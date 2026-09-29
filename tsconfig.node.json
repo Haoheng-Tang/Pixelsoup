@@ -1,0 +1,10 @@
+{
+  // Node-side code: build configs (and later the Electron shell).
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["*.config.ts", "vite.shared.ts"]
+}
