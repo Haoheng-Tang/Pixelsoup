@@ -8,3 +8,5 @@ export * from './history/history';
 export * from './commands/layer-commands';
 export * from './editor';
 export * from './demo-document';
+export * from './compositor/compositor';
+export * from './compositor/cpu-compositor';

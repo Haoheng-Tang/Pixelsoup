@@ -31,7 +31,7 @@ export function getPixel(buffer: PixelBuffer, x: number, y: number): Rgba {
   if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) return TRANSPARENT;
   const i = (y * buffer.width + x) * 4;
   const d = buffer.data;
-  return [d[i] ?? 0, d[i + 1] ?? 0, d[i + 2] ?? 0, d[i + 3] ?? 0];
+  return [d[i], d[i + 1], d[i + 2], d[i + 3]];
 }
 
 export function setPixel(buffer: PixelBuffer, x: number, y: number, color: Rgba): void {

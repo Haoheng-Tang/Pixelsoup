@@ -84,11 +84,11 @@ function paintOver(buf: PixelBuffer, x: number, y: number, color: Rgba, coverage
   const d = buf.data;
   const i = (y * buf.width + x) * 4;
   const sa = (color[3] / 255) * coverage;
-  const da = (d[i + 3] ?? 0) / 255;
+  const da = d[i + 3] / 255;
   const oa = sa + da * (1 - sa);
   if (oa <= 0) return;
   for (let c = 0; c < 3; c++) {
-    d[i + c] = ((color[c] ?? 0) * sa + (d[i + c] ?? 0) * da * (1 - sa)) / oa;
+    d[i + c] = (color[c] * sa + d[i + c] * da * (1 - sa)) / oa;
   }
   d[i + 3] = oa * 255;
 }
