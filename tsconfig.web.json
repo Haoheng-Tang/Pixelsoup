@@ -1,5 +1,5 @@
 {
-  // Renderer (browser) code: React UI + platform adapters. No Node types.
+  // Browser code: React UI + canvas viewport. No Node types.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.web.tsbuildinfo",
