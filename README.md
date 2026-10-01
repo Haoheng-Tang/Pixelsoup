@@ -17,7 +17,7 @@ Photoshop.
 
 ## Requirements
 
-- Node.js 20.19+ or 22.12+ (required by Vite 7) with npm
+- Node.js 22.13+, 24.x, or 26+ (the range supported by Vite 7, Vitest 5 and ESLint 10) with npm
 - A modern browser (Chrome, Edge, Firefox or Safari)
 
 ## Getting started
