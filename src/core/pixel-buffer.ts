@@ -55,3 +55,21 @@ export function fillRect(buffer: PixelBuffer, area: Rect, color: Rgba): void {
     }
   }
 }
+
+/**
+ * Composites `buffer` in place over an opaque colour (Normal blend), leaving every pixel
+ * opaque. Used for formats without alpha, such as JPEG.
+ */
+export function flattenOnto(buffer: PixelBuffer, [r, g, b]: readonly [number, number, number]) {
+  const d = buffer.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (a === 255) continue;
+    const inverse = 255 - a;
+    // Uint8ClampedArray rounds the result to the nearest integer.
+    d[i] = (d[i] * a + r * inverse) / 255;
+    d[i + 1] = (d[i + 1] * a + g * inverse) / 255;
+    d[i + 2] = (d[i + 2] * a + b * inverse) / 255;
+    d[i + 3] = 255;
+  }
+}
