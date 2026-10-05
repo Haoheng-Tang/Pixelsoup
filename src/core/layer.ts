@@ -8,6 +8,12 @@ import { createPixelBuffer } from './pixel-buffer';
  */
 export type BlendMode = 'normal';
 
+export const BLEND_MODES: readonly BlendMode[] = ['normal'];
+
+export function isBlendMode(value: unknown): value is BlendMode {
+  return (BLEND_MODES as readonly unknown[]).includes(value);
+}
+
 export type LayerId = string;
 
 /** Properties shared by every layer kind. */
@@ -38,16 +44,10 @@ export type Layer = RasterLayer;
 
 export type LayerKind = Layer['kind'];
 
-let nextLayerNumber = 1;
-
-export function createLayerId(): LayerId {
-  return `layer-${nextLayerNumber++}`;
-}
-
-export interface RasterLayerOptions {
+interface RasterLayerProperties {
+  /** Must be unique within the document; get one from `createLayerId(doc)`. */
+  id: LayerId;
   name: string;
-  width: number;
-  height: number;
   x?: number;
   y?: number;
   opacity?: number;
@@ -55,17 +55,22 @@ export interface RasterLayerOptions {
   blendMode?: BlendMode;
 }
 
+/** Either a size for a new transparent buffer, or existing pixels the layer takes ownership of. */
+export type RasterLayerOptions = RasterLayerProperties &
+  ({ width: number; height: number } | { pixels: PixelBuffer });
+
+/** Creates a raster layer. Does not add it to a document. */
 export function createRasterLayer(options: RasterLayerOptions): RasterLayer {
   return {
     kind: 'raster',
-    id: createLayerId(),
+    id: options.id,
     name: options.name,
     visible: options.visible ?? true,
     opacity: clampOpacity(options.opacity ?? 1),
     blendMode: options.blendMode ?? 'normal',
     x: options.x ?? 0,
     y: options.y ?? 0,
-    pixels: createPixelBuffer(options.width, options.height),
+    pixels: 'pixels' in options ? options.pixels : createPixelBuffer(options.width, options.height),
   };
 }
 

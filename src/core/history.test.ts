@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { SetLayerOpacityCommand, SetLayerVisibilityCommand } from './commands/layer-commands';
-import { createDocument } from './document';
+import { createDocument, createLayerId } from './document';
 import { Editor } from './editor';
 import type { DocumentChange } from './history/command';
 import { createRasterLayer } from './layer';
 
 function setup() {
   const doc = createDocument(100, 80);
-  const layer = createRasterLayer({ name: 'A', width: 50, height: 50, x: 70, y: -10 });
+  const layer = createRasterLayer({
+    id: createLayerId(doc),
+    name: 'A',
+    width: 50,
+    height: 50,
+    x: 70,
+    y: -10,
+  });
   doc.layers.push(layer);
   const editor = new Editor(doc);
   const changes: DocumentChange[] = [];
