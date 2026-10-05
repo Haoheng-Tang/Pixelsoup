@@ -9,5 +9,7 @@ export * from './commands/layer-commands';
 export * from './editor';
 export * from './blank-document';
 export * from './demo-document';
+export * from './serialization/png-codec';
+export * from './serialization/pixelsoup-format';
 export * from './compositor/compositor';
 export * from './compositor/cpu-compositor';
