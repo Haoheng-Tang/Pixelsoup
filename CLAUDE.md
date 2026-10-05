@@ -40,8 +40,6 @@ Keep dependencies minimal. **Ask before adding any library** beyond the stack ab
   upgrading esbuild), while native `.node` addons such as Rollup's parser load normally.
 - Prefer a pure-JS alternative when one exists.
 
-The project uses Vite 7 for now.
-
 ### Colors
 
 8-bit sRGB only, straight (non-premultiplied) alpha. No color management, ICC profiles, high
@@ -60,25 +58,30 @@ editors do by default). Imported images will be treated as sRGB.
 - **Layers** are a discriminated union on `kind`. Today only `RasterLayer` exists: its own
   `PixelBuffer` (RGBA8, sRGB, straight alpha), an offset `x`/`y` (may be negative or extend past
   the canvas), `opacity` (0–1), `visible`, and `blendMode`. Text and adjustment layers are added
-  as new union members; every `switch (layer.kind)` ends in `assertNever` so the compiler points
-  to each place that needs updating. Shared properties live in `LayerBase`.
+  as new union members (shared properties live in `LayerBase`); every `switch (layer.kind)` ends
+  in `assertNever` so the compiler points to each place that needs updating.
 - **Selection** is an 8-bit mask the size of the canvas (`Selection`). `null` on the document
   means "no selection" (everything editable). The type is reserved; no tools exist yet.
-- **Undo/redo is command-based.** Every document mutation is a `Command` (`apply` / `revert`)
-  executed through `History` (`editor.history.execute(cmd)`). Nothing may mutate an
-  `ImageDocument` any other way. Continuous gestures (slider drags, brush strokes) use a shared
-  `mergeKey` so one gesture is one undo step. Commands return a `DocumentChange` with the
-  canvas-space dirty rect.
+- **Undo/redo is command-based.** Every document mutation is a `Command` (`apply` / `revert`,
+  returning a `DocumentChange` with the canvas-space dirty rect) executed through `History`
+  (`editor.history.execute(cmd)`); nothing may mutate an `ImageDocument` any other way.
+  Continuous gestures (slider drags, brush strokes) share a `mergeKey`: one gesture, one step.
 - **`Editor`** owns one document plus its history and broadcasts each `DocumentChange` to
-  subscribers (the viewport and panels).
+  subscribers (the viewport and panels). It tracks the save point (`isDirty`, `markSaved`);
+  `replaceDocument` swaps in a new or opened document and resets history.
+- **Files**: core reads and writes `.pixelsoup` bytes through an injected `PngCodec` and never
+  sees files, handles or the DOM; decoding images lives in `src/ui/io`. **`FileStore`**
+  (`src/ui/io/file-store.ts`) is the only code that knows how files are picked and written:
+  `FileSystemAccessStore` (Chromium; Save rewrites the same handle) or `DownloadFileStore`
+  (`<input type="file">`, downloads). Pickers need user activation, so file commands must start
+  synchronously in the click or key press. `DocumentSession` (`src/ui/session`) runs file
+  operations; `AppController` runs File commands, confirms discards, and holds the open dialog.
 - **Compositor**: `Compositor.composite(doc, dirtyRects?)` flattens visible layers (Normal blend
-  × layer opacity) into its own output and only needs to touch the dirty regions.
-  `CpuCompositor` is the reference implementation. On the UI side, `CompositeRenderer` is the
-  seam for a GPU compositor: it exposes the composite as a `CanvasImageSource`.
-- **Viewport** (`ViewportController`) is plain TypeScript that owns its `<canvas>`. Input
-  (wheel/pointer/keys) never goes through React state; redraws are coalesced with
-  `requestAnimationFrame`. React only mounts and unmounts it. Readouts such as the zoom % update
-  the DOM directly.
+  × layer opacity) into its own output, touching only the dirty regions. `CpuCompositor` is the
+  reference; on the UI side `CompositeRenderer` (a `CanvasImageSource`) is the GPU seam.
+- **Viewport** (`ViewportController`) is plain TypeScript that owns its `<canvas>`. Input never
+  goes through React state, redraws are coalesced with `requestAnimationFrame`, and readouts
+  such as the zoom % update the DOM directly. React only mounts and unmounts it.
 
 ## Folder layout
 
@@ -87,25 +90,28 @@ index.html               Vite entry
 vite.config.ts           build + Vitest config, production CSP
 eslint.config.js         lint rules incl. core/browser import boundaries
 tsconfig*.json           project references: core (no DOM), web (src/), node (configs)
+docs/file-format.md      .pixelsoup format spec
 src/
   core/                  pure logic – no DOM/React/Node
-    geometry.ts          Rect helpers
+    geometry.ts          Rect helpers; selection.ts: Selection mask type (reserved)
     pixel-buffer.ts      RGBA8 buffers
     layer.ts             Layer union, RasterLayer, BlendMode
-    selection.ts         Selection mask type (reserved)
-    document.ts          ImageDocument
-    editor.ts            Editor: document + history + change events
-    demo-document.ts     startup document (800×600, two layers)
+    document.ts          ImageDocument, per-document layer IDs
+    editor.ts            Editor: document + history + change events + save point
+    blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            concrete commands (layer visibility, opacity, …)
+    commands/            concrete commands (layer visibility, opacity, add layer, …)
     compositor/          Compositor interface, CpuCompositor (+ tests)
+    serialization/       .pixelsoup read/write, PngCodec interface
     index.ts             public barrel used by ui/
   ui/
-    main.tsx, App.tsx    bootstrap and layout
-    styles.css
+    main.tsx, App.tsx    bootstrap (wires editor, file store, codecs) and layout; styles.css
+    io/                  FileStore, lossless PNG codec, browser decode, export encoders
+    session/             DocumentSession, AppController, file types
+    dialogs/             New, Export, confirm-discard and error dialogs
     viewport/            ViewportController, view-transform math, Viewport/ZoomIndicator
     render/              CompositeRenderer (CPU → canvas; GPU seam)
-    panels/              Toolbar, LayerPanel
+    panels/              Toolbar, FileMenu, LayerPanel
 ```
 
 ## Coding conventions
@@ -144,7 +150,7 @@ src/
 1. Document model + compositor (done)
 2. Viewport: zoom/pan, checkerboard (done)
 3. Undo/redo (done; new features add their own commands)
-4. Open/save
+4. Open/save (done: new, open, save, import, export)
 5. Rectangular selection as a mask
 6. Move tool
 7. Brush / eraser
@@ -156,40 +162,38 @@ src/
 
 ## Decisions
 
-- **Pure web app, no Electron (for now).** The original plan was a thin Electron shell
-  (electron-vite, context isolation + sandbox, typed `window.pixelsoup` preload bridge). It was
-  dropped because the development machine's AppLocker policy denies the unsigned
-  `electron.exe` by default (Win32 error 1260, "blocked by group policy"), so the desktop build
-  could never be run or verified. Desktop-like features will use web platform APIs instead: the
-  File System Access API for open/save (Chromium), with `<input type="file">` and download
-  fallbacks elsewhere. If a desktop shell is revisited, use electron-vite 5 (compatible with
-  Vite 7), keep main-process code minimal, and note that sandboxed preload scripts must be
-  CommonJS.
+- **Pure web app, no Electron (for now).** A thin Electron shell was dropped because the
+  development machine's AppLocker policy blocks the unsigned `electron.exe` (Win32 error 1260),
+  so it could never be run. Desktop-like file access uses the File System Access API instead
+  (see `FileStore`). If a shell is revisited, use electron-vite 5 (works with Vite 7), keep
+  main-process code minimal, and note that sandboxed preload scripts must be CommonJS.
 - **Vite 7 for now.** Vite 8 runs on Rolldown/Oxc prebuilt binaries; check them against the
   no-Rust constraint (AppLocker in particular) before upgrading.
 - **`ImageDocument`**, not `Document`, to avoid clashing with the DOM global.
+- **Startup** is a new blank 1920×1080 white document; the demo is under File → Demo Document.
+- **`.pixelsoup` is the native format**: a zip of `document.json` plus one PNG per raster layer.
+  PNG, JPEG and WebP are import and export only. Layer PNGs use the lossless codec in
+  `src/ui/io/png.ts`, as canvas premultiplies. Spec, layer IDs, versioning: @docs/file-format.md
+- **Layer IDs are per document**: `createLayerId(doc)` hands out `layer-N`, and numbering
+  continues after load. `nextLayerNumber` is an ID allocator, so it changes outside commands.
 
 ## Open decisions
 
 Simplest choices made so far that may be revisited:
 
-- **Startup document** is the hard-coded demo from `createDemoDocument()`. Once open/save exists
-  it should become a "new blank document" (with open/new as the way in).
 - **History storage**: `LinearHistory` keeps whole command objects with a 200-step cap. Pixel
   commands will need memory-aware storage (e.g. tiled diffs) behind the same interface.
-- **Layer IDs** come from a module-level counter (`layer-1`, …). Revisit when documents are
-  loaded from files (IDs must be unique per document and survive save/load).
 - **Opacity** is stored as a float in 0–1. The UI slider uses whole percents.
 - **Dirty rects for property changes** are the layer's bounds clipped to the canvas. Each change
   recomposites that rect synchronously; batching or tiling can come later if profiling demands it.
-- **Viewport rendering**: zoom range 1 %–6400 %. Bilinear smoothing below 100 %,
-  nearest-neighbour at and above 100 %. The checkerboard uses fixed 8 CSS-px squares anchored to
-  the document origin.
+- **Viewport rendering**: zoom range 1 %–6400 %; bilinear below 100 %, nearest-neighbour at and
+  above. The checkerboard uses fixed 8 CSS-px squares anchored to the document origin.
 - **Panning**: space+drag only takes Space while the pointer is over (or focus is on) the
   canvas, so Space still activates focused buttons elsewhere.
-- **CSP**: injected only into production builds; the dev server needs inline scripts for Fast
-  Refresh.
-- **File formats for open/save**: not decided. Likely PNG/JPEG/WebP via the browser's codecs
-  plus a native layered format later.
+- **CSP**: production builds only; the dev server needs inline scripts for Fast Refresh.
+- **File I/O limits**: PNG encoding and zipping run on the main thread (~150 ms at 1920×1080);
+  use a worker if that hurts. The download fallback can't tell whether a download was kept, so
+  it marks the document saved. Discard prompts offer Discard or Cancel, not Save. Browsers
+  usually keep Ctrl/Cmd+N in normal tabs, so New may need the menu there.
 - **Installable app**: a PWA (web manifest; offline support would need a service worker) is the
   likely route to a windowed, desktop-like experience. Not started.
