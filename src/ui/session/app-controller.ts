@@ -1,8 +1,9 @@
 import type { NewDocumentOptions } from '../../core';
-import { assertNever } from '../../core';
+import { DEFAULT_NEW_DOCUMENT, assertNever } from '../../core';
 import type { DocumentSession } from './document-session';
 import { FileOperationError } from './document-session';
 import type { ExportOptions } from './file-types';
+import { DEFAULT_EXPORT_OPTIONS } from './file-types';
 
 export type FileCommand =
   'new' | 'open' | 'import' | 'save' | 'save-as' | 'export' | 'close' | 'demo';
@@ -25,6 +26,8 @@ export class AppController {
   private isBusy = false;
   private readonly listeners = new Set<() => void>();
   private revisionCounter = 0;
+  private lastNewDocument: NewDocumentOptions = DEFAULT_NEW_DOCUMENT;
+  private lastExport: ExportOptions = DEFAULT_EXPORT_OPTIONS;
 
   constructor(readonly session: DocumentSession) {}
 
@@ -44,6 +47,16 @@ export class AppController {
 
   get revision(): number {
     return this.revisionCounter;
+  }
+
+  /** Initial settings for the New dialog: the last ones used to create a document. */
+  get newDocumentOptions(): NewDocumentOptions {
+    return this.lastNewDocument;
+  }
+
+  /** Initial settings for the Export dialog: the last ones exported with. */
+  get exportOptions(): ExportOptions {
+    return this.lastExport;
   }
 
   subscribe(listener: () => void): () => void {
@@ -104,6 +117,7 @@ export class AppController {
     this.show(null);
     try {
       this.session.newDocument(options);
+      this.lastNewDocument = options;
     } catch (error) {
       this.showError(error);
     }
@@ -112,6 +126,7 @@ export class AppController {
   /** Confirms the Export dialog. Call from its button's click so the save picker can open. */
   exportImage(options: ExportOptions): void {
     if (this.currentModal?.kind !== 'export' || this.isBusy) return;
+    this.lastExport = options;
     this.show(null);
     this.task(() => this.session.exportImage(options));
   }

@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { Editor, SetLayerVisibilityCommand, createBlankDocument } from '../../core';
+import {
+  DEFAULT_NEW_DOCUMENT,
+  Editor,
+  SetLayerVisibilityCommand,
+  createBlankDocument,
+} from '../../core';
 import { decodePng, encodePng } from '../io/png';
 import { AppController } from './app-controller';
 import { DocumentSession } from './document-session';
+import { DEFAULT_EXPORT_OPTIONS } from './file-types';
 import { MemoryFileStore } from './memory-file-store';
 
 function setup() {
@@ -123,6 +129,38 @@ describe('AppController', () => {
     await settle();
     expect(store.savePickers.at(-1)?.suggestedName).toBe('Untitled-1.webp');
     expect(store.files.has('out.webp')).toBe(true);
+  });
+
+  it('offers the last used New and Export settings again', async () => {
+    const { controller } = setup();
+    expect(controller.newDocumentOptions).toEqual(DEFAULT_NEW_DOCUMENT);
+    expect(controller.exportOptions).toEqual(DEFAULT_EXPORT_OPTIONS);
+
+    controller.run('new');
+    await settle();
+    const size = { width: 640, height: 480, background: 'transparent' } as const;
+    controller.createDocument(size);
+    controller.run('export');
+    controller.exportImage({ format: 'jpeg', quality: 0.5 });
+    await settle();
+
+    expect(controller.newDocumentOptions).toEqual(size);
+    expect(controller.exportOptions).toEqual({ format: 'jpeg', quality: 0.5 });
+  });
+
+  it('keeps the previous New settings when creating fails', async () => {
+    const { controller } = setup();
+    const originalError = console.error;
+    console.error = () => undefined;
+    try {
+      controller.run('new');
+      await settle();
+      controller.createDocument({ width: 0, height: 10, background: 'white' });
+    } finally {
+      console.error = originalError;
+    }
+    expect(controller.modal).toMatchObject({ kind: 'error' });
+    expect(controller.newDocumentOptions).toEqual(DEFAULT_NEW_DOCUMENT);
   });
 
   it('shows failures in an error dialog', async () => {
