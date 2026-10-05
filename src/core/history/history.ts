@@ -15,8 +15,22 @@ export interface History {
   readonly canRedo: boolean;
   readonly undoLabel: string | null;
   readonly redoLabel: string | null;
+  /**
+   * Identifies the document state the history is at. Every execute (including a merge)
+   * moves to a new, never-reused ID; undo and redo return to the IDs recorded for the
+   * states they restore. Store it and compare later to tell whether the document has
+   * changed since then (e.g. since the last save).
+   */
+  readonly stateId: number;
   /** Forgets all recorded steps without touching the document. */
   clear(): void;
+}
+
+interface Step {
+  readonly command: Command;
+  /** State IDs before and after the command; `after` moves when a later command merges in. */
+  readonly before: number;
+  after: number;
 }
 
 /**
@@ -25,8 +39,10 @@ export interface History {
  * behind the same interface.
  */
 export class LinearHistory implements History {
-  private readonly undoStack: Command[] = [];
-  private readonly redoStack: Command[] = [];
+  private readonly undoStack: Step[] = [];
+  private readonly redoStack: Step[] = [];
+  private currentStateId = 0;
+  private lastStateId = 0;
 
   constructor(
     private readonly doc: ImageDocument,
@@ -41,30 +57,36 @@ export class LinearHistory implements History {
       this.redoStack.length === 0 &&
       top !== undefined &&
       command.mergeKey !== undefined &&
-      top.mergeKey === command.mergeKey &&
-      top.mergeWith?.(command) === true;
-    if (!merged) {
-      this.undoStack.push(command);
+      top.command.mergeKey === command.mergeKey &&
+      top.command.mergeWith?.(command) === true;
+    const after = ++this.lastStateId;
+    if (merged) {
+      top.after = after;
+    } else {
+      this.undoStack.push({ command, before: this.currentStateId, after });
       if (this.undoStack.length > this.limit) this.undoStack.shift();
     }
+    this.currentStateId = after;
     this.redoStack.length = 0;
     this.onChange(change);
   }
 
   undo(): boolean {
-    const command = this.undoStack.pop();
-    if (!command) return false;
-    const change = command.revert(this.doc);
-    this.redoStack.push(command);
+    const step = this.undoStack.pop();
+    if (!step) return false;
+    const change = step.command.revert(this.doc);
+    this.currentStateId = step.before;
+    this.redoStack.push(step);
     this.onChange(change);
     return true;
   }
 
   redo(): boolean {
-    const command = this.redoStack.pop();
-    if (!command) return false;
-    const change = command.apply(this.doc);
-    this.undoStack.push(command);
+    const step = this.redoStack.pop();
+    if (!step) return false;
+    const change = step.command.apply(this.doc);
+    this.currentStateId = step.after;
+    this.undoStack.push(step);
     this.onChange(change);
     return true;
   }
@@ -78,11 +100,15 @@ export class LinearHistory implements History {
   }
 
   get undoLabel(): string | null {
-    return this.undoStack.at(-1)?.label ?? null;
+    return this.undoStack.at(-1)?.command.label ?? null;
   }
 
   get redoLabel(): string | null {
-    return this.redoStack.at(-1)?.label ?? null;
+    return this.redoStack.at(-1)?.command.label ?? null;
+  }
+
+  get stateId(): number {
+    return this.currentStateId;
   }
 
   clear(): void {

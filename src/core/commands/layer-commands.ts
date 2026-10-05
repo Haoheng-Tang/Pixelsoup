@@ -1,5 +1,5 @@
 import type { ImageDocument } from '../document';
-import { documentBounds, getLayer } from '../document';
+import { documentBounds, findLayer, getLayer } from '../document';
 import { intersectRects } from '../geometry';
 import type { Command, DocumentChange } from '../history/command';
 import type { Layer, LayerId } from '../layer';
@@ -10,6 +10,27 @@ function layerChange(doc: ImageDocument, layer: Layer): DocumentChange {
   const bounds = layerBounds(layer);
   const canvas = documentBounds(doc);
   return { dirty: bounds ? intersectRects(bounds, canvas) : canvas };
+}
+
+/** Puts a new layer on top of the stack. The layer's ID must not be in use in the document. */
+export class AddLayerCommand implements Command {
+  constructor(
+    readonly layer: Layer,
+    readonly label = 'Add Layer',
+  ) {}
+
+  apply(doc: ImageDocument): DocumentChange {
+    if (findLayer(doc, this.layer.id)) throw new Error(`Duplicate layer ID: ${this.layer.id}`);
+    doc.layers.push(this.layer);
+    return layerChange(doc, this.layer);
+  }
+
+  revert(doc: ImageDocument): DocumentChange {
+    const index = doc.layers.indexOf(this.layer);
+    if (index < 0) throw new Error(`Layer not found: ${this.layer.id}`);
+    doc.layers.splice(index, 1);
+    return layerChange(doc, this.layer);
+  }
 }
 
 export class SetLayerVisibilityCommand implements Command {
