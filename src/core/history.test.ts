@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SetLayerOpacityCommand, SetLayerVisibilityCommand } from './commands/layer-commands';
 import { createDocument, createLayerId } from './document';
 import { Editor } from './editor';
-import type { DocumentChange } from './history/command';
+import type { Command, DocumentChange } from './history/command';
 import { LinearHistory } from './history/history';
 import { createRasterLayer } from './layer';
 
@@ -158,5 +158,35 @@ describe('History state IDs', () => {
     const id = h.stateId;
     h.clear();
     expect(h.stateId).toBe(id);
+  });
+
+  it('keeps the ID for undoable commands that do not change saved content', () => {
+    const { layer, history: h } = history();
+    const neutral = (): Command => ({
+      label: 'Neutral',
+      changesContent: false,
+      apply: () => ({ dirty: null }),
+      revert: () => ({ dirty: null }),
+    });
+    const initial = h.stateId;
+    h.execute(neutral());
+    expect(h.stateId).toBe(initial);
+    expect(h.canUndo).toBe(true);
+
+    h.execute(new SetLayerOpacityCommand(layer.id, 0.5));
+    const edited = h.stateId;
+    expect(edited).not.toBe(initial);
+    h.execute(neutral());
+    expect(h.stateId).toBe(edited);
+
+    h.undo();
+    expect(h.stateId).toBe(edited);
+    h.undo();
+    expect(h.stateId).toBe(initial);
+    h.undo();
+    expect(h.stateId).toBe(initial);
+    h.redo();
+    h.redo();
+    expect(h.stateId).toBe(edited);
   });
 });

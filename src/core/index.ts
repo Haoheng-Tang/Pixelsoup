@@ -6,6 +6,7 @@ export * from './document';
 export * from './history/command';
 export * from './history/history';
 export * from './commands/layer-commands';
+export * from './commands/selection-commands';
 export * from './editor';
 export * from './blank-document';
 export * from './demo-document';
