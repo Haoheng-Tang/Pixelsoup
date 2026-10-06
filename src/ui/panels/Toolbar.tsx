@@ -1,18 +1,22 @@
 import type { Editor } from '../../core';
 import type { AppController } from '../session/app-controller';
+import type { ToolManager } from '../tools/tool-manager';
 import { useRevision } from '../use-revision';
 import { useEditorRevision } from '../use-editor-revision';
 import type { ViewportController } from '../viewport/viewport-controller';
 import { ZoomIndicator } from '../viewport/ZoomIndicator';
 import { FileMenu } from './FileMenu';
+import { SelectMenu } from './SelectMenu';
+import { ToolPicker } from './ToolPicker';
 
 interface ToolbarProps {
   editor: Editor;
   controller: AppController;
+  tools: ToolManager;
   viewport: ViewportController | null;
 }
 
-export function Toolbar({ editor, controller, viewport }: ToolbarProps) {
+export function Toolbar({ editor, controller, tools, viewport }: ToolbarProps) {
   useEditorRevision(editor);
   useRevision(controller);
   useRevision(controller.session);
@@ -24,6 +28,8 @@ export function Toolbar({ editor, controller, viewport }: ToolbarProps) {
     <header className="toolbar">
       <span className="app-title">Pixelsoup</span>
       <FileMenu controller={controller} />
+      <SelectMenu editor={editor} blocked={blocked} />
+      <ToolPicker tools={tools} />
       <div className="toolbar-group" role="group" aria-label="History">
         <button
           type="button"

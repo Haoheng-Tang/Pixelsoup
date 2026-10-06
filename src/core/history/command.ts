@@ -5,6 +5,12 @@ import type { Rect } from '../geometry';
 export interface DocumentChange {
   /** Canvas-space region whose composite may have changed, or null if no pixels changed. */
   readonly dirty: Rect | null;
+  /**
+   * Canvas-space region covering the selection's old and new bounds when the selection
+   * changed (null or absent if it didn't). The composite is unaffected; views redraw the
+   * selection outline.
+   */
+  readonly selectionDirty?: Rect | null;
 }
 
 /**
@@ -22,6 +28,11 @@ export interface Command {
    * undo step via `mergeWith` (e.g. all opacity updates during a single slider drag).
    */
   readonly mergeKey?: string | undefined;
+  /**
+   * False for commands that change only state that isn't saved with the document, such
+   * as the selection. They are undoable but don't make the document unsaved. Default true.
+   */
+  readonly changesContent?: boolean;
   apply(doc: ImageDocument): DocumentChange;
   revert(doc: ImageDocument): DocumentChange;
   /** Absorb `next` (already applied) into this command. Return false to refuse. */

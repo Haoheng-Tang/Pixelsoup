@@ -16,10 +16,11 @@ export interface History {
   readonly undoLabel: string | null;
   readonly redoLabel: string | null;
   /**
-   * Identifies the document state the history is at. Every execute (including a merge)
-   * moves to a new, never-reused ID; undo and redo return to the IDs recorded for the
-   * states they restore. Store it and compare later to tell whether the document has
-   * changed since then (e.g. since the last save).
+   * Identifies the saved content of the document at the current history position. Every
+   * execute (including a merge) of a command that changes content moves to a new,
+   * never-reused ID; commands with `changesContent: false` keep the current ID. Undo and
+   * redo return to the IDs recorded for the states they restore. Store it and compare
+   * later to tell whether the document has changed since then (e.g. since the last save).
    */
   readonly stateId: number;
   /** Forgets all recorded steps without touching the document. */
@@ -59,7 +60,7 @@ export class LinearHistory implements History {
       command.mergeKey !== undefined &&
       top.command.mergeKey === command.mergeKey &&
       top.command.mergeWith?.(command) === true;
-    const after = ++this.lastStateId;
+    const after = command.changesContent === false ? this.currentStateId : ++this.lastStateId;
     if (merged) {
       top.after = after;
     } else {

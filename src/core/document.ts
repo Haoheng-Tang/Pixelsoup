@@ -14,7 +14,10 @@ export interface ImageDocument {
   readonly height: number;
   /** Layer stack ordered bottom (index 0) to top. */
   readonly layers: Layer[];
-  /** Active selection, or null when everything is implicitly selected. */
+  /**
+   * Active selection, or null when everything is implicitly selected. Never an empty
+   * selection: `SetSelectionCommand` stores "nothing selected" as null.
+   */
   selection: Selection | null;
   /**
    * ID allocator state for `createLayerId`, not document content: it only grows (undo
