@@ -8,6 +8,7 @@ import { useDocumentWindow } from './use-document-window';
 import { useFileShortcuts } from './use-file-shortcuts';
 import { useHistoryShortcuts } from './use-history-shortcuts';
 import { useRevision } from './use-revision';
+import { useSelectionShortcuts } from './use-selection-shortcuts';
 import { Viewport } from './viewport/Viewport';
 import type { ViewportController } from './viewport/viewport-controller';
 
@@ -20,6 +21,7 @@ export function App({ editor, controller }: AppProps) {
   const [viewport, setViewport] = useState<ViewportController | null>(null);
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
+  useSelectionShortcuts(editor, controller);
   useFileShortcuts(controller);
   useDocumentWindow(controller.session);
 

@@ -260,12 +260,22 @@ button.danger:hover:not(:disabled) {
   border: 1px solid transparent;
 }
 
-.menu-item:hover:not(:disabled),
+.menu-item:hover:not([aria-disabled='true']),
 .menu-item:focus-visible {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
   outline: none;
+}
+
+.menu-item[aria-disabled='true'] {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.menu-item[aria-disabled='true']:focus-visible {
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .menu-shortcut {

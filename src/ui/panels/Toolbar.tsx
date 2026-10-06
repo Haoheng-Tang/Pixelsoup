@@ -5,6 +5,7 @@ import { useEditorRevision } from '../use-editor-revision';
 import type { ViewportController } from '../viewport/viewport-controller';
 import { ZoomIndicator } from '../viewport/ZoomIndicator';
 import { FileMenu } from './FileMenu';
+import { SelectMenu } from './SelectMenu';
 
 interface ToolbarProps {
   editor: Editor;
@@ -24,6 +25,7 @@ export function Toolbar({ editor, controller, viewport }: ToolbarProps) {
     <header className="toolbar">
       <span className="app-title">Pixelsoup</span>
       <FileMenu controller={controller} />
+      <SelectMenu editor={editor} blocked={blocked} />
       <div className="toolbar-group" role="group" aria-label="History">
         <button
           type="button"
