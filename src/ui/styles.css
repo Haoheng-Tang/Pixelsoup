@@ -239,7 +239,7 @@ button.danger:hover:not(:disabled) {
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 280px;
+  width: 300px;
   min-height: 0;
   background: var(--panel);
   border-left: 1px solid var(--border);
@@ -279,7 +279,7 @@ button.danger:hover:not(:disabled) {
 
 .layer {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 8px 12px 8px 10px;
   border-bottom: 1px solid var(--border);
@@ -317,6 +317,22 @@ button.danger:hover:not(:disabled) {
   height: 26px;
   padding: 0;
   flex: none;
+}
+
+/* Fits THUMBNAIL_WIDTH × THUMBNAIL_HEIGHT in layer-thumbnails.ts. */
+.layer-thumbnail {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 40px;
+  flex: none;
+}
+
+.layer-thumbnail canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  outline: 1px solid var(--border);
 }
 
 .layer-body {

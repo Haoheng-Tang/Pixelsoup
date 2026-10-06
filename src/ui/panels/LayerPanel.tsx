@@ -3,7 +3,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Editor, ImageDocument, Layer, LayerId } from '../../core';
 import {
   SetLayerOpacityCommand,
@@ -18,6 +18,7 @@ import { canRunLayerAction, runLayerAction } from '../layer-actions';
 import { useEditorRevision } from '../use-editor-revision';
 import { formatShortcut } from '../use-file-shortcuts';
 import { DRAG_THRESHOLD, dropSlot, isNoOpDrop, stackIndexForDrop } from './layer-drag';
+import { LayerThumbnails } from './layer-thumbnails';
 
 interface LayerPanelProps {
   editor: Editor;
@@ -40,6 +41,8 @@ export function LayerPanel({ editor, blocked }: LayerPanelProps) {
   const [drag, setDrag] = useState<RowDrag | null>(null);
   const endDrag = useRef<(() => void) | null>(null);
   useEffect(() => () => endDrag.current?.(), []);
+  const thumbnails = useMemo(() => new LayerThumbnails(editor), [editor]);
+  useEffect(() => thumbnails.start(), [thumbnails]);
 
   // Top of the stack first, like most editors.
   const layers = [...editor.document.layers].reverse();
@@ -131,6 +134,7 @@ export function LayerPanel({ editor, blocked }: LayerPanelProps) {
           <LayerRow
             key={layer.id}
             editor={editor}
+            thumbnails={thumbnails}
             layer={layer}
             active={layer.id === editor.activeLayerId}
             dragging={drag?.layerId === layer.id}
@@ -146,6 +150,7 @@ export function LayerPanel({ editor, blocked }: LayerPanelProps) {
 
 interface LayerRowProps {
   editor: Editor;
+  thumbnails: LayerThumbnails;
   layer: Layer;
   active: boolean;
   dragging: boolean;
@@ -154,7 +159,15 @@ interface LayerRowProps {
   onPointerDown: (e: ReactPointerEvent<HTMLLIElement>) => void;
 }
 
-function LayerRow({ editor, layer, active, dragging, dropEdge, onPointerDown }: LayerRowProps) {
+function LayerRow({
+  editor,
+  thumbnails,
+  layer,
+  active,
+  dragging,
+  dropEdge,
+  onPointerDown,
+}: LayerRowProps) {
   // Each pointer/keyboard gesture on the slider gets its own merge key, so one drag
   // becomes one undo step while separate adjustments stay separate.
   const gesture = useRef(0);
@@ -163,6 +176,12 @@ function LayerRow({ editor, layer, active, dragging, dropEdge, onPointerDown }: 
   const [renaming, setRenaming] = useState(false);
   const percent = Math.round(layer.opacity * 100);
   const sliderId = `opacity-${layer.id}`;
+  // The renderer draws into the canvas itself, so re-renders never repaint it.
+  const thumbnailRef = useCallback(
+    (canvas: HTMLCanvasElement | null) =>
+      canvas ? thumbnails.attach(layer.id, canvas) : undefined,
+    [thumbnails, layer.id],
+  );
 
   useEffect(() => {
     if (renaming || !refocusName.current) return;
@@ -220,6 +239,9 @@ function LayerRow({ editor, layer, active, dragging, dropEdge, onPointerDown }: 
       >
         <EyeIcon open={layer.visible} />
       </button>
+      <div className="layer-thumbnail" aria-hidden="true">
+        <canvas ref={thumbnailRef} />
+      </div>
       <div className="layer-body">
         {renaming ? (
           <RenameField editor={editor} layer={layer} onDone={endRename} />
