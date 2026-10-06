@@ -9,6 +9,7 @@ import type { ToolManager } from './tools/tool-manager';
 import { useDocumentWindow } from './use-document-window';
 import { useFileShortcuts } from './use-file-shortcuts';
 import { useHistoryShortcuts } from './use-history-shortcuts';
+import { useLayerShortcuts } from './use-layer-shortcuts';
 import { useRevision } from './use-revision';
 import { useSelectionShortcuts } from './use-selection-shortcuts';
 import { useToolShortcuts } from './use-tool-shortcuts';
@@ -27,6 +28,7 @@ export function App({ editor, controller, tools }: AppProps) {
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
   useSelectionShortcuts(editor, controller);
+  useLayerShortcuts(editor, controller);
   useToolShortcuts(tools, controller);
   useFileShortcuts(controller);
   useDocumentWindow(controller.session);
