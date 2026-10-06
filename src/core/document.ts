@@ -73,3 +73,15 @@ export function getLayer(doc: ImageDocument, id: LayerId): Layer {
   if (!layer) throw new Error(`Layer not found: ${id}`);
   return layer;
 }
+
+/** Stack index (0 = bottom) of the layer with `id`, or -1 if there is none. */
+export function findLayerIndex(doc: ImageDocument, id: LayerId): number {
+  return doc.layers.findIndex((layer) => layer.id === id);
+}
+
+/** Stack index (0 = bottom) of the layer with `id`. Throws if there is none. */
+export function getLayerIndex(doc: ImageDocument, id: LayerId): number {
+  const index = findLayerIndex(doc, id);
+  if (index < 0) throw new Error(`Layer not found: ${id}`);
+  return index;
+}

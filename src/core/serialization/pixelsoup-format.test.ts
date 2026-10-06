@@ -1,6 +1,11 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import type { Zippable } from 'fflate';
 import { describe, expect, it } from 'vitest';
+import {
+  duplicateLayerCommand,
+  renameLayerCommand,
+  reorderLayerCommand,
+} from '../commands/layer-commands';
 import type { ImageDocument } from '../document';
 import { createDocument, createLayerId } from '../document';
 import { createRasterLayer } from '../layer';
@@ -189,6 +194,22 @@ describe('serializeDocument / deserializeDocument', () => {
     );
     expect(loaded.width).toBe(5);
     expect(loaded.layers).toEqual([]);
+  });
+
+  it('round-trips duplicated, renamed and reordered layers', async () => {
+    const doc = sampleDocument();
+    duplicateLayerCommand(doc, 'layer-1')?.apply(doc);
+    renameLayerCommand(doc, 'layer-2', 'Top')?.apply(doc);
+    reorderLayerCommand(doc, 'layer-2', 0)?.apply(doc);
+
+    const loaded = await deserializeDocument(await serializeDocument(doc, fakePng), fakePng);
+    expect(loaded.layers.map((layer) => [layer.id, layer.name])).toEqual([
+      ['layer-2', 'Top'],
+      ['layer-1', 'Background'],
+      ['layer-3', 'Background copy'],
+    ]);
+    expect(loaded.layers).toEqual(doc.layers);
+    expect(createLayerId(loaded)).toBe('layer-4');
   });
 
   it('captures layer properties when called, not when encoding finishes', async () => {
