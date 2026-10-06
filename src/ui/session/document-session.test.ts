@@ -7,6 +7,7 @@ import {
   createPixelBuffer,
   deserializeDocument,
   getPixel,
+  newLayerCommand,
   setPixel,
 } from '../../core';
 import { decodePng, encodePng } from '../io/png';
@@ -230,6 +231,17 @@ describe('DocumentSession', () => {
     store.pick = pngFile('again.png', createPixelBuffer(1, 1));
     await session.importAsLayer();
     expect(doc.layers[1]?.id).toBe('layer-3');
+  });
+
+  it('imports directly above the active layer and makes the import active', async () => {
+    const { session, store, editor } = setup();
+    const doc = editor.document;
+    editor.history.execute(newLayerCommand(doc, null));
+    editor.setActiveLayer('layer-1');
+    store.pick = pngFile('sticker.png', createPixelBuffer(1, 1));
+    await session.importAsLayer();
+    expect(doc.layers.map((layer) => layer.name)).toEqual(['Background', 'sticker', 'Layer 1']);
+    expect(editor.activeLayer?.name).toBe('sticker');
   });
 
   it('exports the flattened composite without touching the document state', async () => {

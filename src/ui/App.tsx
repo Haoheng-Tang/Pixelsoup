@@ -38,7 +38,7 @@ export function App({ editor, controller, tools }: AppProps) {
       <main className="workspace">
         <Viewport editor={editor} tools={tools} onReady={setViewport} />
         <aside className="sidebar">
-          <LayerPanel editor={editor} />
+          <LayerPanel editor={editor} blocked={controller.blocked} />
         </aside>
       </main>
       <StatusBar viewport={viewport} />
