@@ -34,10 +34,9 @@ Keep dependencies minimal. **Ask before adding any library** beyond the stack ab
 
 - No Rust toolchain may be required to develop or build the project (so no Rust source and no
   Tauri).
-- Prebuilt native binaries shipped in npm packages are fine if they run under the development
-  machine's AppLocker policy. AppLocker there enforces executable rules: a standalone `.exe`
-  needs an allow rule (esbuild's is allowed by a hash rule, so check `npm run build` after
-  upgrading esbuild), while native `.node` addons such as Rollup's parser load normally.
+- Prebuilt native binaries in npm packages are fine if they run under the development machine's
+  AppLocker policy: a standalone `.exe` needs an allow rule (esbuild's has a hash rule, so check
+  `npm run build` after upgrading it), while native `.node` addons such as Rollup's load normally.
 - Prefer a pure-JS alternative when one exists.
 
 ### Colors
@@ -60,28 +59,30 @@ editors do by default). Imported images will be treated as sRGB.
   the canvas), `opacity` (0–1), `visible`, and `blendMode`. Text and adjustment layers are added
   as new union members (shared properties live in `LayerBase`); every `switch (layer.kind)` ends
   in `assertNever` so the compiler points to each place that needs updating.
-- **Selection** is an 8-bit mask the size of the canvas (`Selection`). `null` on the document
-  means "no selection" (everything editable). The type is reserved; no tools exist yet.
+- **Selection** is an immutable coverage mask the size of the canvas (`Selection`, 0–255).
+  `doc.selection` is `null` for "no selection" (everything editable), never empty, and only
+  `SetSelectionCommand` changes it (undoable; not an unsaved change). **Invariant: every
+  pixel-editing command clips to a non-null `doc.selection`, weighting by coverage / 255.**
 - **Undo/redo is command-based.** Every document mutation is a `Command` (`apply` / `revert`,
-  returning a `DocumentChange` with the canvas-space dirty rect) executed through `History`
-  (`editor.history.execute(cmd)`); nothing may mutate an `ImageDocument` any other way.
-  Continuous gestures (slider drags, brush strokes) share a `mergeKey`: one gesture, one step.
+  returning a `DocumentChange` with dirty rects) run through `editor.history.execute(cmd)`;
+  nothing else may mutate an `ImageDocument`. Gestures share a `mergeKey`: one gesture, one step.
 - **`Editor`** owns one document plus its history and broadcasts each `DocumentChange` to
   subscribers (the viewport and panels). It tracks the save point (`isDirty`, `markSaved`);
   `replaceDocument` swaps in a new or opened document and resets history.
-- **Files**: core reads and writes `.pixelsoup` bytes through an injected `PngCodec` and never
-  sees files, handles or the DOM; decoding images lives in `src/ui/io`. **`FileStore`**
-  (`src/ui/io/file-store.ts`) is the only code that knows how files are picked and written:
-  `FileSystemAccessStore` (Chromium; Save rewrites the same handle) or `DownloadFileStore`
-  (`<input type="file">`, downloads). Pickers need user activation, so file commands must start
-  synchronously in the click or key press. `DocumentSession` (`src/ui/session`) runs file
-  operations; `AppController` runs File commands, confirms discards, and holds the open dialog.
+- **Files**: core reads and writes `.pixelsoup` bytes through an injected `PngCodec`; decoding
+  images lives in `src/ui/io`. **`FileStore`** (`src/ui/io/file-store.ts`) alone knows how files
+  are picked and written (File System Access API, else file input and downloads). Pickers need
+  user activation, so file commands start synchronously in the click or key press.
+  `DocumentSession` runs file operations; `AppController` runs File commands and dialogs.
 - **Compositor**: `Compositor.composite(doc, dirtyRects?)` flattens visible layers (Normal blend
   × layer opacity) into its own output, touching only the dirty regions. `CpuCompositor` is the
   reference; on the UI side `CompositeRenderer` (a `CanvasImageSource`) is the GPU seam.
-- **Viewport** (`ViewportController`) is plain TypeScript that owns its `<canvas>`. Input never
-  goes through React state, redraws are coalesced with `requestAnimationFrame`, and readouts
-  such as the zoom % update the DOM directly. React only mounts and unmounts it.
+- **Viewport** (`ViewportController`) is plain TypeScript owning its `<canvas>` and an overlay
+  for ants and tool previews. Input never goes through React state, redraws are coalesced with
+  `requestAnimationFrame`, and readouts (zoom %, status bar) update the DOM directly.
+- **Tools** (`src/ui/tools`) implement `Tool` (document-space pointer and key handlers, options
+  panel, preview overlay). `ToolManager` holds the active tool; the viewport routes input to it
+  after its own pan and zoom. Tools edit only through commands. Details: @docs/tools.md
 
 ## Folder layout
 
@@ -90,28 +91,30 @@ index.html               Vite entry
 vite.config.ts           build + Vitest config, production CSP
 eslint.config.js         lint rules incl. core/browser import boundaries
 tsconfig*.json           project references: core (no DOM), web (src/), node (configs)
-docs/file-format.md      .pixelsoup format spec
+docs/file-format.md      .pixelsoup format spec; docs/tools.md: tools and selections
 src/
   core/                  pure logic – no DOM/React/Node
-    geometry.ts          Rect helpers; selection.ts: Selection mask type (reserved)
-    pixel-buffer.ts      RGBA8 buffers
+    geometry.ts          Rect helpers; pixel-buffer.ts: RGBA8 buffers
+    selection.ts         Selection masks; selection-outline.ts: outline tracing for the ants
     layer.ts             Layer union, RasterLayer, BlendMode
     document.ts          ImageDocument, per-document layer IDs
     editor.ts            Editor: document + history + change events + save point
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            concrete commands (layer visibility, opacity, add layer, …)
+    commands/            concrete commands (layer properties, add layer, selection, …)
     compositor/          Compositor interface, CpuCompositor (+ tests)
     serialization/       .pixelsoup read/write, PngCodec interface
     index.ts             public barrel used by ui/
   ui/
-    main.tsx, App.tsx    bootstrap (wires editor, file store, codecs) and layout; styles.css
+    main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
+    use-*.ts             keyboard shortcut hooks; select-commands.ts: Select menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
     session/             DocumentSession, AppController, file types
     dialogs/             New, Export, confirm-discard and error dialogs
-    viewport/            ViewportController, view-transform math, Viewport/ZoomIndicator
+    tools/               Tool interface, ToolManager, marquee tools and their options
+    viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
-    panels/              Toolbar, FileMenu, LayerPanel
+    panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel
 ```
 
 ## Coding conventions
@@ -151,7 +154,7 @@ src/
 2. Viewport: zoom/pan, checkerboard (done)
 3. Undo/redo (done; new features add their own commands)
 4. Open/save (done: new, open, save, import, export)
-5. Rectangular selection as a mask
+5. Selection as a mask + tool system (done: marquee tools, Select menu, marching ants)
 6. Move tool
 7. Brush / eraser
 8. Crop / rotate
@@ -162,11 +165,9 @@ src/
 
 ## Decisions
 
-- **Pure web app, no Electron (for now).** A thin Electron shell was dropped because the
-  development machine's AppLocker policy blocks the unsigned `electron.exe` (Win32 error 1260),
-  so it could never be run. Desktop-like file access uses the File System Access API instead
-  (see `FileStore`). If a shell is revisited, use electron-vite 5 (works with Vite 7), keep
-  main-process code minimal, and note that sandboxed preload scripts must be CommonJS.
+- **Pure web app, no Electron (for now).** The development machine's AppLocker policy blocks the
+  unsigned `electron.exe` (Win32 error 1260). If a shell is revisited, use electron-vite 5 (works
+  with Vite 7) and minimal main-process code; sandboxed preload scripts must be CommonJS.
 - **Vite 7 for now.** Vite 8 runs on Rolldown/Oxc prebuilt binaries; check them against the
   no-Rust constraint (AppLocker in particular) before upgrading.
 - **`ImageDocument`**, not `Document`, to avoid clashing with the DOM global.
@@ -195,5 +196,4 @@ Simplest choices made so far that may be revisited:
   use a worker if that hurts. The download fallback can't tell whether a download was kept, so
   it marks the document saved. Discard prompts offer Discard or Cancel, not Save. Browsers
   usually keep Ctrl/Cmd+N in normal tabs, so New may need the menu there.
-- **Installable app**: a PWA (web manifest; offline support would need a service worker) is the
-  likely route to a windowed, desktop-like experience. Not started.
+- **Installable app**: a PWA is the likely route to a windowed, desktop-like app. Not started.
