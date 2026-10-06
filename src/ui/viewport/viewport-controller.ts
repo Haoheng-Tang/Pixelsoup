@@ -2,10 +2,12 @@ import type { Editor } from '../../core';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
+import type { ToolKeyEvent, ToolModifiers, ToolPointerEvent } from '../tools/tool';
+import type { ToolManager } from '../tools/tool-manager';
 import type { DocumentPlacement } from './selection-overlay';
 import { ANT_STEP_MS, SelectionOverlay } from './selection-overlay';
 import type { ViewTransform } from './view-transform';
-import { centered, fitZoom, nextZoomStep, zoomAt } from './view-transform';
+import { centered, fitZoom, nextZoomStep, screenToDocument, zoomAt } from './view-transform';
 
 const BACKGROUND = '#1b1b1d';
 const CHECKER_LIGHT = '#ffffff';
@@ -15,7 +17,24 @@ const CHECKER_SIZE = 8;
 /** Zoom change per pixel of wheel delta; one 100px notch ≈ ×1.16. */
 const WHEEL_ZOOM_SPEED = 0.0015;
 
+const NO_MODIFIERS: ToolModifiers = {
+  shiftKey: false,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+};
+
 type ZoomListener = (zoom: number) => void;
+
+/** What the status bar shows. */
+export interface ViewportStatus {
+  /** Document pixel under the pointer; null while the pointer is away from the canvas. */
+  readonly pointer: { readonly x: number; readonly y: number } | null;
+  /** Size of the shape a tool is dragging, else of the selection's bounds; null if neither. */
+  readonly selectionSize: { readonly width: number; readonly height: number } | null;
+}
+
+type StatusListener = (status: ViewportStatus) => void;
 
 interface PanDrag {
   pointerId: number;
@@ -24,10 +43,24 @@ interface PanDrag {
   startView: ViewTransform;
 }
 
+interface ClientPoint {
+  readonly clientX: number;
+  readonly clientY: number;
+}
+
+function modifiersOf(e: KeyboardEvent | MouseEvent): ToolModifiers {
+  return { shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey };
+}
+
+function toolKeyEvent(e: KeyboardEvent): ToolKeyEvent {
+  return { key: e.key, code: e.code, repeat: e.repeat, ...modifiersOf(e) };
+}
+
 /**
  * Imperative canvas viewport: draws the document composite over a checkerboard, the
- * selection's marching ants on an overlay canvas above it, and handles zoom (wheel,
- * centered on the cursor) and pan (space+drag, middle-drag).
+ * selection's marching ants and the active tool's preview on an overlay canvas above it,
+ * handles zoom (wheel, centered on the cursor) and pan (space+drag, middle-drag), and
+ * routes all other pointer input to the active tool in document coordinates.
  *
  * Deliberately outside React: pointer and wheel input never trigger React renders.
  * Redraws are coalesced into one requestAnimationFrame; while there is a selection the
@@ -39,6 +72,7 @@ export class ViewportController {
   private readonly overlay: SelectionOverlay;
   private renderer: CompositeRenderer;
   private readonly zoomListeners = new Set<ZoomListener>();
+  private readonly statusListeners = new Set<StatusListener>();
   private readonly cleanups: (() => void)[] = [];
 
   private view: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
@@ -53,14 +87,21 @@ export class ViewportController {
   private placement: DocumentPlacement | null = null;
   private checker: CanvasPattern | null = null;
   private checkerDpr = 0;
+  private status: ViewportStatus = { pointer: null, selectionSize: null };
 
   private spaceHeld = false;
   private pointerInside = false;
   private drag: PanDrag | null = null;
+  /** The pointer whose press went to the active tool, until it is released or cancelled. */
+  private toolPointerId: number | null = null;
+  /** Last pointer position over the canvas (or captured by a gesture). */
+  private pointer: ClientPoint | null = null;
+  private modifiers: ToolModifiers = NO_MODIFIERS;
 
   constructor(
     private readonly container: HTMLElement,
     private readonly editor: Editor,
+    private readonly tools: ToolManager,
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-canvas';
@@ -86,12 +127,21 @@ export class ViewportController {
           if (this.cssWidth > 0 && this.cssHeight > 0) this.fitToView();
           else this.hasFitted = false;
           this.invalidate();
+          this.emitStatus();
           return;
         }
-        if (change.selectionDirty) this.invalidateOverlay();
+        if (change.selectionDirty) {
+          this.invalidateOverlay();
+          this.emitStatus();
+        }
         if (!change.dirty) return;
         this.renderer.update(this.editor.document, [change.dirty]);
         this.invalidate();
+      }),
+      tools.subscribe(() => this.updateCursor()),
+      tools.subscribeOverlay(() => {
+        this.invalidateOverlay();
+        this.emitStatus();
       }),
     );
 
@@ -103,17 +153,22 @@ export class ViewportController {
     this.listen(this.canvas, 'pointerdown', this.handlePointerDown);
     this.listen(this.canvas, 'pointermove', this.handlePointerMove);
     this.listen(this.canvas, 'pointerup', this.handlePointerUp);
-    this.listen(this.canvas, 'pointercancel', this.handlePointerUp);
+    this.listen(this.canvas, 'pointercancel', this.handlePointerCancel);
     this.listen(this.canvas, 'pointerenter', () => (this.pointerInside = true));
-    this.listen(this.canvas, 'pointerleave', () => (this.pointerInside = false));
+    this.listen(this.canvas, 'pointerleave', this.handlePointerLeave);
     // Stop the browser's middle-click autoscroll.
     this.listen(this.canvas, 'mousedown', (e) => {
       if (e.button === 1) e.preventDefault();
     });
     this.listen(window, 'keydown', this.handleKeyDown);
     this.listen(window, 'keyup', this.handleKeyUp);
-    this.listen(window, 'blur', () => this.setSpaceHeld(false));
+    this.listen(window, 'blur', () => {
+      this.modifiers = NO_MODIFIERS;
+      this.setSpaceHeld(false);
+      this.cancelToolGesture();
+    });
 
+    this.updateCursor();
     this.handleResize();
   }
 
@@ -127,6 +182,16 @@ export class ViewportController {
     listener(this.view.zoom);
     return () => {
       this.zoomListeners.delete(listener);
+    };
+  }
+
+  /** Subscribes to status changes; the listener is called immediately with the current status. */
+  onStatusChange(listener: StatusListener): () => void {
+    this.statusListeners.add(listener);
+    this.status = this.computeStatus();
+    listener(this.status);
+    return () => {
+      this.statusListeners.delete(listener);
     };
   }
 
@@ -149,10 +214,12 @@ export class ViewportController {
   }
 
   dispose(): void {
+    this.cancelToolGesture();
     cancelAnimationFrame(this.frame);
     this.frame = 0;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.zoomListeners.clear();
+    this.statusListeners.clear();
     this.canvas.remove();
     this.overlay.canvas.remove();
   }
@@ -166,6 +233,11 @@ export class ViewportController {
     this.view = view;
     this.invalidate();
     if (zoomChanged) for (const listener of this.zoomListeners) listener(view.zoom);
+    // The document moved under the pointer: tell the tool where the pointer is now.
+    if (this.toolPointerId !== null && this.pointer) {
+      this.tools.pointerMove(this.toolEvent(this.pointer));
+    }
+    this.emitStatus();
   }
 
   /** Schedules a redraw of everything. */
@@ -196,7 +268,7 @@ export class ViewportController {
   };
 
   private hasAnts(): boolean {
-    return this.editor.document.selection !== null;
+    return this.editor.document.selection !== null || this.tools.overlay !== null;
   }
 
   private handleResize(): void {
@@ -230,7 +302,13 @@ export class ViewportController {
   private renderOverlay(phase: number): void {
     this.overlayDirty = false;
     this.antPhase = phase;
-    this.overlay.draw(this.editor.document.selection, null, this.placement, this.dpr, phase);
+    this.overlay.draw(
+      this.editor.document.selection,
+      this.tools.overlay,
+      this.placement,
+      this.dpr,
+      phase,
+    );
   }
 
   private renderComposite(): void {
@@ -298,50 +376,141 @@ export class ViewportController {
   };
 
   private readonly handlePointerDown = (e: PointerEvent): void => {
+    if (this.drag || this.toolPointerId !== null) return;
     const isPan = e.button === 1 || (e.button === 0 && this.spaceHeld);
-    if (!isPan || this.drag) return;
+    if (!isPan && e.button !== 0) return;
     e.preventDefault();
     this.canvas.focus({ preventScroll: true });
     this.canvas.setPointerCapture(e.pointerId);
-    this.drag = {
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      startView: this.view,
-    };
-    this.updateCursor();
+    this.trackPointer(e);
+    if (isPan) {
+      this.drag = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startView: this.view,
+      };
+      this.updateCursor();
+      return;
+    }
+    this.toolPointerId = e.pointerId;
+    this.tools.pointerDown(this.toolEvent(e));
   };
 
   private readonly handlePointerMove = (e: PointerEvent): void => {
     const drag = this.drag;
-    if (!drag || e.pointerId !== drag.pointerId) return;
-    this.setView({
-      zoom: drag.startView.zoom,
-      panX: drag.startView.panX + (e.clientX - drag.startX),
-      panY: drag.startView.panY + (e.clientY - drag.startY),
-    });
+    if (drag) {
+      if (e.pointerId !== drag.pointerId) return;
+      this.trackPointer(e);
+      this.setView({
+        zoom: drag.startView.zoom,
+        panX: drag.startView.panX + (e.clientX - drag.startX),
+        panY: drag.startView.panY + (e.clientY - drag.startY),
+      });
+      return;
+    }
+    if (this.toolPointerId !== null && e.pointerId !== this.toolPointerId) return;
+    this.trackPointer(e);
+    // Moves with no button down (hover) go to the tool too.
+    this.tools.pointerMove(this.toolEvent(e));
   };
 
   private readonly handlePointerUp = (e: PointerEvent): void => {
-    if (!this.drag || e.pointerId !== this.drag.pointerId) return;
-    this.drag = null;
-    if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+    if (this.drag) {
+      if (e.pointerId !== this.drag.pointerId) return;
+      this.drag = null;
+      this.releasePointer(e.pointerId);
+      this.updateCursor();
+      return;
+    }
+    if (e.pointerId !== this.toolPointerId) return;
+    this.toolPointerId = null;
+    this.releasePointer(e.pointerId);
+    this.trackPointer(e);
+    this.tools.pointerUp(this.toolEvent(e));
     this.updateCursor();
+    if (!this.pointerInside) this.forgetPointer();
   };
 
+  private readonly handlePointerCancel = (e: PointerEvent): void => {
+    if (this.drag?.pointerId === e.pointerId) {
+      this.drag = null;
+      this.updateCursor();
+    } else if (e.pointerId === this.toolPointerId) {
+      this.cancelToolGesture();
+    }
+  };
+
+  private readonly handlePointerLeave = (): void => {
+    this.pointerInside = false;
+    if (!this.drag && this.toolPointerId === null) this.forgetPointer();
+  };
+
+  /** Abandons the tool's pointer gesture, if any, without committing it. */
+  private cancelToolGesture(): void {
+    if (this.toolPointerId === null) return;
+    this.releasePointer(this.toolPointerId);
+    this.toolPointerId = null;
+    this.tools.cancel();
+    this.updateCursor();
+  }
+
+  private releasePointer(pointerId: number): void {
+    if (this.canvas.hasPointerCapture(pointerId)) this.canvas.releasePointerCapture(pointerId);
+  }
+
+  private trackPointer(e: PointerEvent): void {
+    this.pointer = { clientX: e.clientX, clientY: e.clientY };
+    this.modifiers = modifiersOf(e);
+    this.emitStatus();
+  }
+
+  private forgetPointer(): void {
+    this.pointer = null;
+    this.emitStatus();
+  }
+
+  private toolEvent(point: ClientPoint): ToolPointerEvent {
+    const [x, y] = this.documentPoint(point);
+    return { x, y, zoom: this.view.zoom, ...this.modifiers };
+  }
+
+  private documentPoint(point: ClientPoint): [number, number] {
+    const bounds = this.canvas.getBoundingClientRect();
+    return screenToDocument(this.view, point.clientX - bounds.left, point.clientY - bounds.top);
+  }
+
+  /** Keys go to the tool while the user is working on the canvas. */
+  private toolWantsKeys(): boolean {
+    return (
+      this.toolPointerId !== null || this.pointerInside || document.activeElement === this.canvas
+    );
+  }
+
   private readonly handleKeyDown = (e: KeyboardEvent): void => {
-    if (e.code !== 'Space' || isTextEntry(e.target)) return;
-    // Only claim Space while the user is working on the canvas, so it still
-    // activates focused buttons and checkboxes elsewhere.
-    if (!this.pointerInside && document.activeElement !== this.canvas && !this.drag) return;
-    e.preventDefault();
-    this.setSpaceHeld(true);
+    this.modifiers = modifiersOf(e);
+    if (isTextEntry(e.target)) return;
+    if (e.code === 'Space') {
+      // Only claim Space while the user is working on the canvas, so it still
+      // activates focused buttons and checkboxes elsewhere.
+      if (!this.pointerInside && document.activeElement !== this.canvas && !this.drag) return;
+      e.preventDefault();
+      this.setSpaceHeld(true);
+      return;
+    }
+    if (this.toolWantsKeys() && this.tools.keyDown(toolKeyEvent(e))) e.preventDefault();
   };
 
   private readonly handleKeyUp = (e: KeyboardEvent): void => {
-    if (e.code !== 'Space' || !this.spaceHeld) return;
-    e.preventDefault();
-    this.setSpaceHeld(false);
+    this.modifiers = modifiersOf(e);
+    if (e.code === 'Space') {
+      if (!this.spaceHeld) return;
+      e.preventDefault();
+      this.setSpaceHeld(false);
+      return;
+    }
+    if (isTextEntry(e.target)) return;
+    if (this.toolWantsKeys() && this.tools.keyUp(toolKeyEvent(e))) e.preventDefault();
   };
 
   private setSpaceHeld(held: boolean): void {
@@ -351,7 +520,38 @@ export class ViewportController {
   }
 
   private updateCursor(): void {
-    this.canvas.style.cursor = this.drag ? 'grabbing' : this.spaceHeld ? 'grab' : '';
+    let cursor = this.tools.activeTool.cursor;
+    if (this.drag) cursor = 'grabbing';
+    else if (this.spaceHeld && this.toolPointerId === null) cursor = 'grab';
+    this.canvas.style.cursor = cursor;
+  }
+
+  private computeStatus(): ViewportStatus {
+    let pointer: ViewportStatus['pointer'] = null;
+    if (this.pointer) {
+      const [x, y] = this.documentPoint(this.pointer);
+      pointer = { x: Math.floor(x), y: Math.floor(y) };
+    }
+    const area = this.tools.overlay?.rect ?? this.editor.document.selection?.bounds() ?? null;
+    const selectionSize = area ? { width: area.width, height: area.height } : null;
+    return { pointer, selectionSize };
+  }
+
+  /** Recomputes the status and notifies listeners if it changed. */
+  private emitStatus(): void {
+    if (this.statusListeners.size === 0) return;
+    const next = this.computeStatus();
+    const prev = this.status;
+    if (
+      next.pointer?.x === prev.pointer?.x &&
+      next.pointer?.y === prev.pointer?.y &&
+      next.selectionSize?.width === prev.selectionSize?.width &&
+      next.selectionSize?.height === prev.selectionSize?.height
+    ) {
+      return;
+    }
+    this.status = next;
+    for (const listener of this.statusListeners) listener(next);
   }
 
   private localPoint(e: MouseEvent): [number, number] {

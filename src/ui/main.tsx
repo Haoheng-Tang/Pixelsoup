@@ -8,6 +8,7 @@ import { decodeImageFile } from './io/image-decode';
 import { pngCodec } from './io/png-codec';
 import { AppController } from './session/app-controller';
 import { DocumentSession } from './session/document-session';
+import { createToolManager } from './tools/create-tools';
 import './styles.css';
 
 const container = document.getElementById('root');
@@ -22,9 +23,10 @@ const session = new DocumentSession({
   encodeImage,
 });
 const controller = new AppController(session);
+const tools = createToolManager(editor);
 
 createRoot(container).render(
   <StrictMode>
-    <App editor={editor} controller={controller} />
+    <App editor={editor} controller={controller} tools={tools} />
   </StrictMode>,
 );
