@@ -1,6 +1,7 @@
 import { isValidImageSize } from './document';
 import type { Rect } from './geometry';
 import { intersectRects, unionRects } from './geometry';
+import { assertNever } from './layer';
 
 /** How a new shape combines with the existing selection. */
 export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
@@ -277,13 +278,9 @@ export function combineSelections(
       result = base && base.intersect(shape);
       break;
     default:
-      return assertNeverMode(mode);
+      return assertNever(mode);
   }
   return result && !result.isEmpty ? result : null;
-}
-
-function assertNeverMode(mode: never): never {
-  throw new Error(`Unknown selection mode: ${String(mode)}`);
 }
 
 function assertSize(width: number, height: number): void {
