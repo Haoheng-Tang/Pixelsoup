@@ -32,7 +32,7 @@ interface PanDrag {
 export class ViewportController {
   private readonly canvas: HTMLCanvasElement;
   private readonly context: CanvasRenderingContext2D;
-  private readonly renderer: CompositeRenderer;
+  private renderer: CompositeRenderer;
   private readonly zoomListeners = new Set<ZoomListener>();
   private readonly cleanups: (() => void)[] = [];
 
@@ -68,6 +68,16 @@ export class ViewportController {
 
     this.cleanups.push(
       editor.subscribe((change) => {
+        if (change.documentReplaced) {
+          // The new document may have another size: start over with a fresh composite.
+          const doc = this.editor.document;
+          this.renderer = new CpuCompositeRenderer(doc.width, doc.height);
+          this.renderer.update(doc);
+          if (this.cssWidth > 0 && this.cssHeight > 0) this.fitToView();
+          else this.hasFitted = false;
+          this.invalidate();
+          return;
+        }
         if (!change.dirty) return;
         this.renderer.update(this.editor.document, [change.dirty]);
         this.invalidate();

@@ -1,29 +1,37 @@
 import type { ImageDocument } from './document';
-import { createDocument } from './document';
+import { createDocument, createLayerId } from './document';
 import type { RasterLayer } from './layer';
 import { createRasterLayer } from './layer';
 import type { PixelBuffer, Rgba } from './pixel-buffer';
 
-export const DEFAULT_DOCUMENT_WIDTH = 800;
-export const DEFAULT_DOCUMENT_HEIGHT = 600;
+export const DEMO_DOCUMENT_WIDTH = 800;
+export const DEMO_DOCUMENT_HEIGHT = 600;
 
 /**
- * The document shown at startup: a transparent "Background" layer and, above it, an
+ * A document for trying things out: a transparent "Background" layer and, above it, an
  * offset "Test Pattern" layer with a gradient and a few overlapping translucent shapes.
  */
 export function createDemoDocument(): ImageDocument {
-  const doc = createDocument(DEFAULT_DOCUMENT_WIDTH, DEFAULT_DOCUMENT_HEIGHT);
+  const doc = createDocument(DEMO_DOCUMENT_WIDTH, DEMO_DOCUMENT_HEIGHT);
   const background = createRasterLayer({
+    id: createLayerId(doc),
     name: 'Background',
     width: doc.width,
     height: doc.height,
   });
-  doc.layers.push(background, createTestPatternLayer());
+  doc.layers.push(background, createTestPatternLayer(doc));
   return doc;
 }
 
-function createTestPatternLayer(): RasterLayer {
-  const layer = createRasterLayer({ name: 'Test Pattern', width: 680, height: 500, x: 60, y: 50 });
+function createTestPatternLayer(doc: ImageDocument): RasterLayer {
+  const layer = createRasterLayer({
+    id: createLayerId(doc),
+    name: 'Test Pattern',
+    width: 680,
+    height: 500,
+    x: 60,
+    y: 50,
+  });
   const buf = layer.pixels;
 
   // Hue sweep across the top band, fading from opaque to transparent downwards.

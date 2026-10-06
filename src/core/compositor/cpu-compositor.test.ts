@@ -22,11 +22,14 @@ interface SolidOptions {
   visible?: boolean;
 }
 
+let nextSolidId = 1;
+
 /** A layer filled with one color; defaults to covering the whole 4x4 test canvas. */
 function solid(color: Rgba, options: SolidOptions = {}): RasterLayer {
   const width = options.width ?? 4;
   const height = options.height ?? 4;
   const layer = createRasterLayer({
+    id: `solid-${nextSolidId++}`,
     name: 'solid',
     width,
     height,

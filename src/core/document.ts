@@ -16,13 +16,45 @@ export interface ImageDocument {
   readonly layers: Layer[];
   /** Active selection, or null when everything is implicitly selected. */
   selection: Selection | null;
+  /**
+   * ID allocator state for `createLayerId`, not document content: it only grows (undo
+   * doesn't rewind it), so an ID is never reused within a document. Not saved to files;
+   * rebuilt from the layer IDs on load.
+   */
+  nextLayerNumber: number;
+}
+
+/** Largest width or height, in pixels, of a document or a layer. */
+export const MAX_IMAGE_SIZE = 8192;
+
+export function isValidImageSize(width: number, height: number): boolean {
+  return (
+    Number.isInteger(width) &&
+    Number.isInteger(height) &&
+    width >= 1 &&
+    height >= 1 &&
+    width <= MAX_IMAGE_SIZE &&
+    height <= MAX_IMAGE_SIZE
+  );
 }
 
 export function createDocument(width: number, height: number): ImageDocument {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+  if (!isValidImageSize(width, height)) {
     throw new RangeError(`Invalid document size ${width}x${height}`);
   }
-  return { width, height, layers: [], selection: null };
+  return { width, height, layers: [], selection: null, nextLayerNumber: 1 };
+}
+
+/**
+ * Returns an ID (`layer-1`, `layer-2`, …) that no layer in `doc` uses and that `doc` has
+ * not handed out before. IDs are only unique within their document.
+ */
+export function createLayerId(doc: ImageDocument): LayerId {
+  let id: LayerId;
+  do {
+    id = `layer-${doc.nextLayerNumber++}`;
+  } while (findLayer(doc, id));
+  return id;
 }
 
 export function documentBounds(doc: ImageDocument): Rect {
