@@ -2,6 +2,7 @@ export * from './geometry';
 export * from './pixel-buffer';
 export * from './layer';
 export * from './selection';
+export * from './selection-outline';
 export * from './document';
 export * from './history/command';
 export * from './history/history';

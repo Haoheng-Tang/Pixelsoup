@@ -50,6 +50,8 @@ export interface ToolKeyEvent extends ToolModifiers {
 export interface ToolOverlay {
   readonly shape: 'rect' | 'ellipse';
   readonly rect: Rect;
+  /** Hide the current selection's outline while this shape is shown (it will replace it). */
+  readonly hidesSelection?: boolean;
 }
 
 /** What a tool gets from the `ToolManager` when it becomes active. */

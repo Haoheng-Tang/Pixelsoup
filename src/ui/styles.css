@@ -131,6 +131,15 @@ button.danger:hover:not(:disabled) {
   outline: none;
 }
 
+.viewport-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
 .sidebar {
   width: 260px;
   overflow-y: auto;

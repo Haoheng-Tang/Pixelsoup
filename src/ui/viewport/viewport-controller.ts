@@ -2,6 +2,8 @@ import type { Editor } from '../../core';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
+import type { DocumentPlacement } from './selection-overlay';
+import { ANT_STEP_MS, SelectionOverlay } from './selection-overlay';
 import type { ViewTransform } from './view-transform';
 import { centered, fitZoom, nextZoomStep, zoomAt } from './view-transform';
 
@@ -23,15 +25,18 @@ interface PanDrag {
 }
 
 /**
- * Imperative canvas viewport: draws the document composite over a checkerboard and
- * handles zoom (wheel, centered on the cursor) and pan (space+drag, middle-drag).
+ * Imperative canvas viewport: draws the document composite over a checkerboard, the
+ * selection's marching ants on an overlay canvas above it, and handles zoom (wheel,
+ * centered on the cursor) and pan (space+drag, middle-drag).
  *
  * Deliberately outside React: pointer and wheel input never trigger React renders.
- * Redraws are coalesced into one requestAnimationFrame.
+ * Redraws are coalesced into one requestAnimationFrame; while there is a selection the
+ * frame loop keeps running and redraws only the overlay as the ants move.
  */
 export class ViewportController {
   private readonly canvas: HTMLCanvasElement;
   private readonly context: CanvasRenderingContext2D;
+  private readonly overlay: SelectionOverlay;
   private renderer: CompositeRenderer;
   private readonly zoomListeners = new Set<ZoomListener>();
   private readonly cleanups: (() => void)[] = [];
@@ -42,6 +47,10 @@ export class ViewportController {
   private dpr = 1;
   private hasFitted = false;
   private frame = 0;
+  private mainDirty = false;
+  private overlayDirty = false;
+  private antPhase = 0;
+  private placement: DocumentPlacement | null = null;
   private checker: CanvasPattern | null = null;
   private checkerDpr = 0;
 
@@ -61,6 +70,7 @@ export class ViewportController {
     if (!context) throw new Error('Canvas 2D is not available');
     this.context = context;
     container.appendChild(this.canvas);
+    this.overlay = new SelectionOverlay(container);
 
     const doc = editor.document;
     this.renderer = new CpuCompositeRenderer(doc.width, doc.height);
@@ -78,6 +88,7 @@ export class ViewportController {
           this.invalidate();
           return;
         }
+        if (change.selectionDirty) this.invalidateOverlay();
         if (!change.dirty) return;
         this.renderer.update(this.editor.document, [change.dirty]);
         this.invalidate();
@@ -139,9 +150,11 @@ export class ViewportController {
 
   dispose(): void {
     cancelAnimationFrame(this.frame);
+    this.frame = 0;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.zoomListeners.clear();
     this.canvas.remove();
+    this.overlay.canvas.remove();
   }
 
   private zoomAroundCenter(zoom: number): void {
@@ -155,12 +168,35 @@ export class ViewportController {
     if (zoomChanged) for (const listener of this.zoomListeners) listener(view.zoom);
   }
 
+  /** Schedules a redraw of everything. */
   private invalidate(): void {
-    if (this.frame) return;
-    this.frame = requestAnimationFrame(() => {
-      this.frame = 0;
-      this.render();
-    });
+    this.mainDirty = true;
+    this.requestFrame();
+  }
+
+  /** Schedules a redraw of the overlay only (selection or tool preview changed). */
+  private invalidateOverlay(): void {
+    this.overlayDirty = true;
+    this.requestFrame();
+  }
+
+  private requestFrame(): void {
+    if (!this.frame) this.frame = requestAnimationFrame(this.handleFrame);
+  }
+
+  private readonly handleFrame = (time: number): void => {
+    this.frame = 0;
+    const phase = Math.floor(time / ANT_STEP_MS);
+    if (this.mainDirty) this.render(phase);
+    else if (this.overlayDirty || (this.hasAnts() && phase !== this.antPhase)) {
+      this.renderOverlay(phase);
+    }
+    // Keep the ants marching; frames without a new step draw nothing.
+    if (this.hasAnts()) this.requestFrame();
+  };
+
+  private hasAnts(): boolean {
+    return this.editor.document.selection !== null;
   }
 
   private handleResize(): void {
@@ -170,6 +206,7 @@ export class ViewportController {
     this.dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.max(1, Math.round(bounds.width * this.dpr));
     this.canvas.height = Math.max(1, Math.round(bounds.height * this.dpr));
+    this.overlay.resize(this.canvas.width, this.canvas.height);
     if (!this.hasFitted && bounds.width > 0 && bounds.height > 0) {
       this.hasFitted = true;
       this.fitToView();
@@ -178,11 +215,25 @@ export class ViewportController {
     this.render();
   }
 
-  private render(): void {
+  /** Redraws the composite and the overlay now. */
+  private render(phase = Math.floor(performance.now() / ANT_STEP_MS)): void {
     if ((window.devicePixelRatio || 1) !== this.dpr) {
       this.handleResize();
       return;
     }
+    this.mainDirty = false;
+    this.renderComposite();
+    this.renderOverlay(phase);
+    if (this.hasAnts()) this.requestFrame();
+  }
+
+  private renderOverlay(phase: number): void {
+    this.overlayDirty = false;
+    this.antPhase = phase;
+    this.overlay.draw(this.editor.document.selection, null, this.placement, this.dpr, phase);
+  }
+
+  private renderComposite(): void {
     const ctx = this.context;
     const dpr = this.dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -197,7 +248,17 @@ export class ViewportController {
     const y1 = Math.round((panY + this.renderer.height * zoom) * dpr);
     const w = x1 - x0;
     const h = y1 - y0;
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0) {
+      this.placement = null;
+      return;
+    }
+    // The overlay maps document coordinates exactly as the composite is drawn.
+    this.placement = {
+      x: x0,
+      y: y0,
+      scaleX: w / this.renderer.width,
+      scaleY: h / this.renderer.height,
+    };
 
     const checker = this.checkerPattern();
     if (typeof checker !== 'string') checker.setTransform(new DOMMatrix([1, 0, 0, 1, x0, y0]));
