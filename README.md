@@ -89,6 +89,15 @@ npm run dev
 
 Then open http://localhost:5173.
 
+On Windows you can double-click `start-pixelsoup.cmd` instead. It installs the dependencies the
+first time, starts the dev server in a console window and opens Pixelsoup in its own Microsoft
+Edge window (or the default browser if Edge is missing). Keep the console open while you work;
+closing it stops the server. Running it again while the server is up only opens another window.
+It installs dependencies only when `node_modules` is missing, so run `npm install` after pulling
+changes to `package.json`. To start Pixelsoup from the desktop or taskbar, make a shortcut whose
+target is `cmd.exe /c "<path to>\start-pixelsoup.cmd"`; unlike a shortcut to the file itself,
+it can be pinned.
+
 To build and serve a production version:
 
 ```sh

@@ -140,15 +140,15 @@ src/
 
 ## Commands
 
-| Script              | Purpose                                             |
-| ------------------- | --------------------------------------------------- |
-| `npm run dev`       | Vite dev server (http://localhost:5173)             |
-| `npm run build`     | type-check all projects, then production build      |
-| `npm run preview`   | serve the production build                          |
-| `npm test`          | run unit tests once (`npm run test:watch` to watch) |
-| `npm run lint`      | ESLint + Prettier check                             |
-| `npm run format`    | Prettier write                                      |
-| `npm run typecheck` | `tsc -b` only                                       |
+| Script              | Purpose                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `npm run dev`       | Vite dev server (http://localhost:5173), also run by `start-pixelsoup.cmd` |
+| `npm run build`     | type-check all projects, then production build                             |
+| `npm run preview`   | serve the production build                                                 |
+| `npm test`          | run unit tests once (`npm run test:watch` to watch)                        |
+| `npm run lint`      | ESLint + Prettier check                                                    |
+| `npm run format`    | Prettier write                                                             |
+| `npm run typecheck` | `tsc -b` only                                                              |
 
 ## Planned build order
 
