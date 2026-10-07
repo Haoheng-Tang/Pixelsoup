@@ -1,6 +1,6 @@
 import type { Rect } from './geometry';
 import type { PixelBuffer } from './pixel-buffer';
-import { createPixelBuffer } from './pixel-buffer';
+import { clonePixelBuffer, createPixelBuffer } from './pixel-buffer';
 
 /**
  * How a layer combines with the pixels beneath it. Only 'normal' exists for now;
@@ -72,6 +72,19 @@ export function createRasterLayer(options: RasterLayerOptions): RasterLayer {
     y: options.y ?? 0,
     pixels: 'pixels' in options ? options.pixels : createPixelBuffer(options.width, options.height),
   };
+}
+
+/**
+ * A copy of `layer` with its own copy of the pixels and every other property, under a
+ * new ID and name. Does not add it to a document.
+ */
+export function duplicateLayer(layer: Layer, id: LayerId, name: string): Layer {
+  switch (layer.kind) {
+    case 'raster':
+      return { ...layer, id, name, pixels: clonePixelBuffer(layer.pixels) };
+    default:
+      return assertNever(layer.kind);
+  }
 }
 
 export function clampOpacity(value: number): number {

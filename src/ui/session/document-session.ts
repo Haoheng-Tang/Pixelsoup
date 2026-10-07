@@ -10,6 +10,7 @@ import {
   createRasterLayer,
   deserializeDocument,
   flattenOnto,
+  indexAbove,
   serializeDocument,
 } from '../../core';
 import type { FileRef, FileStore } from '../io/file-store';
@@ -139,8 +140,9 @@ export class DocumentSession {
   }
 
   /**
-   * Asks for an image and adds it as a new layer, centred on the canvas, as one undoable
-   * step. Resolves to false if the user cancelled.
+   * Asks for an image and adds it as a new layer, centred on the canvas and directly above
+   * the active layer, as one undoable step. The new layer becomes active. Resolves to false
+   * if the user cancelled.
    */
   async importAsLayer(): Promise<boolean> {
     const opened = await this.deps.store.open([IMAGE_FILE_TYPE]);
@@ -163,7 +165,9 @@ export class DocumentSession {
       x: Math.floor((doc.width - pixels.width) / 2),
       y: Math.floor((doc.height - pixels.height) / 2),
     });
-    editor.history.execute(new AddLayerCommand(layer, 'Import Image'));
+    const above = indexAbove(doc, editor.activeLayerId);
+    editor.history.execute(new AddLayerCommand(layer, 'Import Image', above));
+    editor.setActiveLayer(layer.id);
     return true;
   }
 

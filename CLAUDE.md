@@ -69,6 +69,9 @@ editors do by default). Imported images will be treated as sRGB.
 - **`Editor`** owns one document plus its history and broadcasts each `DocumentChange` to
   subscribers (the viewport and panels). It tracks the save point (`isDirty`, `markSaved`);
   `replaceDocument` swaps in a new or opened document and resets history.
+- **Active layer**: `editor.activeLayerId` is session state, as in Photoshop: never part of the
+  document, never saved, never a history step. It always names an existing layer (null only
+  with no layers); `Editor` fixes it up after each change. Layer commands, panel: @docs/layers.md
 - **Files**: core reads and writes `.pixelsoup` bytes through an injected `PngCodec`; decoding
   images lives in `src/ui/io`. **`FileStore`** (`src/ui/io/file-store.ts`) alone knows how files
   are picked and written (File System Access API, else file input and downloads). Pickers need
@@ -87,34 +90,33 @@ editors do by default). Imported images will be treated as sRGB.
 ## Folder layout
 
 ```
-index.html               Vite entry
-vite.config.ts           build + Vitest config, production CSP
+index.html               Vite entry; vite.config.ts: build + Vitest config, production CSP
 eslint.config.js         lint rules incl. core/browser import boundaries
 tsconfig*.json           project references: core (no DOM), web (src/), node (configs)
-docs/file-format.md      .pixelsoup format spec; docs/tools.md: tools and selections
+docs/                    file-format.md (.pixelsoup spec), tools.md (tools, selections), layers.md
 src/
   core/                  pure logic – no DOM/React/Node
     geometry.ts          Rect helpers; pixel-buffer.ts: RGBA8 buffers
     selection.ts         Selection masks; selection-outline.ts: outline tracing for the ants
     layer.ts             Layer union, RasterLayer, BlendMode
     document.ts          ImageDocument, per-document layer IDs
-    editor.ts            Editor: document + history + change events + save point
+    editor.ts            Editor: document + history + change events + save point + active layer
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            concrete commands (layer properties, add layer, selection, …)
-    compositor/          Compositor interface, CpuCompositor (+ tests)
+    commands/            concrete commands (layer properties and stack, merge/flatten, selection)
+    compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
     serialization/       .pixelsoup read/write, PngCodec interface
     index.ts             public barrel used by ui/
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
-    use-*.ts             keyboard shortcut hooks; select-commands.ts: Select menu actions
+    use-*.ts             keyboard shortcut hooks; select-commands.ts, layer-actions.ts: menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
     session/             DocumentSession, AppController, file types
     dialogs/             New, Export, confirm-discard and error dialogs
     tools/               Tool interface, ToolManager, marquee tools and their options
     viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
-    panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel
+    panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel (drag, thumbnails)
 ```
 
 ## Coding conventions
@@ -138,15 +140,15 @@ src/
 
 ## Commands
 
-| Script              | Purpose                                             |
-| ------------------- | --------------------------------------------------- |
-| `npm run dev`       | Vite dev server (http://localhost:5173)             |
-| `npm run build`     | type-check all projects, then production build      |
-| `npm run preview`   | serve the production build                          |
-| `npm test`          | run unit tests once (`npm run test:watch` to watch) |
-| `npm run lint`      | ESLint + Prettier check                             |
-| `npm run format`    | Prettier write                                      |
-| `npm run typecheck` | `tsc -b` only                                       |
+| Script              | Purpose                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `npm run dev`       | Vite dev server (http://localhost:5173), also run by `start-pixelsoup.cmd` |
+| `npm run build`     | type-check all projects, then production build                             |
+| `npm run preview`   | serve the production build                                                 |
+| `npm test`          | run unit tests once (`npm run test:watch` to watch)                        |
+| `npm run lint`      | ESLint + Prettier check                                                    |
+| `npm run format`    | Prettier write                                                             |
+| `npm run typecheck` | `tsc -b` only                                                              |
 
 ## Planned build order
 
@@ -155,6 +157,7 @@ src/
 3. Undo/redo (done; new features add their own commands)
 4. Open/save (done: new, open, save, import, export)
 5. Selection as a mask + tool system (done: marquee tools, Select menu, marching ants)
+   - then layer management (done: active layer, layer commands, Layer menu, thumbnails)
 6. Move tool
 7. Brush / eraser
 8. Crop / rotate
@@ -175,8 +178,6 @@ src/
 - **`.pixelsoup` is the native format**: a zip of `document.json` plus one PNG per raster layer.
   PNG, JPEG and WebP are import and export only. Layer PNGs use the lossless codec in
   `src/ui/io/png.ts`, as canvas premultiplies. Spec, layer IDs, versioning: @docs/file-format.md
-- **Layer IDs are per document**: `createLayerId(doc)` hands out `layer-N`, and numbering
-  continues after load. `nextLayerNumber` is an ID allocator, so it changes outside commands.
 
 ## Open decisions
 
@@ -184,7 +185,6 @@ Simplest choices made so far that may be revisited:
 
 - **History storage**: `LinearHistory` keeps whole command objects with a 200-step cap. Pixel
   commands will need memory-aware storage (e.g. tiled diffs) behind the same interface.
-- **Opacity** is stored as a float in 0–1. The UI slider uses whole percents.
 - **Dirty rects for property changes** are the layer's bounds clipped to the canvas. Each change
   recomposites that rect synchronously; batching or tiling can come later if profiling demands it.
 - **Viewport rendering**: zoom range 1 %–6400 %; bilinear below 100 %, nearest-neighbour at and

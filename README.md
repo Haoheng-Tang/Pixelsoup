@@ -3,9 +3,9 @@
 An open-source, layered raster image editor that runs in your browser, like a lightweight
 Photoshop.
 
-> Early days: Pixelsoup can create, open, save, import and export documents, show, hide and fade
-> their layers, and make rectangular and elliptical selections. Painting and other tools are on
-> the roadmap.
+> Early days: Pixelsoup can create, open, save, import and export documents, manage their
+> layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), and make
+> rectangular and elliptical selections. Painting and other tools are on the roadmap.
 
 ## Features so far
 
@@ -22,7 +22,10 @@ Photoshop.
   (Normal)
 - Viewport with a transparency checkerboard, zoom to cursor (mouse wheel) and pan
   (Space+drag or middle-mouse drag)
-- Layer panel with visibility toggles and opacity sliders that update live
+- Layer panel with thumbnails, visibility toggles, live opacity sliders, drag-and-drop
+  reordering and inline renaming; the active layer is highlighted
+- Layer menu and panel buttons: new layer, duplicate, delete, move up and down, merge down and
+  flatten image. Merging bakes in each layer's opacity, so the image looks the same afterwards
 - Rectangular and elliptical marquee tools (the ellipse has anti-aliased edges) in New, Add,
   Subtract and Intersect modes, picked in the tool-options bar or with modifier keys
 - Select menu: Select All, Deselect and Inverse
@@ -49,6 +52,22 @@ Selections aren't saved in `.pixelsoup` files, and changing one doesn't count as
 change. Some browsers keep Ctrl/Cmd+D (bookmark) or Ctrl/Cmd+Shift+I (developer tools) for
 themselves; the Select menu always works.
 
+### Layer shortcuts
+
+| Keys                       | Action                               |
+| -------------------------- | ------------------------------------ |
+| Ctrl/Cmd+Shift+N           | new layer above the active one       |
+| Ctrl/Cmd+J                 | duplicate the active layer           |
+| Ctrl/Cmd+E                 | merge down                           |
+| Ctrl/Cmd+[, Ctrl/Cmd+]     | move the active layer down, up       |
+| Alt+[, Alt+]               | select the layer below, above        |
+| Double-click a name, or F2 | rename (Enter keeps it, Esc cancels) |
+| Drag a layer               | reorder (Esc cancels)                |
+
+Selecting a layer isn't an edit: it isn't saved and isn't an undo step. Merge Down needs both
+layers visible. Flatten Image discards hidden layers. Browsers may keep Ctrl/Cmd+Shift+N for a
+new private window; Layer → New Layer and the panel's button always work.
+
 ### Saving and browsers
 
 In Chromium-based browsers (Chrome, Edge, Opera), Open and Save use the system file dialogs and
@@ -69,6 +88,15 @@ npm run dev
 ```
 
 Then open http://localhost:5173.
+
+On Windows you can double-click `start-pixelsoup.cmd` instead. It installs the dependencies the
+first time, starts the dev server in a console window and opens Pixelsoup in its own Microsoft
+Edge window (or the default browser if Edge is missing). Keep the console open while you work;
+closing it stops the server. Running it again while the server is up only opens another window.
+It installs dependencies only when `node_modules` is missing, so run `npm install` after pulling
+changes to `package.json`. To start Pixelsoup from the desktop or taskbar, make a shortcut whose
+target is `cmd.exe /c "<path to>\start-pixelsoup.cmd"`; unlike a shortcut to the file itself,
+it can be pinned.
 
 To build and serve a production version:
 

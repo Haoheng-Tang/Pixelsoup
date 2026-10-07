@@ -1,5 +1,6 @@
 import type { ImageDocument } from '../document';
 import type { Rect } from '../geometry';
+import type { LayerId } from '../layer';
 
 /** What a command (or undo/redo) changed, so views can update incrementally. */
 export interface DocumentChange {
@@ -11,6 +12,17 @@ export interface DocumentChange {
    * selection outline.
    */
   readonly selectionDirty?: Rect | null;
+  /**
+   * Layers whose own pixels changed, for views of single layers such as thumbnails.
+   * Absent if none did. Adding, removing, reordering or restyling layers isn't listed.
+   */
+  readonly layerPixels?: readonly LayerPixelsChange[];
+}
+
+export interface LayerPixelsChange {
+  readonly layerId: LayerId;
+  /** Layer-space region that changed, or null if the whole layer may have, size included. */
+  readonly rect: Rect | null;
 }
 
 /**
