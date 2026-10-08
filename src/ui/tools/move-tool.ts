@@ -1,25 +1,12 @@
 import type { ComponentType } from 'react';
 import type { Editor, FloatingSelection, ImageDocument, LayerId } from '../../core';
 import { findLayer, liftSelectionCommand, moveLayerCommand } from '../../core';
+import type { FrameClock } from './frame-clock';
+import { browserClock } from './frame-clock';
 import { CLICK_TOLERANCE } from './marquee-tool';
 import { NudgeGrouper, nudgeOffset } from './nudge';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent } from './tool';
 import { TOOL_KEYS } from './tool';
-
-/** The timing the Move tool relies on; tests pass their own to run frames by hand. */
-export interface MoveToolClock {
-  /** Runs `callback` once before the next repaint, like requestAnimationFrame. */
-  requestFrame(callback: () => void): number;
-  cancelFrame(handle: number): void;
-  /** Milliseconds, to group arrow-key nudges. */
-  now(): number;
-}
-
-const browserClock: MoveToolClock = {
-  requestFrame: (callback) => requestAnimationFrame(callback),
-  cancelFrame: (handle) => cancelAnimationFrame(handle),
-  now: () => performance.now(),
-};
 
 /** A layer a drag or nudge moves, and where it was when the gesture took hold of it. */
 interface MoveTarget {
@@ -83,7 +70,7 @@ export class MoveTool implements Tool {
 
   constructor(
     readonly OptionsPanel?: ComponentType,
-    private readonly clock: MoveToolClock = browserClock,
+    private readonly clock: FrameClock = browserClock,
   ) {}
 
   activate(context: ToolContext): void {
