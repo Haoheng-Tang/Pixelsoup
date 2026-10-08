@@ -14,7 +14,7 @@ import {
   reorderLayerCommand,
 } from '../../core';
 import type { LayerAction } from '../layer-actions';
-import { canRunLayerAction, runLayerAction } from '../layer-actions';
+import { canRunLayerAction, commitFloatingFrom, runLayerAction } from '../layer-actions';
 import { useEditorRevision } from '../use-editor-revision';
 import { formatShortcut } from '../use-file-shortcuts';
 import { DRAG_THRESHOLD, dropSlot, isNoOpDrop, stackIndexForDrop } from './layer-drag';
@@ -211,12 +211,14 @@ function LayerRow({
   };
 
   const toggleVisibility = () => {
+    commitFloatingFrom(editor, layer.id);
     editor.history.execute(new SetLayerVisibilityCommand(layer.id, !layer.visible));
   };
 
   const changeOpacity = (value: number) => {
     const opacity = value / 100;
     if (opacity === layer.opacity) return;
+    commitFloatingFrom(editor, layer.id);
     const mergeKey = `opacity:${layer.id}:${gesture.current}`;
     editor.history.execute(new SetLayerOpacityCommand(layer.id, opacity, mergeKey));
   };

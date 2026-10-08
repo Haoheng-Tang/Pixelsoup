@@ -1,4 +1,4 @@
-import type { Command, Editor } from '../core';
+import type { Command, Editor, LayerId } from '../core';
 import {
   assertNever,
   duplicateLayerCommand,
@@ -128,6 +128,15 @@ export function runLayerAction(editor: Editor, action: LayerAction): void {
     default:
       assertNever(action);
   }
+}
+
+/**
+ * Commits the floating selection if it was lifted from `layerId`. Call before changing
+ * that layer's visibility or opacity: the float took them when lifted, and its source
+ * mustn't change while it floats.
+ */
+export function commitFloatingFrom(editor: Editor, layerId: LayerId): void {
+  if (editor.floating?.sourceId === layerId) editor.commitFloating();
 }
 
 function execute(editor: Editor, command: Command | null): void {

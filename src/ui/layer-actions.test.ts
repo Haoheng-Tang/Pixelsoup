@@ -12,7 +12,7 @@ import {
   liftSelectionCommand,
 } from '../core';
 import type { LayerAction } from './layer-actions';
-import { canRunLayerAction, runLayerAction } from './layer-actions';
+import { canRunLayerAction, commitFloatingFrom, runLayerAction } from './layer-actions';
 
 const ACTIONS: readonly LayerAction[] = [
   'new',
@@ -167,6 +167,22 @@ describe('runLayerAction with a floating selection', () => {
     }
     expect(names(doc)).toEqual(['A', 'B', FLOATING_LAYER_NAME]);
     expect(editor.floating).not.toBeNull();
+  });
+});
+
+describe('commitFloatingFrom', () => {
+  it('commits a floating selection lifted from the layer, and no other', () => {
+    const { editor, doc } = setup('A', 'B');
+    float(editor);
+    const floatId = doc.layers[2].id;
+    commitFloatingFrom(editor, 'layer-1');
+    commitFloatingFrom(editor, floatId);
+    expect(names(doc)).toEqual(['A', 'B', FLOATING_LAYER_NAME]);
+
+    commitFloatingFrom(editor, 'layer-2');
+    expect(names(doc)).toEqual(['A', 'B']);
+    expect(editor.floating).toBeNull();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
   });
 });
 
