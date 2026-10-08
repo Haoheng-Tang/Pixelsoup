@@ -7,6 +7,7 @@ import { ToolOptionsBar } from './panels/ToolOptionsBar';
 import { Toolbar } from './panels/Toolbar';
 import type { AppController } from './session/app-controller';
 import type { ToolManager } from './tools/tool-manager';
+import { useBrushShortcuts } from './use-brush-shortcuts';
 import { useColorShortcuts } from './use-color-shortcuts';
 import { useDocumentWindow } from './use-document-window';
 import { useFileShortcuts } from './use-file-shortcuts';
@@ -34,6 +35,7 @@ export function App({ editor, controller, tools, colors }: AppProps) {
   useLayerShortcuts(editor, controller);
   useToolShortcuts(tools, controller);
   useColorShortcuts(colors, controller);
+  useBrushShortcuts(tools, controller);
   useFileShortcuts(controller);
   useDocumentWindow(controller.session);
 

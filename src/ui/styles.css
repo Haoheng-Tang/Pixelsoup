@@ -105,6 +105,8 @@ button.danger:hover:not(:disabled) {
 .app {
   display: grid;
   grid-template-rows: auto auto 1fr auto;
+  /* Never wider than the window, however wide a tool's options are. */
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -888,4 +890,38 @@ button.danger:hover:not(:disabled) {
 .options-label {
   color: var(--text-muted);
   font-size: var(--font-size-md);
+}
+
+.options-slider {
+  width: 96px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.options-number {
+  width: 52px;
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  font-size: var(--font-size-md);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.options-number[aria-invalid='true'] {
+  border-color: var(--invalid);
+}
+
+.options-unit {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+
+.options-toggle[aria-pressed='true'] {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
 }

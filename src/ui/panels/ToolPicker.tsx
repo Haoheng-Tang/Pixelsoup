@@ -29,6 +29,16 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />
     </svg>
   ),
+  brush: (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2 10 6M8.6 5.6l1.8 1.8-2 2-1.8-1.8zM6.6 7.6c-2 .2-2.6 1.6-2.9 3.1-.2 1.2-.7 2.3-1.7 3.3 1.9.2 4.2-.3 5.3-1.6.9-1.1 1.1-2.2 1.1-3.1" />
+    </svg>
+  ),
+  eraser: (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2.2 10.2 10.2 2.2l3.6 3.6-8 8zM5.4 7l3.6 3.6M5.8 13.8H14" />
+    </svg>
+  ),
   eyedropper: (
     <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8.5 6.5 3 12l-1 2 2-1 5.5-5.5M7 5l4 4M10 6l2.3-2.3a1.6 1.6 0 0 1 2.3 2.3L12.3 8.3" />
