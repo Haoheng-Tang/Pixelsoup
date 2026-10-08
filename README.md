@@ -5,8 +5,8 @@ Photoshop.
 
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), make
-> rectangular and elliptical selections, and move layers and selected pixels. Painting and
-> other tools are on the roadmap.
+> rectangular and elliptical selections, move layers and selected pixels, and paint and erase
+> with soft or hard brushes. Cropping, adjustments and other tools are on the roadmap.
 
 ## Features so far
 
@@ -35,7 +35,15 @@ Photoshop.
   lifts the selected pixels (soft edges included) into a floating selection that moves with
   its outline, or copies them with Alt; committing drops them back into their layer, exactly
   as they were if they didn't move
-- Status bar with the pointer's document position and the selection size
+- Brush and Eraser with size (1–500 px), hardness and opacity, and optional pen pressure for
+  size, opacity or both. Opacity works as in Photoshop: a stroke never paints more than its
+  opacity where it crosses itself, while the next stroke builds on it. Fast strokes leave no
+  gaps, painting respects the selection's soft edges, and painting past a layer's edges grows it
+- Foreground and background colours as two toolbar swatches, each with a picker (a
+  saturation/brightness square, a hue strip, and hex and R, G, B fields)
+- Eyedropper that picks a colour from the image, or from the active layer alone
+- Status bar with the pointer's document position, the selection size, and brief messages such
+  as a new brush size
 - Undo/redo for every edit, selection changes included (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y)
 
 ### Selection shortcuts
@@ -89,6 +97,24 @@ A floating selection stays on its own layer until it's committed. That happens b
 you deselect or change the selection, pick another layer or tool, add a layer, merge, flatten,
 save or export, so a saved file never contains one. Each lift, move and commit is an undo step,
 and undoing a commit floats the pixels again.
+
+### Painting shortcuts
+
+| Keys                        | Action                                         |
+| --------------------------- | ---------------------------------------------- |
+| B, E, I                     | brush, eraser, eyedropper                      |
+| [, ]                        | smaller, larger brush                          |
+| Shift+[, Shift+]            | softer, harder brush                           |
+| Shift-click                 | straight line from where the last stroke ended |
+| Alt with the Brush, Eraser  | pick the foreground colour while held          |
+| Alt-click (Eyedropper)      | pick the background colour                     |
+| X                           | swap the foreground and background colours     |
+| D                           | reset the colours to black and white           |
+| Esc during a stroke or pick | cancel it                                      |
+
+Each stroke is one undo step, clipped to the selection. The Eraser erases to transparency on
+every layer. Pen pressure only applies to pens; mouse strokes use the full size and opacity.
+The colours aren't saved, and changing them isn't an undo step.
 
 ### Saving and browsers
 

@@ -64,9 +64,9 @@ editors do by default). Imported images will be treated as sRGB.
 - **Undo/redo is command-based.** Every document mutation is a `Command` (`apply` / `revert`,
   returning a `DocumentChange` with dirty rects) run through `editor.history.execute(cmd)`;
   nothing else may mutate an `ImageDocument`. Gestures share a `mergeKey`: one gesture, one step.
-- **Pixel edits** keep a `PixelSnapshot` of only the layer-space rects they change, taken before
-  their first write; revert restores it. They list the layer in `DocumentChange.layerPixels`. A
-  floating selection (`editor.floating`, session state) is committed before its source changes.
+- **Pixel edits** save just the pixels they change before their first write (`PixelSnapshot`
+  rects; strokes: 64 px tiles), and revert restores them. They list the layer in `layerPixels`.
+  A floating selection (`editor.floating`, session state) is committed before its source changes.
 - **`Editor`** owns one document plus its history and broadcasts each `DocumentChange` to
   subscribers (the viewport and panels). It tracks the save point (`isDirty`, `markSaved`);
   `replaceDocument` swaps in a new or opened document and resets history.
@@ -86,7 +86,8 @@ editors do by default). Imported images will be treated as sRGB.
   `requestAnimationFrame`, and readouts (zoom %, status bar) update the DOM directly.
 - **Tools** (`src/ui/tools`) implement `Tool` (document-space pointer and key handlers, options
   panel, preview overlay). `ToolManager` holds the active tool; the viewport routes input to it
-  after its own pan and zoom. Tools edit only through commands. Details: @docs/tools.md
+  after its own pan and zoom. Tools edit only through commands; painting tools run the core
+  stroke engine once per frame. Colours (`Colors`) are session state. Details: @docs/tools.md
 
 ## Folder layout
 
@@ -94,9 +95,9 @@ editors do by default). Imported images will be treated as sRGB.
 index.html               Vite entry; vite.config.ts: build + Vitest config, production CSP
 eslint.config.js         lint rules incl. core/browser import boundaries
 tsconfig*.json           project references: core (no DOM), web (src/), node (configs)
-docs/                    file-format.md (.pixelsoup spec), tools.md (tools, selections), layers.md
+docs/                    file-format.md, tools.md (tools, selections, painting), layers.md
 src/
-  core/                  pure logic – no DOM/React/Node
+  core/                  pure logic – no DOM/React/Node; index.ts: the public barrel for ui/
     pixel-buffer.ts      RGBA8 buffers; pixel-snapshot.ts: saved pixel rects for undo
     geometry.ts          Rect helpers; layer.ts: Layer union, RasterLayer, BlendMode
     selection.ts         Selection masks; selection-outline.ts: outline tracing for the ants
@@ -104,17 +105,18 @@ src/
     editor.ts            Editor: document + history + change events + save point + active layer
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            concrete commands (layer props and stack, merge, selection, move, float)
+    commands/            commands: layer props and stack, merge, selection, move, float, stroke
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
+    paint/               dabs and their placement, stroke masks, paint math, colour sampling
     serialization/       .pixelsoup read/write, PngCodec interface
-    index.ts             public barrel used by ui/
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
     use-*.ts             keyboard shortcut hooks; select-commands.ts, layer-actions.ts: menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
     session/             DocumentSession, AppController, file types
     dialogs/             New, Export, confirm-discard and error dialogs
-    tools/               Tool interface, ToolManager, marquee and move tools and their options
+    color/               Colors (foreground, background), swatches, HSV picker, colour math
+    tools/               Tool, ToolManager; marquee, move, brush/eraser, eyedropper tools, options
     viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
     panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel (drag, thumbnails)
@@ -159,7 +161,7 @@ src/
 5. Selection as a mask + tool system (done: marquee tools, Select menu, marching ants)
    - then layer management (done: active layer, layer commands, Layer menu, thumbnails)
 6. Move tool (done: layer moves and nudges, floating selections, pixel snapshots)
-7. Brush / eraser
+7. Brush / eraser (done: stroke engine, colours and picker, eyedropper)
 8. Crop / rotate
 9. Adjustments
 10. Lasso + magic wand
@@ -183,14 +185,12 @@ src/
 
 Simplest choices made so far that may be revisited:
 
-- **History storage**: `LinearHistory` keeps whole commands, snapshots included, with a 200-step
-  cap. Very large or repeated pixel edits may later need tiled snapshots behind `PixelSnapshot`.
+- **History storage**: `LinearHistory` keeps whole commands and their snapshots, up to 200 steps.
+  Strokes keep 64 px tiles (11 MB to cover 1920×1200); other pixel edits may need tiles later.
 - **Dirty rects for property changes** are the layer's bounds clipped to the canvas. Each change
   recomposites that rect synchronously; batching or tiling can come later if profiling demands it.
 - **Viewport rendering**: zoom range 1 %–6400 %; bilinear below 100 %, nearest-neighbour at and
   above. The checkerboard uses fixed 8 CSS-px squares anchored to the document origin.
-- **Panning**: space+drag only takes Space while the pointer is over (or focus is on) the
-  canvas, so Space still activates focused buttons elsewhere.
 - **CSP**: production builds only; the dev server needs inline scripts for Fast Refresh.
 - **File I/O limits**: PNG encoding and zipping run on the main thread (~150 ms at 1920×1080);
   use a worker if that hurts. The download fallback can't tell whether a download was kept, so
