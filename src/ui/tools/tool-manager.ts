@@ -1,5 +1,6 @@
 import type { Editor } from '../../core';
 import type {
+  BrushProperty,
   Tool,
   ToolContext,
   ToolKey,
@@ -21,6 +22,7 @@ export class ToolManager {
   private pointerIsDown = false;
   private readonly toolListeners = new Set<() => void>();
   private readonly overlayListeners = new Set<() => void>();
+  private readonly messageListeners = new Set<(text: string) => void>();
   private readonly context: ToolContext;
   private readonly unsubscribeEditor: () => void;
 
@@ -38,6 +40,9 @@ export class ToolManager {
       editor,
       overlayChanged: () => {
         for (const listener of [...this.overlayListeners]) listener();
+      },
+      showMessage: (text) => {
+        for (const listener of [...this.messageListeners]) listener(text);
       },
     };
     this.unsubscribeEditor = editor.subscribe((change) => {
@@ -134,6 +139,13 @@ export class ToolManager {
     return this.active.keyUp?.(event) ?? false;
   }
 
+  /** Steps the active painting tool's brush. Returns false if the tool has no brush. */
+  stepBrush(property: BrushProperty, direction: -1 | 1): boolean {
+    if (!this.active.stepBrush) return false;
+    this.active.stepBrush(property, direction);
+    return true;
+  }
+
   /** Calls `listener` when the active tool changes. */
   subscribe(listener: () => void): () => void {
     this.toolListeners.add(listener);
@@ -142,11 +154,19 @@ export class ToolManager {
     };
   }
 
-  /** Calls `listener` when the active tool's overlay may have changed. */
+  /** Calls `listener` when the active tool's overlay or cursor may have changed. */
   subscribeOverlay(listener: () => void): () => void {
     this.overlayListeners.add(listener);
     return () => {
       this.overlayListeners.delete(listener);
+    };
+  }
+
+  /** Calls `listener` with each message a tool wants shown briefly in the status bar. */
+  subscribeMessages(listener: (text: string) => void): () => void {
+    this.messageListeners.add(listener);
+    return () => {
+      this.messageListeners.delete(listener);
     };
   }
 
@@ -156,5 +176,6 @@ export class ToolManager {
     this.unsubscribeEditor();
     this.toolListeners.clear();
     this.overlayListeners.clear();
+    this.messageListeners.clear();
   }
 }

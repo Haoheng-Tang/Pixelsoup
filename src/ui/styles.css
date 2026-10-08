@@ -16,6 +16,8 @@
   --default-foreground: #000;
   --default-background: #fff;
   --shadow-popover: 0 6px 20px rgb(0 0 0 / 45%);
+  --cursor-line: #fff;
+  --cursor-halo: rgb(0 0 0 / 55%);
 
   /* Spacing, radii and type for new UI; older rules still use literal values. */
   --space-1: 2px;
@@ -236,6 +238,11 @@ button.danger:hover:not(:disabled) {
 
 .status-value {
   min-width: 90px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-message {
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
 

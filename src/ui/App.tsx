@@ -53,7 +53,7 @@ export function App({ editor, controller, tools, colors }: AppProps) {
           <LayerPanel editor={editor} blocked={controller.blocked} />
         </aside>
       </main>
-      <StatusBar viewport={viewport} />
+      <StatusBar viewport={viewport} tools={tools} />
       <ModalHost controller={controller} />
     </div>
   );
