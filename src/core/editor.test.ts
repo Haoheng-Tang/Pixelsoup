@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankDocument } from './blank-document';
+import { liftSelectionCommand } from './commands/float-commands';
 import {
   AddLayerCommand,
   SetLayerOpacityCommand,
@@ -13,6 +14,7 @@ import { createDocument, createLayerId } from './document';
 import type { EditorChange } from './editor';
 import { Editor } from './editor';
 import { createRasterLayer } from './layer';
+import { Selection } from './selection';
 
 function setup() {
   const editor = new Editor(createBlankDocument({ width: 20, height: 10, background: 'white' }));
@@ -211,5 +213,81 @@ describe('Editor active layer', () => {
     expect(editor.activeLayerId).toBe(layer.id);
     editor.history.undo();
     expect(editor.activeLayerId).toBeNull();
+  });
+});
+
+describe('Editor floating selection', () => {
+  /** Layers A and B (layer-1, layer-2), with part of B lifted into layer-3. */
+  function floating() {
+    const setup = stackEditor('A', 'B');
+    setup.doc.selection = Selection.fromRect(10, 10, { x: 0, y: 0, width: 2, height: 4 });
+    const lift = liftSelectionCommand(setup.doc, 'layer-2');
+    if (!lift) throw new Error('Nothing to lift');
+    setup.editor.history.execute(lift);
+    return setup;
+  }
+
+  it('starts with a lift, and keeps the floating layer active', () => {
+    const { editor, changes } = floating();
+    expect(editor.floating).toMatchObject({ layerId: 'layer-3', sourceId: 'layer-2' });
+    expect(editor.activeLayerId).toBe('layer-3');
+    expect(changes.at(-1)).toMatchObject({ floatingChanged: true, activeLayerChanged: true });
+  });
+
+  it('ends with a commit, which leaves the source layer active', () => {
+    const { editor, doc, changes } = floating();
+    expect(editor.commitFloating()).toBe(true);
+    expect(editor.floating).toBeNull();
+    expect(editor.activeLayerId).toBe('layer-2');
+    expect(doc.layers.map((l) => l.id)).toEqual(['layer-1', 'layer-2']);
+    expect(changes.at(-1)).toMatchObject({ floatingChanged: true, activeLayerChanged: true });
+    expect(editor.commitFloating()).toBe(false);
+  });
+
+  it('comes and goes with undo and redo', () => {
+    const { editor } = floating();
+    const record = editor.floating;
+    editor.commitFloating();
+
+    editor.history.undo();
+    expect(editor.floating).toBe(record);
+    expect(editor.activeLayerId).toBe('layer-3');
+    editor.history.undo();
+    expect(editor.floating).toBeNull();
+    expect(editor.activeLayerId).toBe('layer-2');
+    editor.history.redo();
+    expect(editor.floating).toBe(record);
+    expect(editor.activeLayerId).toBe('layer-3');
+    editor.history.redo();
+    expect(editor.floating).toBeNull();
+  });
+
+  it('is committed before another layer becomes active', () => {
+    const { editor } = floating();
+    editor.setActiveLayer('layer-3');
+    expect(editor.floating).not.toBeNull();
+    expect(() => editor.setActiveLayer('missing')).toThrow();
+    expect(editor.floating).not.toBeNull();
+
+    editor.setActiveLayer('layer-1');
+    expect(editor.floating).toBeNull();
+    expect(editor.activeLayerId).toBe('layer-1');
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+  });
+
+  it('is dropped when the document is replaced', () => {
+    const { editor, changes } = floating();
+    editor.replaceDocument(createDocument(5, 5));
+    expect(editor.floating).toBeNull();
+    expect(changes.at(-1)).toMatchObject({ documentReplaced: true, floatingChanged: true });
+  });
+
+  it('is dropped if its layer stops being directly above its source', () => {
+    const { editor, doc } = floating();
+    const flatten = flattenCommand(doc);
+    if (!flatten) throw new Error('Nothing to flatten');
+    editor.history.execute(flatten);
+    expect(editor.floating).toBeNull();
+    expect(editor.activeLayerId).toBe('layer-1');
   });
 });
