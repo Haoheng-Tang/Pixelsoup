@@ -33,6 +33,11 @@ export interface FloatingSelection {
    * which leaves the source untouched.
    */
   readonly before: PixelSnapshot | null;
+  /**
+   * True once the floating layer has been painted on. Committing an edited float where
+   * it was lifted composites it like a moved one, instead of restoring `before`.
+   */
+  readonly edited?: boolean;
 }
 
 /** True if the floating layer is in `doc`, directly above its source layer. */

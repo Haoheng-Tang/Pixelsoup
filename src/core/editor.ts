@@ -17,7 +17,10 @@ export interface EditorChange extends DocumentChange {
   readonly documentReplaced?: boolean;
   /** True when `activeLayerId` changed, whether set or moved off a layer that went away. */
   readonly activeLayerChanged?: boolean;
-  /** True when `floating` changed: a selection was lifted or committed, or that was undone. */
+  /**
+   * True when `floating` changed: a selection was lifted, committed or first painted on,
+   * or that was undone.
+   */
   readonly floatingChanged?: boolean;
 }
 

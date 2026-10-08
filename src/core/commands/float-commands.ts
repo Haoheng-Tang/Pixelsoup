@@ -165,10 +165,10 @@ type CommitPlan =
  *
  * The float's pixels are composited onto the source's own pixels with the merge-down
  * blend math, whatever either layer's opacity, visibility and blend mode, and the source
- * keeps its ID, name and those properties. Committed where it was lifted, the source gets
- * back exactly the pixels it had, which compositing alone can't promise for partly
- * selected pixels. Pixels moved past the source's edges make it grow to take them in, as
- * merging does.
+ * keeps its ID, name and those properties. Committed where it was lifted and not painted
+ * on, the source gets back exactly the pixels it had, which compositing alone can't
+ * promise for partly selected pixels. Pixels moved past the source's edges make it grow
+ * to take them in, as merging does.
  */
 export class CommitFloatingCommand implements Command {
   readonly label = 'Commit Floating Selection';
@@ -208,7 +208,7 @@ function commitInto(
   float: RasterLayer,
   floating: FloatingSelection,
 ): CommitPlan {
-  if (float.x === floating.x && float.y === floating.y) {
+  if (!floating.edited && float.x === floating.x && float.y === floating.y) {
     const rect = floating.before?.rect;
     if (!floating.before || !rect) return { kind: 'none' };
     const undo = PixelSnapshot.capture(source.pixels, rect);
