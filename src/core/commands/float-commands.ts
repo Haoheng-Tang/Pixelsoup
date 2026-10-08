@@ -3,15 +3,16 @@ import type { ImageDocument } from '../document';
 import { createLayerId, documentBounds, findLayer, getLayer, getLayerIndex } from '../document';
 import type { FloatingSelection } from '../floating-selection';
 import { FLOATING_LAYER_NAME, isFloatingIn } from '../floating-selection';
-import type { Rect } from '../geometry';
-import { intersectRects, unionRects } from '../geometry';
+import { containsRect, intersectRects, unionRects } from '../geometry';
 import type { Command, DocumentChange } from '../history/command';
 import type { LayerId, RasterLayer } from '../layer';
-import { assertNever, createRasterLayer } from '../layer';
+import { assertNever, createRasterLayer, rasterBounds, toLayerSpace } from '../layer';
 import type { PixelBuffer } from '../pixel-buffer';
 import { createPixelBuffer } from '../pixel-buffer';
 import { PixelSnapshot } from '../pixel-snapshot';
 import type { Selection } from '../selection';
+import type { Placement } from './layer-growth';
+import { place, placementOf } from './layer-growth';
 import { mergeArea } from './merge-commands';
 
 /**
@@ -158,12 +159,6 @@ type CommitPlan =
   /** The source grew to take in pixels moved past its edges. */
   | { readonly kind: 'grow'; readonly undo: Placement; readonly redo: Placement };
 
-interface Placement {
-  readonly pixels: PixelBuffer;
-  readonly x: number;
-  readonly y: number;
-}
-
 /**
  * Merges a floating selection back into its source layer and removes the floating
  * layer, in one undo step; undo floats it again.
@@ -228,14 +223,14 @@ function commitInto(
   const raw: RasterLayer = { ...source, ...plain };
   const lifted: RasterLayer = { ...float, ...plain };
   const floatBounds = rasterBounds(float);
-  if (contains(rasterBounds(source), floatBounds)) {
+  if (containsRect(rasterBounds(source), floatBounds)) {
     const rect = toLayerSpace(source, floatBounds);
     const undo = PixelSnapshot.capture(source.pixels, rect);
     putPixels(source.pixels, compositeLayers([raw, lifted], floatBounds), rect.x, rect.y);
     return { kind: 'in-place', undo, redo: PixelSnapshot.capture(source.pixels, rect) };
   }
   const area = mergeArea(doc, raw, lifted);
-  const undo: Placement = { pixels: source.pixels, x: source.x, y: source.y };
+  const undo = placementOf(source);
   const redo: Placement = { pixels: compositeLayers([raw, lifted], area), x: area.x, y: area.y };
   place(source, redo);
   return { kind: 'grow', undo, redo };
@@ -254,12 +249,6 @@ function restoreSource(source: RasterLayer, plan: CommitPlan, side: 'undo' | 're
     default:
       assertNever(plan);
   }
-}
-
-function place(layer: RasterLayer, placement: Placement): void {
-  layer.pixels = placement.pixels;
-  layer.x = placement.x;
-  layer.y = placement.y;
 }
 
 function commitChange(
@@ -298,23 +287,6 @@ function commitChange(
     default:
       return assertNever(plan);
   }
-}
-
-function rasterBounds(layer: RasterLayer): Rect {
-  return { x: layer.x, y: layer.y, width: layer.pixels.width, height: layer.pixels.height };
-}
-
-function toLayerSpace(layer: RasterLayer, area: Rect): Rect {
-  return { ...area, x: area.x - layer.x, y: area.y - layer.y };
-}
-
-function contains(outer: Rect, inner: Rect): boolean {
-  return (
-    inner.x >= outer.x &&
-    inner.y >= outer.y &&
-    inner.x + inner.width <= outer.x + outer.width &&
-    inner.y + inner.height <= outer.y + outer.height
-  );
 }
 
 /** Copies all of `pixels` into `target` with its top-left pixel at (x, y); it must fit. */

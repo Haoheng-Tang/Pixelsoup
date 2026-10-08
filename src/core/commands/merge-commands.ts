@@ -1,11 +1,12 @@
 import { compositeLayers } from '../compositor/composite-layers';
 import type { ImageDocument } from '../document';
-import { MAX_IMAGE_SIZE, documentBounds, findLayerIndex, getLayerIndex } from '../document';
+import { documentBounds, findLayerIndex, getLayerIndex } from '../document';
 import type { Rect } from '../geometry';
-import { intersectRects, unionRects } from '../geometry';
+import { intersectRects } from '../geometry';
 import type { Command, DocumentChange } from '../history/command';
 import type { Layer, LayerId } from '../layer';
 import { assertNever, createRasterLayer, layerBounds } from '../layer';
+import { growthArea } from './layer-growth';
 
 /**
  * Merges a layer into the one below it. The result is the compositor's output for the
@@ -57,8 +58,7 @@ function mergeLayers(doc: ImageDocument, lower: Layer, upper: Layer): Layer {
  * should that exceed the maximum image size.
  */
 export function mergeArea(doc: ImageDocument, lower: Layer, upper: Layer): Rect {
-  const area = unionRects(layerBounds(lower), layerBounds(upper)) ?? documentBounds(doc);
-  return area.width > MAX_IMAGE_SIZE || area.height > MAX_IMAGE_SIZE ? documentBounds(doc) : area;
+  return growthArea(doc, layerBounds(lower), layerBounds(upper));
 }
 
 /**

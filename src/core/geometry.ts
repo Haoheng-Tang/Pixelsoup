@@ -35,6 +35,16 @@ export function unionRects(a: Rect | null, b: Rect | null): Rect | null {
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
+/** True if `inner` lies entirely inside `outer`. */
+export function containsRect(outer: Rect, inner: Rect): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
 /** Expands a (possibly fractional) rect outward to integer pixel boundaries. */
 export function roundRectOut(r: Rect): Rect {
   const x0 = Math.floor(r.x);
