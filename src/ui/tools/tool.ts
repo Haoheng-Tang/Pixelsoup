@@ -10,6 +10,8 @@ export const TOOL_KEYS = {
   marquee: 'M',
   move: 'V',
   brush: 'B',
+  eraser: 'E',
+  eyedropper: 'I',
   lasso: 'L',
   wand: 'W',
   text: 'T',

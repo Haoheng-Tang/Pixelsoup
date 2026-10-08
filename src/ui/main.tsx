@@ -25,7 +25,7 @@ const session = new DocumentSession({
 });
 const controller = new AppController(session);
 const colors = new Colors();
-const tools = createToolManager(editor);
+const tools = createToolManager(editor, colors);
 
 createRoot(container).render(
   <StrictMode>

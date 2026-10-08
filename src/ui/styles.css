@@ -868,3 +868,17 @@ button.danger:hover:not(:disabled) {
 .color-field input[aria-invalid='true'] {
   border-color: var(--invalid);
 }
+
+/* Tool options */
+
+.options-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  white-space: nowrap;
+}
+
+.options-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}

@@ -15,6 +15,7 @@ export * from './commands/selection-commands';
 export * from './commands/stroke-commands';
 export * from './paint/dab';
 export * from './paint/dab-placer';
+export * from './paint/sample-color';
 export * from './floating-selection';
 export * from './editor';
 export * from './blank-document';

@@ -29,6 +29,11 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />
     </svg>
   ),
+  eyedropper: (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8.5 6.5 3 12l-1 2 2-1 5.5-5.5M7 5l4 4M10 6l2.3-2.3a1.6 1.6 0 0 1 2.3 2.3L12.3 8.3" />
+    </svg>
+  ),
 };
 
 /** One button per tool, showing its shortcut key; the active tool is pressed. */
