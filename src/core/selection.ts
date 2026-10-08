@@ -227,6 +227,33 @@ export class Selection {
     return new Selection(this.width, this.height, mask, scanBounds(mask, this.width, all));
   }
 
+  /**
+   * The selection moved by whole pixels. Coverage moved off the canvas is dropped, and
+   * moving back doesn't restore it, so to follow a moving shape translate the original
+   * by the total offset rather than step by step.
+   */
+  translate(dx: number, dy: number): Selection {
+    if (!Number.isInteger(dx) || !Number.isInteger(dy)) {
+      throw new RangeError(`Selections move by whole pixels, not ${dx}, ${dy}`);
+    }
+    const box = this.box;
+    if (!box || (dx === 0 && dy === 0)) return this;
+    const { width, height } = this;
+    const moved = intersectRects(
+      { x: box.x + dx, y: box.y + dy, width: box.width, height: box.height },
+      { x: 0, y: 0, width, height },
+    );
+    if (!moved) return Selection.empty(width, height);
+    const mask = new Uint8ClampedArray(this.mask.length);
+    for (let y = moved.y; y < moved.y + moved.height; y++) {
+      const from = (y - dy) * width + moved.x - dx;
+      mask.set(this.mask.subarray(from, from + moved.width), y * width + moved.x);
+    }
+    // Unclipped, the bounds just move; clipped, the edge rows or columns left may be empty.
+    const clipped = moved.width !== box.width || moved.height !== box.height;
+    return new Selection(width, height, mask, clipped ? scanBounds(mask, width, moved) : moved);
+  }
+
   /** True if both select exactly the same pixels with the same coverage. */
   equals(other: Selection): boolean {
     if (other === this) return true;

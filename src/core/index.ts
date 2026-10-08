@@ -1,5 +1,6 @@
 export * from './geometry';
 export * from './pixel-buffer';
+export * from './pixel-snapshot';
 export * from './layer';
 export * from './selection';
 export * from './selection-outline';
