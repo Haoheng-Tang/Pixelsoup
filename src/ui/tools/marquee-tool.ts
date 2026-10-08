@@ -6,8 +6,8 @@ import type {
   Tool,
   ToolContext,
   ToolKeyEvent,
+  ShapeOverlay,
   ToolModifiers,
-  ToolOverlay,
   ToolPointerEvent,
 } from './tool';
 import { TOOL_KEYS } from './tool';
@@ -94,7 +94,7 @@ export class MarqueeTool implements Tool {
   readonly cursor = 'crosshair';
   private context: ToolContext | null = null;
   private drag: MarqueeDrag | null = null;
-  private preview: ToolOverlay | null = null;
+  private preview: ShapeOverlay | null = null;
 
   constructor(
     readonly shape: MarqueeShape,
@@ -105,7 +105,7 @@ export class MarqueeTool implements Tool {
     this.name = shape === 'rect' ? 'Rectangular Marquee' : 'Elliptical Marquee';
   }
 
-  get overlay(): ToolOverlay | null {
+  get overlay(): ShapeOverlay | null {
     return this.preview;
   }
 
@@ -234,7 +234,7 @@ export class MarqueeTool implements Tool {
 
   private updatePreview(): void {
     const drag = this.drag;
-    const next: ToolOverlay | null = drag?.dragged
+    const next: ShapeOverlay | null = drag?.dragged
       ? { shape: this.shape, rect: this.shapeRect(drag), hidesSelection: drag.mode === 'replace' }
       : null;
     if (next === null && this.preview === null) return;

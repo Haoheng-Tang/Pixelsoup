@@ -3,14 +3,14 @@
 How layers are managed: the active layer, floating selections, the layer commands, and the
 Layer panel, menu and shortcuts. The code lives in `src/core/editor.ts` (active layer, floating
 selection), `src/core/commands` (`layer-commands.ts`, `merge-commands.ts`, `move-commands.ts`,
-`float-commands.ts`), `src/ui/layer-actions.ts` and `src/ui/panels`.
+`float-commands.ts`, `layer-growth.ts`), `src/ui/layer-actions.ts` and `src/ui/panels`.
 
 ## The active layer
 
-- `editor.activeLayerId` names the layer that layer commands, the Move tool and later brushes
-  act on. It's **session state**, as in Photoshop: not part of `ImageDocument`, never saved and
-  never a history step. Changing it doesn't make the document unsaved, and undo doesn't bring
-  back the layer that was active before.
+- `editor.activeLayerId` names the layer that layer commands, the Move tool and the painting
+  tools act on. It's **session state**, as in Photoshop: not part of `ImageDocument`, never
+  saved and never a history step. Changing it doesn't make the document unsaved, and undo
+  doesn't bring back the layer that was active before.
 - While the document has layers it always names one of them; it's null only when there are
   none. `setActiveLayer(id)` changes it and throws for an ID that isn't in the document.
 - `Editor` fixes it up after every command, undo and redo. If the active layer went away it
@@ -52,14 +52,16 @@ would do nothing, like the selection helpers.
 - **Dirty rects**: adding, removing, duplicating or reordering a layer dirties its canvas area,
   and moving it dirties its old and new canvas area. Renaming dirties nothing. Merge and flatten
   dirty the result's canvas area. Lifting dirties the selection's bounds, and committing the
-  floating layer's bounds plus the area of the source it changed.
+  floating layer's bounds plus the area of the source it changed. A brush or eraser stroke
+  dirties the area it painted.
 - **`layerPixels`**: merge and flatten list the result layer in `DocumentChange.layerPixels`,
   both ways, because the layer with that ID has different pixels. **Every command that changes
   a layer's pixels must list it there** (layer space; `rect: null` for the whole layer), or its
   thumbnail won't update. Lifting and committing list the source both ways: lifting with the
   rect it cut (a copy lists nothing), committing with the rect it changed, or `rect: null` if
-  the source grew (a copy committed where it was lifted changes nothing). Moving a layer
-  changes no pixels and lists nothing.
+  the source grew (a copy committed where it was lifted changes nothing). A stroke lists the
+  rect it painted, or `rect: null` if it grew the layer. Moving a layer changes no pixels and
+  lists nothing.
 
 ### Merge down
 
@@ -67,7 +69,8 @@ would do nothing, like the selection helpers.
   blend math), so they look as they did: each layer's opacity is baked into the pixels and the
   result is visible at opacity 1.
 - It keeps the lower layer's ID, name and blend mode, and covers the union of both layers'
-  bounds, or the canvas if the union would exceed 8192 pixels on a side.
+  bounds, or the canvas if the union would exceed 8192 pixels on a side. Committing a floating
+  selection and painting past a layer's edges grow layers the same way (`growthArea`).
 - Merging is refused while either layer is hidden, as in Photoshop, rather than quietly
   dropping the hidden one.
 
@@ -99,8 +102,13 @@ its source, the selection and position as lifted, and a `PixelSnapshot` of the p
   its source with the merge-down blend math, both treated as plain opaque Normal layers, and
   removes it. The source keeps its ID, name, opacity, visibility and blend mode, and grows to
   take in pixels moved past its edges (to the canvas at most, if the union would exceed 8192
-  pixels on a side). Committed where it was lifted, the source gets back exactly the pixels it
-  had, so a lift and a commit without a move change nothing. Undo floats it again.
+  pixels on a side). Committed where it was lifted and not painted, the source gets back
+  exactly the pixels it had, so a lift and a commit without a move change nothing. Undo floats
+  it again.
+- **Painting**: switching from the Move tool commits a floating selection, but undo can float
+  it again with another tool active. The Brush and Eraser then paint the floating layer, within
+  its bounds (it doesn't grow). The first stroke marks it as `edited` (undo clears that again),
+  so that committing it where it was lifted composites it like a moved one and keeps the paint.
 - **What commits it**: Layer → Commit Floating Selection (Ctrl/Cmd+Enter) and Merge Down; New
   Layer and Flatten Image, first; making another layer active (clicking its row, Alt+[ or
   Alt+]); hiding or fading the source; any selection change (a marquee, Select All, Deselect,
@@ -169,8 +177,9 @@ The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts.
   overlap, because the merged pair is rounded before it's composited.
 - **Flatten naming** keeps the bottom visible layer's name; Photoshop names the result
   "Background".
-- **Memory**: merge, flatten and a commit that grows its source keep the replaced layers whole
-  in history; a lift or any other commit keeps only the rect it changed.
+- **Memory**: merge, flatten, and a commit or stroke that grows its layer keep the replaced
+  layers whole in history; a lift, any other commit and any other stroke keep only what they
+  changed (a stroke in 64 px tiles).
 - **Thumbnails** show the layer's own bounds; Photoshop's default shows the whole canvas.
 - **Long lists**: dragging doesn't auto-scroll the layer list.
 - **Floating edges**: until it's committed or moved, a floating selection's partly selected

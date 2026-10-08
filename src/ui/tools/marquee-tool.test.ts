@@ -97,7 +97,7 @@ describe('MarqueeTool', () => {
     select({ x: 0, y: 0, width: 2, height: 2 });
     view.down(4, 4, { shiftKey: true });
     view.move(9, 9);
-    expect(tools.overlay?.hidesSelection).toBe(false);
+    expect(tools.overlay).toMatchObject({ hidesSelection: false });
   });
 
   it('deselects on a click without a drag', () => {
@@ -185,7 +185,7 @@ describe('MarqueeTool', () => {
     view.down(10, 10);
     view.move(4, 8);
     view.keyDown('Shift');
-    expect(view.tools.overlay?.rect).toEqual({ x: 4, y: 4, width: 6, height: 6 });
+    expect(view.tools.overlay).toMatchObject({ rect: { x: 4, y: 4, width: 6, height: 6 } });
     view.up(4, 8);
     expect(doc().selection?.bounds()).toEqual({ x: 4, y: 4, width: 6, height: 6 });
   });
@@ -209,10 +209,10 @@ describe('MarqueeTool', () => {
     select({ x: 0, y: 0, width: 1, height: 1 });
     view.down(2, 2, { shiftKey: true }); // Shift picks "add"
     view.move(10, 4);
-    expect(view.tools.overlay?.rect).toEqual({ x: 2, y: 2, width: 8, height: 2 });
+    expect(view.tools.overlay).toMatchObject({ rect: { x: 2, y: 2, width: 8, height: 2 } });
     view.keyUp('Shift');
     view.keyDown('Shift'); // now Shift constrains
-    expect(view.tools.overlay?.rect).toEqual({ x: 2, y: 2, width: 8, height: 8 });
+    expect(view.tools.overlay).toMatchObject({ rect: { x: 2, y: 2, width: 8, height: 8 } });
     view.up(10, 4);
     const expected = rect({ x: 0, y: 0, width: 1, height: 1 }).union(
       rect({ x: 2, y: 2, width: 8, height: 8 }),

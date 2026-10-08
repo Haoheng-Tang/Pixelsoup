@@ -2,7 +2,12 @@ import type { Editor } from '../../core';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
-import type { ToolKeyEvent, ToolModifiers, ToolPointerEvent } from '../tools/tool';
+import type {
+  ToolKeyEvent,
+  ToolModifiers,
+  ToolPointerEvent,
+  ToolPointerSample,
+} from '../tools/tool';
 import type { ToolManager } from '../tools/tool-manager';
 import type { DocumentPlacement } from './selection-overlay';
 import { ANT_STEP_MS, SelectionOverlay } from './selection-overlay';
@@ -56,6 +61,18 @@ function toolKeyEvent(e: KeyboardEvent): ToolKeyEvent {
   return { key: e.key, code: e.code, repeat: e.repeat, ...modifiersOf(e) };
 }
 
+/** Pen pressure; mice report a fixed 0.5 while pressed, and touch pressure is unreliable. */
+function penPressure(e: PointerEvent): number | undefined {
+  return e.pointerType === 'pen' ? e.pressure : undefined;
+}
+
+/** The positions a pointer move passed through, oldest first, where the browser reports them. */
+function coalescedEvents(e: PointerEvent): readonly PointerEvent[] {
+  // Only in secure contexts, so it may be missing despite the type.
+  if (e.type !== 'pointermove' || typeof e.getCoalescedEvents !== 'function') return [];
+  return e.getCoalescedEvents();
+}
+
 /**
  * Imperative canvas viewport: draws the document composite over a checkerboard, the
  * selection's marching ants and the active tool's preview on an overlay canvas above it,
@@ -88,6 +105,7 @@ export class ViewportController {
   private checker: CanvasPattern | null = null;
   private checkerDpr = 0;
   private status: ViewportStatus = { pointer: null, selectionSize: null };
+  private cursor = '';
 
   private spaceHeld = false;
   private pointerInside = false;
@@ -138,8 +156,13 @@ export class ViewportController {
         this.renderer.update(this.editor.document, [change.dirty]);
         this.invalidate();
       }),
-      tools.subscribe(() => this.updateCursor()),
+      tools.subscribe(() => {
+        this.updateCursor();
+        // The new tool doesn't know where the pointer is yet, e.g. to show a brush outline.
+        this.resendPointer();
+      }),
       tools.subscribeOverlay(() => {
+        this.updateCursor();
         this.invalidateOverlay();
         this.emitStatus();
       }),
@@ -154,7 +177,7 @@ export class ViewportController {
     this.listen(this.canvas, 'pointermove', this.handlePointerMove);
     this.listen(this.canvas, 'pointerup', this.handlePointerUp);
     this.listen(this.canvas, 'pointercancel', this.handlePointerCancel);
-    this.listen(this.canvas, 'pointerenter', () => (this.pointerInside = true));
+    this.listen(this.canvas, 'pointerenter', this.handlePointerEnter);
     this.listen(this.canvas, 'pointerleave', this.handlePointerLeave);
     // Stop the browser's middle-click autoscroll.
     this.listen(this.canvas, 'mousedown', (e) => {
@@ -234,9 +257,7 @@ export class ViewportController {
     this.invalidate();
     if (zoomChanged) for (const listener of this.zoomListeners) listener(view.zoom);
     // The document moved under the pointer: tell the tool where the pointer is now.
-    if (this.toolPointerId !== null && this.pointer) {
-      this.tools.pointerMove(this.toolEvent(this.pointer));
-    }
+    this.resendPointer();
     this.emitStatus();
   }
 
@@ -268,7 +289,16 @@ export class ViewportController {
   };
 
   private hasAnts(): boolean {
-    return this.editor.document.selection !== null || this.tools.overlay !== null;
+    const overlay = this.tools.overlay;
+    return (
+      this.editor.document.selection !== null || (overlay !== null && overlay.shape !== 'brush')
+    );
+  }
+
+  /** A brush outline follows the pointer over the canvas, but not while panning. */
+  private showsBrush(): boolean {
+    const gesture = this.toolPointerId !== null;
+    return (this.pointerInside || gesture) && !this.drag && (gesture || !this.spaceHeld);
   }
 
   private handleResize(): void {
@@ -302,9 +332,10 @@ export class ViewportController {
   private renderOverlay(phase: number): void {
     this.overlayDirty = false;
     this.antPhase = phase;
+    const overlay = this.tools.overlay;
     this.overlay.draw(
       this.editor.document.selection,
-      this.tools.overlay,
+      overlay?.shape === 'brush' && !this.showsBrush() ? null : overlay,
       this.placement,
       this.dpr,
       phase,
@@ -391,10 +422,11 @@ export class ViewportController {
         startView: this.view,
       };
       this.updateCursor();
+      this.invalidateOverlay();
       return;
     }
     this.toolPointerId = e.pointerId;
-    this.tools.pointerDown(this.toolEvent(e));
+    this.tools.pointerDown(this.toolEvent(e, e));
   };
 
   private readonly handlePointerMove = (e: PointerEvent): void => {
@@ -412,7 +444,7 @@ export class ViewportController {
     if (this.toolPointerId !== null && e.pointerId !== this.toolPointerId) return;
     this.trackPointer(e);
     // Moves with no button down (hover) go to the tool too.
-    this.tools.pointerMove(this.toolEvent(e));
+    this.tools.pointerMove(this.toolEvent(e, e));
   };
 
   private readonly handlePointerUp = (e: PointerEvent): void => {
@@ -421,13 +453,14 @@ export class ViewportController {
       this.drag = null;
       this.releasePointer(e.pointerId);
       this.updateCursor();
+      this.invalidateOverlay();
       return;
     }
     if (e.pointerId !== this.toolPointerId) return;
     this.toolPointerId = null;
     this.releasePointer(e.pointerId);
     this.trackPointer(e);
-    this.tools.pointerUp(this.toolEvent(e));
+    this.tools.pointerUp(this.toolEvent(e, e));
     this.updateCursor();
     if (!this.pointerInside) this.forgetPointer();
   };
@@ -436,13 +469,20 @@ export class ViewportController {
     if (this.drag?.pointerId === e.pointerId) {
       this.drag = null;
       this.updateCursor();
+      this.invalidateOverlay();
     } else if (e.pointerId === this.toolPointerId) {
       this.cancelToolGesture();
     }
   };
 
+  private readonly handlePointerEnter = (): void => {
+    this.pointerInside = true;
+    this.invalidateOverlay();
+  };
+
   private readonly handlePointerLeave = (): void => {
     this.pointerInside = false;
+    this.invalidateOverlay();
     if (!this.drag && this.toolPointerId === null) this.forgetPointer();
   };
 
@@ -470,14 +510,44 @@ export class ViewportController {
     this.emitStatus();
   }
 
-  private toolEvent(point: ClientPoint): ToolPointerEvent {
-    const [x, y] = this.documentPoint(point);
-    return { x, y, zoom: this.view.zoom, ...this.modifiers };
+  /**
+   * The tool's view of a pointer at `point`. Given the browser event, adds pen pressure and,
+   * for moves, the coalesced positions the pointer passed through since the last event.
+   */
+  private toolEvent(point: ClientPoint, e?: PointerEvent): ToolPointerEvent {
+    const bounds = this.canvas.getBoundingClientRect();
+    const [x, y] = this.documentPoint(point, bounds);
+    const event: ToolPointerEvent = { x, y, zoom: this.view.zoom, ...this.modifiers };
+    if (!e) return event;
+    const pressure = penPressure(e);
+    const coalesced = coalescedEvents(e);
+    return {
+      ...event,
+      ...(pressure === undefined ? {} : { pressure }),
+      ...(coalesced.length > 1 ? { samples: coalesced.map((c) => this.sample(c, bounds)) } : {}),
+    };
   }
 
-  private documentPoint(point: ClientPoint): [number, number] {
-    const bounds = this.canvas.getBoundingClientRect();
+  private sample(e: PointerEvent, bounds: DOMRect): ToolPointerSample {
+    const [x, y] = this.documentPoint(e, bounds);
+    const pressure = penPressure(e);
+    return pressure === undefined ? { x, y } : { x, y, pressure };
+  }
+
+  private documentPoint(
+    point: ClientPoint,
+    bounds = this.canvas.getBoundingClientRect(),
+  ): [number, number] {
     return screenToDocument(this.view, point.clientX - bounds.left, point.clientY - bounds.top);
+  }
+
+  /**
+   * Tells the tool where the pointer is after the document moved under it (pan or zoom) or
+   * the tool changed. Only while the pointer is over the canvas or in a gesture.
+   */
+  private resendPointer(): void {
+    if (!this.pointer || (this.toolPointerId === null && !this.pointerInside)) return;
+    this.tools.pointerMove(this.toolEvent(this.pointer));
   }
 
   /** Keys go to the tool while the user is working on the canvas. */
@@ -517,12 +587,15 @@ export class ViewportController {
     if (this.spaceHeld === held) return;
     this.spaceHeld = held;
     this.updateCursor();
+    this.invalidateOverlay();
   }
 
   private updateCursor(): void {
     let cursor = this.tools.activeTool.cursor;
     if (this.drag) cursor = 'grabbing';
     else if (this.spaceHeld && this.toolPointerId === null) cursor = 'grab';
+    if (cursor === this.cursor) return;
+    this.cursor = cursor;
     this.canvas.style.cursor = cursor;
   }
 
@@ -532,7 +605,9 @@ export class ViewportController {
       const [x, y] = this.documentPoint(this.pointer);
       pointer = { x: Math.floor(x), y: Math.floor(y) };
     }
-    const area = this.tools.overlay?.rect ?? this.editor.document.selection?.bounds() ?? null;
+    const overlay = this.tools.overlay;
+    const shape = overlay && overlay.shape !== 'brush' ? overlay.rect : null;
+    const area = shape ?? this.editor.document.selection?.bounds() ?? null;
     const selectionSize = area ? { width: area.width, height: area.height } : null;
     return { pointer, selectionSize };
   }

@@ -10,9 +10,9 @@ import {
   SetLayerVisibilityCommand,
   SetSelectionCommand,
 } from '../../core';
+import { FakeClock } from './fake-clock';
 import { FakeViewport } from './fake-viewport';
 import { MarqueeTool } from './marquee-tool';
-import type { MoveToolClock } from './move-tool';
 import { MoveTool } from './move-tool';
 import { SelectionOptions } from './selection-options';
 import { ToolManager } from './tool-manager';
@@ -20,37 +20,6 @@ import { ToolManager } from './tool-manager';
 const W = 8;
 const H = 6;
 const CLEAR = [0, 0, 0, 0];
-
-/** Runs animation frames and tells the time only when a test says so. */
-class FakeClock implements MoveToolClock {
-  time = 0;
-  private readonly frames = new Map<number, () => void>();
-  private nextHandle = 1;
-
-  get pendingFrames(): number {
-    return this.frames.size;
-  }
-
-  requestFrame(callback: () => void): number {
-    const handle = this.nextHandle++;
-    this.frames.set(handle, callback);
-    return handle;
-  }
-
-  cancelFrame(handle: number): void {
-    this.frames.delete(handle);
-  }
-
-  now(): number {
-    return this.time;
-  }
-
-  runFrame(): void {
-    const callbacks = [...this.frames.values()];
-    this.frames.clear();
-    for (const callback of callbacks) callback();
-  }
-}
 
 /** The photo's pixel at (px, py) in layer space: opaque, and different for every pixel. */
 function photoPixel(px: number, py: number): Rgba {

@@ -99,10 +99,20 @@ export function clampOpacity(value: number): number {
 export function layerBounds(layer: Layer): Rect | null {
   switch (layer.kind) {
     case 'raster':
-      return { x: layer.x, y: layer.y, width: layer.pixels.width, height: layer.pixels.height };
+      return rasterBounds(layer);
     default:
       return assertNever(layer.kind);
   }
+}
+
+/** Canvas-space area of a raster layer's pixels. */
+export function rasterBounds(layer: RasterLayer): Rect {
+  return { x: layer.x, y: layer.y, width: layer.pixels.width, height: layer.pixels.height };
+}
+
+/** A canvas-space rect in the raster layer's own pixel coordinates. */
+export function toLayerSpace(layer: RasterLayer, area: Rect): Rect {
+  return { ...area, x: area.x - layer.x, y: area.y - layer.y };
 }
 
 export function assertNever(value: never): never {

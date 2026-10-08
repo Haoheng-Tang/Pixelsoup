@@ -1,4 +1,6 @@
 import type { Editor } from '../../core';
+import { ColorSwatches } from '../color/ColorSwatches';
+import type { Colors } from '../color/colors';
 import type { AppController } from '../session/app-controller';
 import type { ToolManager } from '../tools/tool-manager';
 import { useRevision } from '../use-revision';
@@ -14,10 +16,11 @@ interface ToolbarProps {
   editor: Editor;
   controller: AppController;
   tools: ToolManager;
+  colors: Colors;
   viewport: ViewportController | null;
 }
 
-export function Toolbar({ editor, controller, tools, viewport }: ToolbarProps) {
+export function Toolbar({ editor, controller, tools, colors, viewport }: ToolbarProps) {
   useEditorRevision(editor);
   useRevision(controller);
   useRevision(controller.session);
@@ -32,6 +35,7 @@ export function Toolbar({ editor, controller, tools, viewport }: ToolbarProps) {
       <SelectMenu editor={editor} blocked={blocked} />
       <LayerMenu editor={editor} blocked={blocked} />
       <ToolPicker tools={tools} />
+      <ColorSwatches colors={colors} />
       <div className="toolbar-group" role="group" aria-label="History">
         <button
           type="button"

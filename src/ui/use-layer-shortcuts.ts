@@ -4,7 +4,7 @@ import { isTextEntry } from './dom';
 import type { LayerAction } from './layer-actions';
 import { runLayerAction } from './layer-actions';
 
-type ShortcutKeys = Pick<
+export type ShortcutKeys = Pick<
   KeyboardEvent,
   'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'
 >;
@@ -48,7 +48,8 @@ export function layerActionFor(e: ShortcutKeys): LayerAction | null {
   }
 }
 
-function bracketOf(e: ShortcutKeys): '[' | ']' | null {
+/** The bracket key pressed, by key position or by character. */
+export function bracketOf(e: Pick<KeyboardEvent, 'key' | 'code'>): '[' | ']' | null {
   if (e.code === 'BracketLeft' || e.key === '[') return '[';
   if (e.code === 'BracketRight' || e.key === ']') return ']';
   return null;

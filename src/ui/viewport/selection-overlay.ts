@@ -1,6 +1,6 @@
 import type { Selection, SelectionOutline } from '../../core';
 import { traceSelectionOutline } from '../../core';
-import type { ToolOverlay } from '../tools/tool';
+import type { BrushOverlay, ShapeOverlay, ToolOverlay } from '../tools/tool';
 
 /** Where the document sits on the canvas, in device pixels: device = origin + doc × scale. */
 export interface DocumentPlacement {
@@ -14,6 +14,14 @@ export interface DocumentPlacement {
 const DASH = 4;
 /** The ants advance one CSS pixel per step. */
 export const ANT_STEP_MS = 60;
+/** Brushes narrower than this on screen, in CSS pixels, show a crosshair instead. */
+const MIN_BRUSH_OUTLINE = 4;
+/** The crosshair's arms run from this far from its centre, in CSS pixels… */
+const CROSSHAIR_GAP = 2;
+/** …to this far. */
+const CROSSHAIR_ARM = 7;
+/** The dark halo that keeps cursors visible on light pixels, in line widths. */
+const HALO_WIDTH = 3;
 
 /** A Path2D in document coordinates tracing every loop of `outline`. */
 export function outlinePath(outline: SelectionOutline): Path2D {
@@ -26,7 +34,7 @@ export function outlinePath(outline: SelectionOutline): Path2D {
   return path;
 }
 
-function previewPath({ shape, rect }: ToolOverlay): Path2D {
+function previewPath({ shape, rect }: ShapeOverlay): Path2D {
   const path = new Path2D();
   if (shape === 'rect') {
     path.rect(rect.x, rect.y, rect.width, rect.height);
@@ -39,8 +47,8 @@ function previewPath({ shape, rect }: ToolOverlay): Path2D {
 }
 
 /**
- * Draws the selection's marching ants, and any shape the active tool is previewing, on
- * a transparent canvas stacked above the composite.
+ * Draws the selection's marching ants, any shape the active tool is previewing, and a
+ * painting tool's brush outline, on a transparent canvas stacked above the composite.
  *
  * The selection outline is traced into a Path2D in document coordinates once per
  * selection; each frame only re-strokes it through the current pan/zoom transform with
@@ -51,6 +59,9 @@ export class SelectionOverlay {
   private readonly context: CanvasRenderingContext2D;
   private pathSelection: Selection | null = null;
   private path: Path2D | null = null;
+  /** Brush outline colours, from the `--cursor-line` and `--cursor-halo` tokens. */
+  private readonly cursorLine: string;
+  private readonly cursorHalo: string;
 
   constructor(container: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -60,6 +71,9 @@ export class SelectionOverlay {
     if (!context) throw new Error('Canvas 2D is not available');
     this.context = context;
     container.appendChild(this.canvas);
+    const style = getComputedStyle(container);
+    this.cursorLine = style.getPropertyValue('--cursor-line').trim() || '#fff';
+    this.cursorHalo = style.getPropertyValue('--cursor-halo').trim() || 'rgb(0 0 0 / 55%)';
   }
 
   /** Matches the main canvas's backing size in device pixels. */
@@ -102,9 +116,11 @@ export class SelectionOverlay {
     const dash = (DASH * dpr) / scale;
     const offset = (-(phase % (2 * DASH)) * dpr) / scale;
 
-    if (selection && !preview?.hidesSelection)
-      this.strokeAnts(this.outline(selection), dash, offset);
-    if (preview) this.strokeAnts(previewPath(preview), dash, offset);
+    const brush = preview?.shape === 'brush' ? preview : null;
+    const shape = preview?.shape === 'brush' ? null : preview;
+    if (selection && !shape?.hidesSelection) this.strokeAnts(this.outline(selection), dash, offset);
+    if (shape) this.strokeAnts(previewPath(shape), dash, offset);
+    if (brush) this.drawBrush(brush, placement, dpr, lineWidth, nudge);
   }
 
   private outline(selection: Selection): Path2D {
@@ -128,6 +144,51 @@ export class SelectionOverlay {
     ctx.setLineDash([dash, dash]);
     ctx.lineDashOffset = offset;
     ctx.strokeStyle = '#000000';
+    ctx.stroke(path);
+  }
+
+  /**
+   * The brush's outline at its size in document pixels, so it scales with the zoom; or a
+   * crosshair when the brush would be too small on screen to see. Drawn in device pixels.
+   */
+  private drawBrush(
+    brush: BrushOverlay,
+    placement: DocumentPlacement,
+    dpr: number,
+    lineWidth: number,
+    nudge: number,
+  ): void {
+    const ctx = this.context;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setLineDash([]);
+    const x = placement.x + brush.x * placement.scaleX;
+    const y = placement.y + brush.y * placement.scaleY;
+    const rx = (brush.diameter * placement.scaleX) / 2;
+    const ry = (brush.diameter * placement.scaleY) / 2;
+    const path = new Path2D();
+    if (2 * Math.max(rx, ry) >= MIN_BRUSH_OUTLINE * dpr) {
+      path.ellipse(x, y, rx, ry, 0, 0, 2 * Math.PI);
+    } else {
+      // On the device pixel grid, so that the lines stay crisp.
+      const cx = Math.round(x) + nudge;
+      const cy = Math.round(y) + nudge;
+      const gap = Math.round(CROSSHAIR_GAP * dpr);
+      const arm = Math.round(CROSSHAIR_ARM * dpr);
+      for (const [dx, dy] of [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+      ] as const) {
+        path.moveTo(cx + dx * gap, cy + dy * gap);
+        path.lineTo(cx + dx * arm, cy + dy * arm);
+      }
+    }
+    ctx.lineWidth = lineWidth * HALO_WIDTH;
+    ctx.strokeStyle = this.cursorHalo;
+    ctx.stroke(path);
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = this.cursorLine;
     ctx.stroke(path);
   }
 }

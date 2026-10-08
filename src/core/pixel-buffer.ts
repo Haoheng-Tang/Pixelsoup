@@ -4,6 +4,9 @@ import { intersectRects } from './geometry';
 /** 8-bit sRGB color with straight (non-premultiplied) alpha, each channel 0–255. */
 export type Rgba = readonly [r: number, g: number, b: number, a: number];
 
+/** Opaque 8-bit sRGB color, each channel 0–255. */
+export type Rgb = readonly [r: number, g: number, b: number];
+
 export const TRANSPARENT: Rgba = [0, 0, 0, 0];
 
 /**

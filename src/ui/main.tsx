@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DEFAULT_NEW_DOCUMENT, Editor, createBlankDocument } from '../core';
 import { App } from './App';
+import { Colors } from './color/colors';
 import { encodeImage } from './io/export-image';
 import { createFileStore } from './io/file-store';
 import { decodeImageFile } from './io/image-decode';
@@ -23,10 +24,11 @@ const session = new DocumentSession({
   encodeImage,
 });
 const controller = new AppController(session);
-const tools = createToolManager(editor);
+const colors = new Colors();
+const tools = createToolManager(editor, colors);
 
 createRoot(container).render(
   <StrictMode>
-    <App editor={editor} controller={controller} tools={tools} />
+    <App editor={editor} controller={controller} tools={tools} colors={colors} />
   </StrictMode>,
 );

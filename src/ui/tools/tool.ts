@@ -10,6 +10,8 @@ export const TOOL_KEYS = {
   marquee: 'M',
   move: 'V',
   brush: 'B',
+  eraser: 'E',
+  eyedropper: 'I',
   lasso: 'L',
   wand: 'W',
   text: 'T',
@@ -25,6 +27,14 @@ export interface ToolModifiers {
   readonly metaKey: boolean;
 }
 
+/** A position the pointer passed through, in document space. */
+export interface ToolPointerSample {
+  readonly x: number;
+  readonly y: number;
+  /** Pen pressure, 0–1. Absent for mice and touch. */
+  readonly pressure?: number;
+}
+
 /** A pointer event mapped into document space. */
 export interface ToolPointerEvent extends ToolModifiers {
   /**
@@ -35,6 +45,13 @@ export interface ToolPointerEvent extends ToolModifiers {
   readonly y: number;
   /** CSS pixels per document pixel, for thresholds measured on screen. */
   readonly zoom: number;
+  /** Pen pressure, 0–1. Absent for mice and touch. */
+  readonly pressure?: number;
+  /**
+   * Every position a move passed through since the previous event, oldest first and
+   * ending at (x, y), when the browser reported more than one (coalesced events).
+   */
+  readonly samples?: readonly ToolPointerSample[];
 }
 
 export interface ToolKeyEvent extends ToolModifiers {
@@ -43,22 +60,42 @@ export interface ToolKeyEvent extends ToolModifiers {
   readonly repeat: boolean;
 }
 
-/**
- * A shape the viewport draws over the document for the active tool, such as a marquee
- * being dragged. Plain data in document coordinates, so tools stay free of canvas APIs.
- */
-export interface ToolOverlay {
+/** A marquee shape being dragged, drawn as marching ants. */
+export interface ShapeOverlay {
   readonly shape: 'rect' | 'ellipse';
   readonly rect: Rect;
   /** Hide the current selection's outline while this shape is shown (it will replace it). */
   readonly hidesSelection?: boolean;
 }
 
+/**
+ * A painting tool's outline: a circle `diameter` pixels across, centred on (x, y). The
+ * viewport shows it, or a crosshair when it would be tiny on screen, only while the
+ * pointer is over the canvas.
+ */
+export interface BrushOverlay {
+  readonly shape: 'brush';
+  readonly x: number;
+  readonly y: number;
+  readonly diameter: number;
+}
+
+/**
+ * What the viewport draws over the document for the active tool. Plain data in document
+ * coordinates, so tools stay free of canvas APIs.
+ */
+export type ToolOverlay = ShapeOverlay | BrushOverlay;
+
+/** What `[` and `]` step: a brush's size, or with Shift its hardness. */
+export type BrushProperty = 'size' | 'hardness';
+
 /** What a tool gets from the `ToolManager` when it becomes active. */
 export interface ToolContext {
   readonly editor: Editor;
-  /** Call whenever `overlay` changes so the viewport redraws it. */
+  /** Call whenever `overlay` or `cursor` changes so the viewport redraws them. */
   overlayChanged(): void;
+  /** Shows `text` briefly in the status bar, e.g. a brush size changed from the keyboard. */
+  showMessage(text: string): void;
 }
 
 /**
@@ -76,7 +113,7 @@ export interface Tool {
   /** Display name, e.g. 'Rectangular Marquee'. */
   readonly name: string;
   readonly shortcut: ToolKey;
-  /** CSS cursor over the canvas while this tool is active. */
+  /** CSS cursor over the canvas while this tool is active. Report changes via `overlayChanged`. */
   readonly cursor: string;
   /** Settings shown in the tool-options bar while this tool is active. */
   readonly OptionsPanel?: ComponentType | undefined;
@@ -100,4 +137,7 @@ export interface Tool {
   /** Return true if the key was used, so the viewport suppresses its default action. */
   keyDown?(event: ToolKeyEvent): boolean;
   keyUp?(event: ToolKeyEvent): boolean;
+
+  /** Painting tools: `[` / `]` (with Shift, hardness) step the brush down or up. */
+  stepBrush?(property: BrushProperty, direction: -1 | 1): void;
 }

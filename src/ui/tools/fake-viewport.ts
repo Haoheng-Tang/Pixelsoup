@@ -1,8 +1,19 @@
-import type { ToolModifiers } from './tool';
+import type { ToolModifiers, ToolPointerEvent, ToolPointerSample } from './tool';
 import type { ToolManager } from './tool-manager';
 
 /** For tests: modifier keys to hold, on top of those already held. */
 export type Modifiers = Partial<ToolModifiers>;
+
+/** For tests: what a pointer event carries besides its position and modifiers. */
+export interface PointerExtras {
+  /** Pen pressure, 0–1; leave out for a mouse. */
+  readonly pressure?: number;
+  /**
+   * Screen positions a move passed through before this one, oldest first, reported
+   * together with it as coalesced samples.
+   */
+  readonly via?: readonly (readonly [number, number])[];
+}
 
 export const NO_MODIFIERS: Required<ToolModifiers> = {
   shiftKey: false,
@@ -31,19 +42,19 @@ export class FakeViewport {
 
   constructor(readonly tools: ToolManager) {}
 
-  down(sx: number, sy: number, mods: Modifiers = {}): void {
+  down(sx: number, sy: number, mods: Modifiers = {}, extras: PointerExtras = {}): void {
     this.held = { ...this.held, ...mods };
-    this.tools.pointerDown(this.event(sx, sy));
+    this.tools.pointerDown(this.event(sx, sy, extras));
   }
 
-  move(sx: number, sy: number, mods: Modifiers = {}): void {
+  move(sx: number, sy: number, mods: Modifiers = {}, extras: PointerExtras = {}): void {
     this.held = { ...this.held, ...mods };
-    this.tools.pointerMove(this.event(sx, sy));
+    this.tools.pointerMove(this.event(sx, sy, extras));
   }
 
-  up(sx: number, sy: number, mods: Modifiers = {}): void {
+  up(sx: number, sy: number, mods: Modifiers = {}, extras: PointerExtras = {}): void {
     this.held = { ...this.held, ...mods };
-    this.tools.pointerUp(this.event(sx, sy));
+    this.tools.pointerUp(this.event(sx, sy, extras));
   }
 
   /** Press, move to the end point, release, with the same modifiers throughout. */
@@ -70,12 +81,18 @@ export class FakeViewport {
     return this.tools.keyUp({ key, code: key, repeat: false, ...this.held, ...mods });
   }
 
-  private event(sx: number, sy: number) {
+  private event(sx: number, sy: number, { pressure, via }: PointerExtras): ToolPointerEvent {
+    const sample = (x: number, y: number): ToolPointerSample => ({
+      x: (x - this.panX) / this.zoom,
+      y: (y - this.panY) / this.zoom,
+      ...(pressure === undefined ? {} : { pressure }),
+    });
+    const samples = via && [...via, [sx, sy] as const].map(([x, y]) => sample(x, y));
     return {
-      x: (sx - this.panX) / this.zoom,
-      y: (sy - this.panY) / this.zoom,
+      ...sample(sx, sy),
       zoom: this.zoom,
       ...this.held,
+      ...(samples ? { samples } : {}),
     };
   }
 }
