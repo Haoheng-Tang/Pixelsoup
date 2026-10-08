@@ -20,7 +20,19 @@ export type LayerAction =
   | 'move-up'
   | 'move-down'
   | 'select-above'
-  | 'select-below';
+  | 'select-below'
+  | 'commit-floating';
+
+/**
+ * Actions a floating selection's layer can't take: they would take it away from its
+ * source layer, or leave a copy that floats in place of the real thing.
+ */
+const NOT_WHILE_FLOATING: ReadonlySet<LayerAction> = new Set([
+  'duplicate',
+  'delete',
+  'move-up',
+  'move-down',
+]);
 
 /**
  * Whether `action` would do anything now, for enabling buttons and menu items. Mirrors
@@ -29,6 +41,12 @@ export type LayerAction =
 export function canRunLayerAction(editor: Editor, action: LayerAction): boolean {
   const doc = editor.document;
   const id = editor.activeLayerId;
+  if (action === 'commit-floating') return editor.floating !== null;
+  if (editor.floating) {
+    if (NOT_WHILE_FLOATING.has(action)) return false;
+    // Merging a floating selection down commits it.
+    if (action === 'merge-down') return true;
+  }
   if (action === 'new') return true;
   if (action === 'flatten') return flattenCommand(doc) !== null;
   const index = id === null ? -1 : findLayerIndex(doc, id);
@@ -51,8 +69,22 @@ export function canRunLayerAction(editor: Editor, action: LayerAction): boolean 
   }
 }
 
-/** Runs `action` if it can run. New layers and copies become the active layer. */
+/**
+ * Runs `action` if it can run. New layers and copies become the active layer. A floating
+ * selection is committed by merging it down, and first by adding a layer or flattening.
+ */
 export function runLayerAction(editor: Editor, action: LayerAction): void {
+  if (action === 'commit-floating') {
+    editor.commitFloating();
+    return;
+  }
+  if (editor.floating) {
+    if (NOT_WHILE_FLOATING.has(action)) return;
+    if (action === 'merge-down' || action === 'new' || action === 'flatten') {
+      editor.commitFloating();
+      if (action === 'merge-down') return;
+    }
+  }
   const doc = editor.document;
   const id = editor.activeLayerId;
   if (action === 'new') {

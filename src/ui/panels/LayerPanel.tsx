@@ -46,6 +46,7 @@ export function LayerPanel({ editor, blocked }: LayerPanelProps) {
 
   // Top of the stack first, like most editors.
   const layers = [...editor.document.layers].reverse();
+  const floatingId = editor.floating?.layerId ?? null;
 
   // A press activates the row's layer; moving the pointer far enough then drags the row.
   // Window listeners follow the pointer; the row captures it only once a drag starts, so
@@ -54,6 +55,8 @@ export function LayerPanel({ editor, blocked }: LayerPanelProps) {
     if (e.button !== 0 || (e.target instanceof Element && e.target.closest(ROW_CONTROL))) return;
     activate(editor, layerId);
     endDrag.current?.();
+    // A floating selection stays directly above the layer it came from.
+    if (layerId === editor.floating?.layerId) return;
 
     const row = e.currentTarget;
     const { pointerId } = e;
@@ -137,6 +140,7 @@ export function LayerPanel({ editor, blocked }: LayerPanelProps) {
             thumbnails={thumbnails}
             layer={layer}
             active={layer.id === editor.activeLayerId}
+            floating={layer.id === floatingId}
             dragging={drag?.layerId === layer.id}
             dropEdge={dropEdgeAt(drag, row, layers.length)}
             onPointerDown={(e) => onRowPointerDown(e, layer.id)}
@@ -153,6 +157,11 @@ interface LayerRowProps {
   thumbnails: LayerThumbnails;
   layer: Layer;
   active: boolean;
+  /**
+   * The layer holds a floating selection: it can't be renamed, reordered, hidden or faded
+   * until it's committed.
+   */
+  floating: boolean;
   dragging: boolean;
   /** Where to show the drop indicator: above this row, below it (last row only), or not. */
   dropEdge: 'before' | 'after' | null;
@@ -164,6 +173,7 @@ function LayerRow({
   thumbnails,
   layer,
   active,
+  floating,
   dragging,
   dropEdge,
   onPointerDown,
@@ -195,7 +205,7 @@ function LayerRow({
   };
 
   const onNameKeyDown = (e: ReactKeyboardEvent) => {
-    if (e.key !== 'F2') return;
+    if (e.key !== 'F2' || floating) return;
     e.preventDefault();
     setRenaming(true);
   };
@@ -214,6 +224,7 @@ function LayerRow({
   const className = [
     'layer',
     active && 'is-active',
+    floating && 'is-floating',
     !layer.visible && 'is-hidden',
     dragging && 'is-dragging',
     dropEdge && `drop-${dropEdge}`,
@@ -235,6 +246,7 @@ function LayerRow({
         aria-pressed={layer.visible}
         aria-label={`${layer.visible ? 'Hide' : 'Show'} ${layer.name}`}
         title={layer.visible ? 'Hide layer' : 'Show layer'}
+        disabled={floating}
         onClick={toggleVisibility}
       >
         <EyeIcon open={layer.visible} />
@@ -250,9 +262,13 @@ function LayerRow({
             ref={nameButton}
             type="button"
             className="layer-name"
-            title={`${layer.name} (double-click or F2 to rename)`}
+            title={
+              floating
+                ? `${layer.name}: commit it with ${formatShortcut('Enter')}`
+                : `${layer.name} (double-click or F2 to rename)`
+            }
             onClick={() => activate(editor, layer.id)}
-            onDoubleClick={() => setRenaming(true)}
+            onDoubleClick={() => setRenaming(!floating)}
             onKeyDown={onNameKeyDown}
           >
             {layer.name}
@@ -267,6 +283,7 @@ function LayerRow({
             max={100}
             step={1}
             value={percent}
+            disabled={floating}
             onPointerDown={() => gesture.current++}
             onKeyDown={() => gesture.current++}
             onChange={(e) => changeOpacity(Number(e.currentTarget.value))}

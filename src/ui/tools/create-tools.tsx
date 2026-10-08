@@ -1,5 +1,7 @@
 import type { Editor } from '../../core';
 import { MarqueeTool } from './marquee-tool';
+import { MoveOptionsPanel } from './MoveOptionsPanel';
+import { MoveTool } from './move-tool';
 import { SelectionOptions } from './selection-options';
 import { SelectionOptionsPanel } from './SelectionOptionsPanel';
 import { ToolManager } from './tool-manager';
@@ -14,6 +16,7 @@ export function createToolManager(editor: Editor): ToolManager {
     [
       new MarqueeTool('rect', selectionOptions, SelectionToolOptions),
       new MarqueeTool('ellipse', selectionOptions, SelectionToolOptions),
+      new MoveTool(MoveOptionsPanel),
     ],
     editor,
   );

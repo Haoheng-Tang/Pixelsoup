@@ -28,6 +28,8 @@ describe('layerActionFor', () => {
     expect(press('e', 'KeyE', { metaKey: true })).toBe('merge-down');
     expect(press('[', 'BracketLeft', { ctrlKey: true })).toBe('move-down');
     expect(press(']', 'BracketRight', { metaKey: true })).toBe('move-up');
+    expect(press('Enter', 'Enter', { ctrlKey: true })).toBe('commit-floating');
+    expect(press('Enter', 'NumpadEnter', { metaKey: true })).toBe('commit-floating');
   });
 
   it('maps Alt+brackets by key position, since Option+[ types a quote on a Mac', () => {
@@ -45,5 +47,7 @@ describe('layerActionFor', () => {
     expect(press('{', 'BracketLeft', { altKey: true, shiftKey: true })).toBeNull();
     expect(press('[', 'BracketLeft')).toBeNull();
     expect(press('j', 'KeyJ')).toBeNull();
+    expect(press('Enter', 'Enter')).toBeNull();
+    expect(press('Enter', 'Enter', { ctrlKey: true, shiftKey: true })).toBeNull();
   });
 });

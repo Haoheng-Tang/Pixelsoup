@@ -31,6 +31,7 @@ export function LayerMenu({ editor, blocked }: LayerMenuProps) {
     ],
     [item('move-up', 'Move Layer Up', ']'), item('move-down', 'Move Layer Down', '[')],
     [item('merge-down', 'Merge Down', 'E'), item('flatten', 'Flatten Image')],
+    [item('commit-floating', 'Commit Floating Selection', 'Enter')],
   ];
   return (
     <MenuButton

@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { ImageDocument } from '../core';
 import {
   Editor,
+  FLOATING_LAYER_NAME,
+  Selection,
+  SetSelectionCommand,
   createBlankDocument,
   createDocument,
   createLayerId,
   createRasterLayer,
+  liftSelectionCommand,
 } from '../core';
 import type { LayerAction } from './layer-actions';
 import { canRunLayerAction, runLayerAction } from './layer-actions';
@@ -20,6 +24,7 @@ const ACTIONS: readonly LayerAction[] = [
   'move-down',
   'select-above',
   'select-below',
+  'commit-floating',
 ];
 
 /** An editor on a 10×10 document with a 4×4 layer per name, bottom first, IDs layer-1… */
@@ -29,6 +34,16 @@ function setup(...names: string[]): { editor: Editor; doc: ImageDocument } {
     doc.layers.push(createRasterLayer({ id: createLayerId(doc), name, width: 4, height: 4 }));
   }
   return { editor: new Editor(doc), doc };
+}
+
+/** Lifts the top-left 2×2 pixels of the active layer into a floating selection. */
+function float(editor: Editor): void {
+  const doc = editor.document;
+  const area = { x: 0, y: 0, width: 2, height: 2 };
+  editor.history.execute(new SetSelectionCommand(Selection.fromRect(doc.width, doc.height, area)));
+  const lift = liftSelectionCommand(doc, editor.activeLayerId ?? '');
+  if (!lift) throw new Error('Nothing to lift');
+  editor.history.execute(lift);
 }
 
 function names(doc: ImageDocument): string[] {
@@ -100,6 +115,61 @@ describe('runLayerAction', () => {
   });
 });
 
+describe('runLayerAction with a floating selection', () => {
+  it('commits it with Commit Floating Selection or Merge Down', () => {
+    const { editor, doc } = setup('A', 'B');
+    float(editor);
+    expect(names(doc)).toEqual(['A', 'B', FLOATING_LAYER_NAME]);
+    runLayerAction(editor, 'commit-floating');
+    expect(names(doc)).toEqual(['A', 'B']);
+    expect(editor.floating).toBeNull();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+
+    float(editor);
+    runLayerAction(editor, 'merge-down');
+    expect(names(doc)).toEqual(['A', 'B']);
+    expect(activeName(editor)).toBe('B');
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+  });
+
+  it('commits it before adding a layer or flattening', () => {
+    const { editor, doc } = setup('A', 'B');
+    float(editor);
+    runLayerAction(editor, 'new');
+    expect(doc.layers).toHaveLength(3);
+    expect(editor.floating).toBeNull();
+    expect(editor.activeLayerId).toBe(doc.layers[2].id);
+    editor.history.undo();
+    editor.history.undo();
+    expect(names(doc)).toEqual(['A', 'B', FLOATING_LAYER_NAME]);
+
+    runLayerAction(editor, 'flatten');
+    expect(names(doc)).toEqual(['A']);
+    expect(editor.history.undoLabel).toBe('Flatten Image');
+    editor.history.undo();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+  });
+
+  it('commits it when another layer is selected', () => {
+    const { editor, doc } = setup('A', 'B');
+    float(editor);
+    runLayerAction(editor, 'select-below');
+    expect(editor.floating).toBeNull();
+    expect(names(doc)).toEqual(['A', 'B']);
+    expect(activeName(editor)).toBe('B');
+  });
+
+  it('refuses to duplicate, delete or reorder it', () => {
+    const { editor, doc } = setup('A', 'B');
+    float(editor);
+    for (const action of ['duplicate', 'delete', 'move-up', 'move-down'] as const) {
+      runLayerAction(editor, action);
+    }
+    expect(names(doc)).toEqual(['A', 'B', FLOATING_LAYER_NAME]);
+    expect(editor.floating).not.toBeNull();
+  });
+});
+
 describe('canRunLayerAction', () => {
   it('rules out what a single plain layer cannot do', () => {
     const editor = new Editor(createBlankDocument({ width: 8, height: 8, background: 'white' }));
@@ -110,7 +180,8 @@ describe('canRunLayerAction', () => {
   it('follows the active layer through the stack', () => {
     const { editor } = setup('A', 'B', 'C');
     editor.setActiveLayer('layer-2');
-    expect(ACTIONS.every((action) => canRunLayerAction(editor, action))).toBe(true);
+    const blocked = ACTIONS.filter((action) => !canRunLayerAction(editor, action));
+    expect(blocked).toEqual(['commit-floating']);
     editor.setActiveLayer('layer-1');
     expect(canRunLayerAction(editor, 'merge-down')).toBe(false);
     expect(canRunLayerAction(editor, 'move-down')).toBe(false);
@@ -139,5 +210,19 @@ describe('canRunLayerAction', () => {
         expect([action, editor.revision !== revision]).toEqual([action, expected]);
       }
     }
+  });
+
+  it('agrees with what runLayerAction does with a floating selection', () => {
+    const runnable: LayerAction[] = [];
+    for (const action of ACTIONS) {
+      const { editor } = setup('A', 'B');
+      float(editor);
+      const revision = editor.revision;
+      const expected = canRunLayerAction(editor, action);
+      runLayerAction(editor, action);
+      expect([action, editor.revision !== revision]).toEqual([action, expected]);
+      if (expected) runnable.push(action);
+    }
+    expect(runnable).toEqual(['new', 'merge-down', 'flatten', 'select-below', 'commit-floating']);
   });
 });

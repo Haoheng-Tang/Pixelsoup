@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import type { PixelBuffer, PngCodec } from '../../core';
 import {
   Editor,
+  MoveLayerCommand,
+  Selection,
   SetLayerVisibilityCommand,
+  SetSelectionCommand,
   createBlankDocument,
   createPixelBuffer,
   deserializeDocument,
   getPixel,
+  liftSelectionCommand,
   newLayerCommand,
   setPixel,
 } from '../../core';
@@ -50,6 +54,23 @@ function hideBottomLayer(editor: Editor): void {
   const layer = editor.document.layers[0];
   if (!layer) throw new Error('no layer');
   editor.history.execute(new SetLayerVisibilityCommand(layer.id, !layer.visible));
+}
+
+/**
+ * Paints the background's top-left pixel red, then lifts it into a floating selection
+ * and moves that to (2, 1), as the Move tool would.
+ */
+function floatRedPixel(editor: Editor): void {
+  const doc = editor.document;
+  const layer = doc.layers[0];
+  if (!layer) throw new Error('no layer');
+  setPixel(layer.pixels, 0, 0, [255, 0, 0, 255]);
+  const pixel = { x: 0, y: 0, width: 1, height: 1 };
+  editor.history.execute(new SetSelectionCommand(Selection.fromRect(doc.width, doc.height, pixel)));
+  const lift = liftSelectionCommand(doc, layer.id);
+  if (!lift) throw new Error('Nothing to lift');
+  editor.history.execute(lift);
+  editor.history.execute(new MoveLayerCommand(lift.floatId, 2, 1));
 }
 
 describe('DocumentSession', () => {
@@ -131,6 +152,31 @@ describe('DocumentSession', () => {
     store.saveName = null;
     expect(await session.save()).toBe(false);
     expect(session.name).toBe('Untitled-1');
+    expect(session.isDirty).toBe(true);
+  });
+
+  it('commits a floating selection when saving, so the file has no floating layer', async () => {
+    const { session, store, editor } = setup();
+    floatRedPixel(editor);
+    store.saveName = null;
+    await session.save();
+    expect(editor.floating).not.toBeNull();
+
+    store.saveName = 'picked.pixelsoup';
+    expect(await session.save()).toBe(true);
+    expect(editor.floating).toBeNull();
+    expect(session.isDirty).toBe(false);
+    const bytes = new Uint8Array(await store.file('picked.pixelsoup').arrayBuffer());
+    const loaded = await deserializeDocument(bytes, png);
+    expect(loaded.layers.map((layer) => layer.name)).toEqual(['Background']);
+    const pixels = loaded.layers[0]?.pixels ?? createPixelBuffer(0, 0);
+    expect(getPixel(pixels, 0, 0)).toEqual([0, 0, 0, 0]);
+    expect(getPixel(pixels, 2, 1)).toEqual([255, 0, 0, 255]);
+
+    // The commit is an undo step of its own, before the save point.
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+    editor.history.undo();
+    expect(editor.floating).not.toBeNull();
     expect(session.isDirty).toBe(true);
   });
 
@@ -268,6 +314,18 @@ describe('DocumentSession', () => {
 
     expect(session.name).toBe('Untitled-2');
     expect(session.savesInPlace).toBe(false);
+  });
+
+  it('commits a floating selection when exporting', async () => {
+    const { session, store, editor, exported } = setup();
+    floatRedPixel(editor);
+    store.saveName = 'out.png';
+    expect(await session.exportImage({ format: 'png', quality: 0.9 })).toBe(true);
+    expect(editor.floating).toBeNull();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+    const pixels = exported[0]?.pixels ?? createPixelBuffer(0, 0);
+    expect(getPixel(pixels, 0, 0)).toEqual([0, 0, 0, 0]);
+    expect(getPixel(pixels, 2, 1)).toEqual([255, 0, 0, 255]);
   });
 
   it('notifies subscribers of name changes and editor changes', async () => {

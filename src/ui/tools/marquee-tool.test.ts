@@ -1,72 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Rect } from '../../core';
 import { createDocument, Editor, Selection, SetSelectionCommand } from '../../core';
+import { FakeViewport, NO_MODIFIERS as noMods } from './fake-viewport';
 import { CLICK_TOLERANCE, MarqueeTool, marqueeRect } from './marquee-tool';
 import { SelectionOptions } from './selection-options';
-import type { ToolModifiers } from './tool';
 import { ToolManager } from './tool-manager';
-
-type Modifiers = Partial<ToolModifiers>;
 
 const W = 20;
 const H = 12;
-const noMods = { shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
-
-/**
- * Stands in for the viewport: maps screen (CSS pixel) coordinates to document space
- * with `doc = (screen - pan) / zoom` and feeds the ToolManager as the real one does.
- */
-class FakeViewport {
-  zoom = 1;
-  panX = 0;
-  panY = 0;
-  private held: Required<ToolModifiers> = { ...noMods };
-
-  constructor(readonly tools: ToolManager) {}
-
-  down(sx: number, sy: number, mods: Modifiers = {}): void {
-    this.held = { ...this.held, ...mods };
-    this.tools.pointerDown(this.event(sx, sy));
-  }
-
-  move(sx: number, sy: number, mods: Modifiers = {}): void {
-    this.held = { ...this.held, ...mods };
-    this.tools.pointerMove(this.event(sx, sy));
-  }
-
-  up(sx: number, sy: number, mods: Modifiers = {}): void {
-    this.held = { ...this.held, ...mods };
-    this.tools.pointerUp(this.event(sx, sy));
-  }
-
-  /** Press, move to the end point, release, with the same modifiers throughout. */
-  drag(x0: number, y0: number, x1: number, y1: number, mods: Modifiers = {}): void {
-    this.down(x0, y0, mods);
-    this.move(x1, y1);
-    this.up(x1, y1);
-    this.held = { ...this.held, shiftKey: false, altKey: false };
-  }
-
-  keyDown(key: 'Shift' | 'Alt' | 'Escape'): boolean {
-    if (key !== 'Escape')
-      this.held = { ...this.held, [key === 'Shift' ? 'shiftKey' : 'altKey']: true };
-    return this.tools.keyDown({ key, code: key, repeat: false, ...this.held });
-  }
-
-  keyUp(key: 'Shift' | 'Alt'): boolean {
-    this.held = { ...this.held, [key === 'Shift' ? 'shiftKey' : 'altKey']: false };
-    return this.tools.keyUp({ key, code: key, repeat: false, ...this.held });
-  }
-
-  private event(sx: number, sy: number) {
-    return {
-      x: (sx - this.panX) / this.zoom,
-      y: (sy - this.panY) / this.zoom,
-      zoom: this.zoom,
-      ...this.held,
-    };
-  }
-}
 
 function setup(shape: 'rect' | 'ellipse' = 'rect') {
   const editor = new Editor(createDocument(W, H));

@@ -162,12 +162,15 @@ export class MarqueeTool implements Tool {
     if (!shape || shape.isEmpty) {
       // A click (or a shape off the canvas) deselects, unless it was meant to modify.
       if (drag.mode === 'replace' && current) {
+        editor.commitFloating();
         editor.history.execute(new SetSelectionCommand(null, 'Deselect'));
       }
       return;
     }
     const next = combineSelections(current, shape, drag.mode);
     if (next === null ? current === null : current?.equals(next)) return;
+    // A floating selection is dropped back into its layer before the selection changes.
+    editor.commitFloating();
     editor.history.execute(new SetSelectionCommand(next, this.name));
   }
 
