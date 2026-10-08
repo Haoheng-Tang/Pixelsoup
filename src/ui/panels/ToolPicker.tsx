@@ -24,6 +24,11 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <ellipse cx="8" cy="8" rx="5.6" ry="4.6" />
     </svg>
   ),
+  move: (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />
+    </svg>
+  ),
 };
 
 /** One button per tool, showing its shortcut key; the active tool is pressed. */

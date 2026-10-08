@@ -237,6 +237,64 @@ describe('Selection set operations', () => {
   });
 });
 
+describe('Selection.translate', () => {
+  // Coverage 255, 128 and 64 in a row, so moved values can be told apart.
+  const shape = Selection.fromMask(5, 4, [
+    ...[0, 0, 0, 0, 0],
+    ...[0, 255, 128, 64, 0],
+    ...[0, 255, 255, 255, 0],
+    ...[0, 0, 0, 0, 0],
+  ]);
+
+  it('moves coverage and bounds by whole pixels', () => {
+    const moved = shape.translate(1, -1);
+    expect(moved.bounds()).toEqual({ x: 2, y: 0, width: 3, height: 2 });
+    expect(moved.coverageAt(2, 0)).toBe(255);
+    expect(moved.coverageAt(3, 0)).toBe(128);
+    expect(moved.coverageAt(4, 0)).toBe(64);
+    expect(rowsOf(moved)).toEqual(['..#++', '..###', '.....', '.....']);
+    expect(rowsOf(shape)).toEqual(['.....', '.#++.', '.###.', '.....']);
+  });
+
+  it('drops coverage moved off the canvas', () => {
+    const left = shape.translate(-2, 0);
+    expect(rowsOf(left)).toEqual(['.....', '++...', '##...', '.....']);
+    expect(left.bounds()).toEqual({ x: 0, y: 1, width: 2, height: 2 });
+    expect(left.coverageAt(0, 1)).toBe(128);
+
+    const down = shape.translate(0, 2);
+    expect(rowsOf(down)).toEqual(['.....', '.....', '.....', '.#++.']);
+    expect(down.bounds()).toEqual({ x: 1, y: 3, width: 3, height: 1 });
+
+    // Moving back doesn't bring the dropped part back.
+    expect(rowsOf(left.translate(2, 0))).toEqual(['.....', '..++.', '..##.', '.....']);
+  });
+
+  it('is empty when moved entirely off the canvas', () => {
+    expect(shape.translate(4, 0).isEmpty).toBe(true);
+    expect(shape.translate(0, -3).isEmpty).toBe(true);
+    expect(shape.translate(-100, 100).bounds()).toBeNull();
+  });
+
+  it('is empty when only unselected pixels of the bounds stay on the canvas', () => {
+    const corners = Selection.fromMask(3, 3, [0, 0, 255, 0, 0, 0, 255, 0, 0]);
+    const moved = corners.translate(-1, -1);
+    expect(moved.isEmpty).toBe(true);
+    expect(moved.bounds()).toBeNull();
+  });
+
+  it('returns the same selection for no move or an empty selection', () => {
+    expect(shape.translate(0, 0)).toBe(shape);
+    const none = Selection.empty(5, 4);
+    expect(none.translate(2, 1)).toBe(none);
+  });
+
+  it('rejects fractional offsets', () => {
+    expect(() => shape.translate(0.5, 0)).toThrow(RangeError);
+    expect(() => shape.translate(0, Number.NaN)).toThrow(RangeError);
+  });
+});
+
 describe('combineSelections', () => {
   const base = fromRows(['##..', '##..']);
   const shape = fromRows(['.##.', '.##.']);

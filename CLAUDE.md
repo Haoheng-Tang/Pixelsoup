@@ -6,8 +6,7 @@ raster image editor (a lightweight Photoshop) that runs entirely in the browser.
 ## Git workflow
 
 - `main` must always lint, test, and build. Never commit directly to `main`.
-- All work happens on `feat/*`, `fix/*`, or `chore/*` branches and lands on `main` via pull
-  request.
+- All work happens on `feat/*`, `fix/*`, or `chore/*` branches, landing on `main` via pull request.
 - Make small, logical commits that are easy to review (e.g. tooling, model, compositor + tests,
   UI piece, docs). Don't mix refactors with features.
 - Don't push or merge unless explicitly asked.
@@ -32,8 +31,7 @@ Keep dependencies minimal. **Ask before adding any library** beyond the stack ab
 
 ### No-Rust constraint
 
-- No Rust toolchain may be required to develop or build the project (so no Rust source and no
-  Tauri).
+- No Rust toolchain may be required to develop or build the project (no Rust source, no Tauri).
 - Prebuilt native binaries in npm packages are fine if they run under the development machine's
   AppLocker policy: a standalone `.exe` needs an allow rule (esbuild's has a hash rule, so check
   `npm run build` after upgrading it), while native `.node` addons such as Rollup's load normally.
@@ -60,12 +58,15 @@ editors do by default). Imported images will be treated as sRGB.
   as new union members (shared properties live in `LayerBase`); every `switch (layer.kind)` ends
   in `assertNever` so the compiler points to each place that needs updating.
 - **Selection** is an immutable coverage mask the size of the canvas (`Selection`, 0–255).
-  `doc.selection` is `null` for "no selection" (everything editable), never empty, and only
-  `SetSelectionCommand` changes it (undoable; not an unsaved change). **Invariant: every
-  pixel-editing command clips to a non-null `doc.selection`, weighting by coverage / 255.**
+  `doc.selection` is `null` for "no selection" (everything editable), never empty, and set by
+  `SetSelectionCommand` (undoable; not an unsaved change) or moved with a floating selection.
+  **Invariant: every pixel edit clips to a non-null `doc.selection`, weighting by coverage / 255.**
 - **Undo/redo is command-based.** Every document mutation is a `Command` (`apply` / `revert`,
   returning a `DocumentChange` with dirty rects) run through `editor.history.execute(cmd)`;
   nothing else may mutate an `ImageDocument`. Gestures share a `mergeKey`: one gesture, one step.
+- **Pixel edits** keep a `PixelSnapshot` of only the layer-space rects they change, taken before
+  their first write; revert restores it. They list the layer in `DocumentChange.layerPixels`. A
+  floating selection (`editor.floating`, session state) is committed before its source changes.
 - **`Editor`** owns one document plus its history and broadcasts each `DocumentChange` to
   subscribers (the viewport and panels). It tracks the save point (`isDirty`, `markSaved`);
   `replaceDocument` swaps in a new or opened document and resets history.
@@ -96,14 +97,14 @@ tsconfig*.json           project references: core (no DOM), web (src/), node (co
 docs/                    file-format.md (.pixelsoup spec), tools.md (tools, selections), layers.md
 src/
   core/                  pure logic – no DOM/React/Node
-    geometry.ts          Rect helpers; pixel-buffer.ts: RGBA8 buffers
+    pixel-buffer.ts      RGBA8 buffers; pixel-snapshot.ts: saved pixel rects for undo
+    geometry.ts          Rect helpers; layer.ts: Layer union, RasterLayer, BlendMode
     selection.ts         Selection masks; selection-outline.ts: outline tracing for the ants
-    layer.ts             Layer union, RasterLayer, BlendMode
-    document.ts          ImageDocument, per-document layer IDs
+    document.ts          ImageDocument, layer IDs; floating-selection.ts: the Move tool's float
     editor.ts            Editor: document + history + change events + save point + active layer
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            concrete commands (layer properties and stack, merge/flatten, selection)
+    commands/            concrete commands (layer props and stack, merge, selection, move, float)
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
     serialization/       .pixelsoup read/write, PngCodec interface
     index.ts             public barrel used by ui/
@@ -113,7 +114,7 @@ src/
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
     session/             DocumentSession, AppController, file types
     dialogs/             New, Export, confirm-discard and error dialogs
-    tools/               Tool interface, ToolManager, marquee tools and their options
+    tools/               Tool interface, ToolManager, marquee and move tools and their options
     viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
     panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel (drag, thumbnails)
@@ -131,8 +132,7 @@ src/
   hand, with the arithmetic in a comment when it's not obvious.
 - Hot loops work on typed arrays with index arithmetic, with no per-pixel allocations or
   closures. Reuse scratch buffers.
-- Exhaustive `switch` over unions with `assertNever`.
-- No `any`. Prefer narrow interfaces at module boundaries.
+- Exhaustive `switch` over unions with `assertNever`. No `any`; narrow interfaces between modules.
 - Comment only what isn't obvious from the code (invariants, units, coordinate spaces, why).
 - Coordinates: document space is integer pixels from the canvas's top-left. Layer offsets
   translate layer space to document space. The viewport maps document space to CSS pixels with
@@ -158,7 +158,7 @@ src/
 4. Open/save (done: new, open, save, import, export)
 5. Selection as a mask + tool system (done: marquee tools, Select menu, marching ants)
    - then layer management (done: active layer, layer commands, Layer menu, thumbnails)
-6. Move tool
+6. Move tool (done: layer moves and nudges, floating selections, pixel snapshots)
 7. Brush / eraser
 8. Crop / rotate
 9. Adjustments
@@ -183,8 +183,8 @@ src/
 
 Simplest choices made so far that may be revisited:
 
-- **History storage**: `LinearHistory` keeps whole command objects with a 200-step cap. Pixel
-  commands will need memory-aware storage (e.g. tiled diffs) behind the same interface.
+- **History storage**: `LinearHistory` keeps whole commands, snapshots included, with a 200-step
+  cap. Very large or repeated pixel edits may later need tiled snapshots behind `PixelSnapshot`.
 - **Dirty rects for property changes** are the layer's bounds clipped to the canvas. Each change
   recomposites that rect synchronously; batching or tiling can come later if profiling demands it.
 - **Viewport rendering**: zoom range 1 %–6400 %; bilinear below 100 %, nearest-neighbour at and

@@ -171,7 +171,10 @@ export class DocumentSession {
     return true;
   }
 
-  /** Saves to the document's file, or asks where if it has none (or the store can't overwrite). */
+  /**
+   * Saves to the document's file, or asks where if it has none (or the store can't
+   * overwrite). A floating selection is committed first.
+   */
   save(): Promise<boolean> {
     return this.write(this.savesInPlace ? this.fileRef : null);
   }
@@ -181,16 +184,21 @@ export class DocumentSession {
     return this.write(null);
   }
 
-  /** Asks where to save, then writes the flattened composite as an image. */
+  /**
+   * Asks where to save, then writes the flattened composite as an image. A floating
+   * selection is committed first.
+   */
   async exportImage(options: ExportOptions): Promise<boolean> {
+    const { editor } = this.deps;
     const format = EXPORT_FORMATS[options.format];
-    const doc = this.deps.editor.document;
+    const doc = editor.document;
     const suggestedName = this.documentName + format.extension;
     try {
       const ref = await this.deps.store.save({
         suggestedName,
         type: exportFileType(options.format),
         data: () => {
+          if (editor.document === doc) editor.commitFloating();
           const compositor = new CpuCompositor(doc.width, doc.height);
           compositor.composite(doc);
           const pixels = compositor.output;
@@ -218,6 +226,8 @@ export class DocumentSession {
         suggestedName,
         type: PIXELSOUP_FILE_TYPE,
         data: async () => {
+          // A floating selection isn't saved: it's committed, as one more undo step.
+          if (editor.document === doc) editor.commitFloating();
           // Edits made after this point aren't in the file, so they stay unsaved.
           savedState = editor.history.stateId;
           const bytes = await serializeDocument(doc, png);

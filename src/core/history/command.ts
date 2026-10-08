@@ -1,4 +1,5 @@
 import type { ImageDocument } from '../document';
+import type { FloatingSelection } from '../floating-selection';
 import type { Rect } from '../geometry';
 import type { LayerId } from '../layer';
 
@@ -17,6 +18,11 @@ export interface DocumentChange {
    * Absent if none did. Adding, removing, reordering or restyling layers isn't listed.
    */
   readonly layerPixels?: readonly LayerPixelsChange[];
+  /**
+   * The floating selection after this change, for changes that start or end one (absent
+   * otherwise). Only lifting and committing set it; `Editor` keeps it as session state.
+   */
+  readonly floating?: FloatingSelection | null;
 }
 
 export interface LayerPixelsChange {

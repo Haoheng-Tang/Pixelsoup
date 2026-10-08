@@ -41,6 +41,8 @@ export function layerActionFor(e: ShortcutKeys): LayerAction | null {
       return e.shiftKey ? null : 'duplicate';
     case 'e':
       return e.shiftKey ? null : 'merge-down';
+    case 'enter':
+      return e.shiftKey ? null : 'commit-floating';
     default:
       return null;
   }
@@ -54,9 +56,9 @@ function bracketOf(e: ShortcutKeys): '[' | ']' | null {
 
 /**
  * Layer shortcuts: Ctrl/Cmd+Shift+N new layer, +J duplicate, +E merge down, +[ and +] move
- * the active layer down and up; Alt+[ and Alt+] select the layer below and above. They
- * suppress the browser's own action (downloads, search, back/forward) but leave text fields
- * alone. Inactive while `gate.blocked`.
+ * the active layer down and up, +Enter commit a floating selection; Alt+[ and Alt+] select
+ * the layer below and above. They suppress the browser's own action (downloads, search,
+ * back/forward) but leave text fields alone. Inactive while `gate.blocked`.
  */
 export function useLayerShortcuts(editor: Editor, gate: { readonly blocked: boolean }): void {
   useEffect(() => {

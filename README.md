@@ -4,8 +4,9 @@ An open-source, layered raster image editor that runs in your browser, like a li
 Photoshop.
 
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
-> layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), and make
-> rectangular and elliptical selections. Painting and other tools are on the roadmap.
+> layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), make
+> rectangular and elliptical selections, and move layers and selected pixels. Painting and
+> other tools are on the roadmap.
 
 ## Features so far
 
@@ -30,6 +31,10 @@ Photoshop.
   Subtract and Intersect modes, picked in the tool-options bar or with modifier keys
 - Select menu: Select All, Deselect and Inverse
 - Marching ants that stay a hairline wide and track the canvas exactly at every zoom level
+- Move tool: drag or nudge the active layer anywhere, even off the canvas. With a selection it
+  lifts the selected pixels (soft edges included) into a floating selection that moves with
+  its outline, or copies them with Alt; committing drops them back into their layer, exactly
+  as they were if they didn't move
 - Status bar with the pointer's document position and the selection size
 - Undo/redo for every edit, selection changes included (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y)
 
@@ -67,6 +72,23 @@ themselves; the Select menu always works.
 Selecting a layer isn't an edit: it isn't saved and isn't an undo step. Merge Down needs both
 layers visible. Flatten Image discards hidden layers. Browsers may keep Ctrl/Cmd+Shift+N for a
 new private window; Layer → New Layer and the panel's button always work.
+
+### Move tool shortcuts
+
+| Keys                | Action                                                            |
+| ------------------- | ----------------------------------------------------------------- |
+| V                   | move tool                                                         |
+| Drag                | move the active layer, or lift and move the selected pixels       |
+| Alt+drag            | copy the selected pixels and move the copy                        |
+| Shift during a drag | keep to one axis                                                  |
+| Arrow keys          | nudge by 1 pixel (Shift: 10); quick runs of nudges undo at once   |
+| Ctrl/Cmd+Enter      | commit the floating selection (Layer → Commit Floating Selection) |
+| Esc during a drag   | cancel, undoing the lift too                                      |
+
+A floating selection stays on its own layer until it's committed. That happens by itself when
+you deselect or change the selection, pick another layer or tool, add a layer, merge, flatten,
+save or export, so a saved file never contains one. Each lift, move and commit is an undo step,
+and undoing a commit floats the pixels again.
 
 ### Saving and browsers
 

@@ -4,8 +4,12 @@ import { assertNever, deselectCommand, invertSelectionCommand, selectAllCommand 
 /** Commands of the Select menu and their shortcuts. */
 export type SelectCommand = 'select-all' | 'deselect' | 'inverse';
 
-/** Runs a Select menu command; does nothing if it wouldn't change the selection. */
+/**
+ * Runs a Select menu command; does nothing if it wouldn't change the selection. A
+ * floating selection is committed first, either way.
+ */
 export function runSelectCommand(editor: Editor, command: SelectCommand): void {
+  editor.commitFloating();
   const doc = editor.document;
   let change: SetSelectionCommand | null;
   switch (command) {

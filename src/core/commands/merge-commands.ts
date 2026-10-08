@@ -41,8 +41,7 @@ export class MergeDownCommand implements Command {
 }
 
 function mergeLayers(doc: ImageDocument, lower: Layer, upper: Layer): Layer {
-  let area = unionRects(layerBounds(lower), layerBounds(upper)) ?? documentBounds(doc);
-  if (area.width > MAX_IMAGE_SIZE || area.height > MAX_IMAGE_SIZE) area = documentBounds(doc);
+  const area = mergeArea(doc, lower, upper);
   return createRasterLayer({
     id: lower.id,
     name: lower.name,
@@ -51,6 +50,15 @@ function mergeLayers(doc: ImageDocument, lower: Layer, upper: Layer): Layer {
     y: area.y,
     pixels: compositeLayers([lower, upper], area),
   });
+}
+
+/**
+ * Canvas-space area a merge of two layers covers: both layers' bounds, or the canvas
+ * should that exceed the maximum image size.
+ */
+export function mergeArea(doc: ImageDocument, lower: Layer, upper: Layer): Rect {
+  const area = unionRects(layerBounds(lower), layerBounds(upper)) ?? documentBounds(doc);
+  return area.width > MAX_IMAGE_SIZE || area.height > MAX_IMAGE_SIZE ? documentBounds(doc) : area;
 }
 
 /**

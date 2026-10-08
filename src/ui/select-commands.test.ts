@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, Editor, Selection, SetSelectionCommand } from '../core';
+import {
+  createDocument,
+  createLayerId,
+  createRasterLayer,
+  Editor,
+  liftSelectionCommand,
+  Selection,
+  SetSelectionCommand,
+} from '../core';
+import type { SelectCommand } from './select-commands';
 import { runSelectCommand } from './select-commands';
 
 describe('runSelectCommand', () => {
@@ -32,5 +41,26 @@ describe('runSelectCommand', () => {
     runSelectCommand(editor, 'select-all');
     editor.history.undo();
     expect(editor.history.canUndo).toBe(false);
+  });
+
+  it('commits a floating selection first', () => {
+    for (const command of ['select-all', 'deselect', 'inverse'] satisfies SelectCommand[]) {
+      const doc = createDocument(4, 4);
+      doc.layers.push(
+        createRasterLayer({ id: createLayerId(doc), name: 'A', width: 4, height: 4 }),
+      );
+      const editor = new Editor(doc);
+      const area = { x: 0, y: 0, width: 2, height: 2 };
+      editor.history.execute(new SetSelectionCommand(Selection.fromRect(4, 4, area)));
+      const lift = liftSelectionCommand(doc, 'layer-1');
+      if (!lift) throw new Error('Nothing to lift');
+      editor.history.execute(lift);
+
+      runSelectCommand(editor, command);
+      expect(editor.floating).toBeNull();
+      expect(doc.layers).toHaveLength(1);
+      editor.history.undo();
+      expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+    }
   });
 });

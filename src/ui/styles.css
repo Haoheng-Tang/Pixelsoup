@@ -180,6 +180,16 @@ button.danger:hover:not(:disabled) {
   color: var(--text-muted);
 }
 
+.tool-options-hint {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .status-bar {
   display: flex;
   gap: 24px;
@@ -308,6 +318,10 @@ button.danger:hover:not(:disabled) {
 
 .layer.is-hidden .layer-name {
   color: var(--text-muted);
+}
+
+.layer.is-floating .layer-name {
+  font-style: italic;
 }
 
 .visibility-toggle {

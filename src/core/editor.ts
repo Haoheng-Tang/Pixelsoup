@@ -1,5 +1,8 @@
+import { commitFloatingCommand } from './commands/float-commands';
 import type { ImageDocument } from './document';
 import { documentBounds, findLayer, findLayerIndex, getLayerIndex } from './document';
+import type { FloatingSelection } from './floating-selection';
+import { isFloatingIn } from './floating-selection';
 import type { DocumentChange } from './history/command';
 import type { History } from './history/history';
 import { LinearHistory } from './history/history';
@@ -14,6 +17,8 @@ export interface EditorChange extends DocumentChange {
   readonly documentReplaced?: boolean;
   /** True when `activeLayerId` changed, whether set or moved off a layer that went away. */
   readonly activeLayerChanged?: boolean;
+  /** True when `floating` changed: a selection was lifted or committed, or that was undone. */
+  readonly floatingChanged?: boolean;
 }
 
 export type EditorListener = (change: EditorChange) => void;
@@ -32,6 +37,7 @@ export class Editor {
   private activeId: LayerId | null = null;
   /** Stack index of the active layer when last seen, to pick a neighbour if it goes away. */
   private activeIndex = -1;
+  private floatingState: FloatingSelection | null = null;
 
   constructor(document: ImageDocument) {
     this.currentDocument = document;
@@ -72,12 +78,39 @@ export class Editor {
     return this.activeId === null ? null : (findLayer(this.currentDocument, this.activeId) ?? null);
   }
 
-  /** Makes another layer of the document active. Throws if the document has no such layer. */
+  /**
+   * Makes another layer of the document active. Throws if the document has no such layer.
+   * Commits a floating selection first, whose layer stays active while it floats.
+   */
   setActiveLayer(id: LayerId): void {
+    getLayerIndex(this.currentDocument, id);
+    if (this.floatingState && id !== this.floatingState.layerId) this.commitFloating();
     this.activeIndex = getLayerIndex(this.currentDocument, id);
     if (id === this.activeId) return;
     this.activeId = id;
     this.emit({ dirty: null, activeLayerChanged: true });
+  }
+
+  /**
+   * The selection the Move tool lifted into a layer of its own, until it's committed
+   * back into its source layer. Session state like the active layer: not saved, and
+   * restored by undo and redo of the lift and commit. While it exists, its layer is the
+   * active layer.
+   */
+  get floating(): FloatingSelection | null {
+    return this.floatingState;
+  }
+
+  /**
+   * Commits the floating selection into its source layer as one undo step. Returns false
+   * if there was none.
+   */
+  commitFloating(): boolean {
+    const floating = this.floatingState;
+    const command = floating && commitFloatingCommand(this.currentDocument, floating);
+    if (!command) return false;
+    this.currentHistory.execute(command);
+    return true;
   }
 
   /**
@@ -92,17 +125,20 @@ export class Editor {
 
   /**
    * Swaps in another document (new, open, close) with a fresh history. It starts clean,
-   * with its top layer active.
+   * with its top layer active and nothing floating.
    */
   replaceDocument(document: ImageDocument): void {
+    const wasFloating = this.floatingState !== null;
     this.currentDocument = document;
     this.currentHistory = this.createHistory(document);
     this.savedStateId = this.currentHistory.stateId;
+    this.floatingState = null;
     this.activateTopLayer();
     this.emit({
       dirty: documentBounds(document),
       documentReplaced: true,
       activeLayerChanged: true,
+      ...(wasFloating && { floatingChanged: true }),
     });
   }
 
@@ -117,7 +153,10 @@ export class Editor {
     return new LinearHistory(document, (change) => {
       // Ignore a stale history whose document has since been replaced.
       if (document !== this.currentDocument) return;
-      this.emit(this.keepActiveLayer() ? { ...change, activeLayerChanged: true } : change);
+      let emitted: EditorChange = change;
+      if (this.keepFloating(change)) emitted = { ...emitted, floatingChanged: true };
+      if (this.keepActiveLayer()) emitted = { ...emitted, activeLayerChanged: true };
+      this.emit(emitted);
     });
   }
 
@@ -128,18 +167,35 @@ export class Editor {
   }
 
   /**
-   * After a change to the document, moves the active layer off a layer that went away:
-   * to the one below where it was, else the one above (the bottom one now), else the top.
-   * Returns true if the active layer changed.
+   * Takes the floating selection a change reports, if any, and drops it should its layer
+   * no longer be directly above its source. Returns true if it changed.
+   */
+  private keepFloating(change: DocumentChange): boolean {
+    const previous = this.floatingState;
+    let floating = change.floating === undefined ? previous : change.floating;
+    if (floating && !isFloatingIn(this.currentDocument, floating)) floating = null;
+    this.floatingState = floating;
+    return floating !== previous;
+  }
+
+  /**
+   * After a change to the document, makes a floating selection's layer active, or moves
+   * the active layer off a layer that went away: to the one below where it was, else the
+   * one above (the bottom one now), else the top. Returns true if the active layer changed.
    */
   private keepActiveLayer(): boolean {
     const doc = this.currentDocument;
+    const previous = this.activeId;
+    if (this.floatingState) {
+      this.activeId = this.floatingState.layerId;
+      this.activeIndex = findLayerIndex(doc, this.activeId);
+      return this.activeId !== previous;
+    }
     const index = this.activeId === null ? -1 : findLayerIndex(doc, this.activeId);
     if (index >= 0) {
       this.activeIndex = index;
       return false;
     }
-    const previous = this.activeId;
     if (this.activeIndex < 0 || doc.layers.length === 0) {
       this.activateTopLayer();
     } else {
