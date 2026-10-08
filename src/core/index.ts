@@ -9,6 +9,7 @@ export * from './history/command';
 export * from './history/history';
 export * from './commands/layer-commands';
 export * from './commands/merge-commands';
+export * from './commands/move-commands';
 export * from './commands/selection-commands';
 export * from './editor';
 export * from './blank-document';
