@@ -16,7 +16,8 @@ import { mergeArea } from './merge-commands';
 
 /**
  * Lifts the selected pixels of a layer (the source) into a new floating layer directly
- * above it, the size of the selection's bounds, for the Move tool to move.
+ * above it, the size of the selection's bounds, for the Move tool to move. The float
+ * takes the source's opacity, visibility and blend mode, so the pixels look as they did.
  *
  * Coverage weights each pixel, as for every pixel edit: with coverage c, the float gets
  * alpha round(a × c / 255) of a pixel with alpha a and, unless copying, the source keeps
@@ -81,6 +82,9 @@ function lift(
     x: bounds.x,
     y: bounds.y,
     pixels: createPixelBuffer(bounds.width, bounds.height),
+    opacity: source.opacity,
+    visible: source.visible,
+    blendMode: source.blendMode,
   });
   splitPixels(source, selection, layer, !copy);
   const floating: FloatingSelection = {
@@ -164,11 +168,12 @@ interface Placement {
  * Merges a floating selection back into its source layer and removes the floating
  * layer, in one undo step; undo floats it again.
  *
- * The float is composited onto the source's own pixels with the merge-down blend math,
- * and the source keeps its ID, name, opacity, visibility and blend mode. Committed where
- * it was lifted, the source gets back exactly the pixels it had, which compositing alone
- * can't promise for partly selected pixels. Pixels moved past the source's edges make it
- * grow to take them in, as merging does.
+ * The float's pixels are composited onto the source's own pixels with the merge-down
+ * blend math, whatever either layer's opacity, visibility and blend mode, and the source
+ * keeps its ID, name and those properties. Committed where it was lifted, the source gets
+ * back exactly the pixels it had, which compositing alone can't promise for partly
+ * selected pixels. Pixels moved past the source's edges make it grow to take them in, as
+ * merging does.
  */
 export class CommitFloatingCommand implements Command {
   readonly label = 'Commit Floating Selection';
@@ -208,13 +213,7 @@ function commitInto(
   float: RasterLayer,
   floating: FloatingSelection,
 ): CommitPlan {
-  const unmoved =
-    float.x === floating.x &&
-    float.y === floating.y &&
-    float.visible &&
-    float.opacity === 1 &&
-    float.blendMode === 'normal';
-  if (unmoved) {
+  if (float.x === floating.x && float.y === floating.y) {
     const rect = floating.before?.rect;
     if (!floating.before || !rect) return { kind: 'none' };
     const undo = PixelSnapshot.capture(source.pixels, rect);
@@ -222,19 +221,22 @@ function commitInto(
     return { kind: 'in-place', undo, redo: floating.before };
   }
 
-  // The source's own pixels, whatever its opacity, visibility and blend mode, which it
-  // keeps: the float is merged into the layer, not the layer into the canvas.
-  const raw: RasterLayer = { ...source, visible: true, opacity: 1, blendMode: 'normal' };
+  // The float is merged into the source's own pixels, not the layer into the canvas, so
+  // both count as plain opaque layers here; the source keeps its opacity, visibility and
+  // blend mode.
+  const plain = { visible: true, opacity: 1, blendMode: 'normal' } as const;
+  const raw: RasterLayer = { ...source, ...plain };
+  const lifted: RasterLayer = { ...float, ...plain };
   const floatBounds = rasterBounds(float);
   if (contains(rasterBounds(source), floatBounds)) {
     const rect = toLayerSpace(source, floatBounds);
     const undo = PixelSnapshot.capture(source.pixels, rect);
-    putPixels(source.pixels, compositeLayers([raw, float], floatBounds), rect.x, rect.y);
+    putPixels(source.pixels, compositeLayers([raw, lifted], floatBounds), rect.x, rect.y);
     return { kind: 'in-place', undo, redo: PixelSnapshot.capture(source.pixels, rect) };
   }
-  const area = mergeArea(doc, raw, float);
+  const area = mergeArea(doc, raw, lifted);
   const undo: Placement = { pixels: source.pixels, x: source.x, y: source.y };
-  const redo: Placement = { pixels: compositeLayers([raw, float], area), x: area.x, y: area.y };
+  const redo: Placement = { pixels: compositeLayers([raw, lifted], area), x: area.x, y: area.y };
   place(source, redo);
   return { kind: 'grow', undo, redo };
 }

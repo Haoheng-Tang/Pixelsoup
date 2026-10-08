@@ -228,7 +228,8 @@ describe('CommitFloatingCommand', () => {
     expect(firstDifference(source.pixels.data, original)).toBe(-1);
     expect(editor.document.layers).toHaveLength(1);
 
-    // Moved away and back again counts as not moved.
+    // Moved away and back again counts as not moved, whatever the layer's opacity.
+    source.opacity = 0.5;
     lift(editor);
     moveFloat(editor, 5, -3);
     moveFloat(editor, 1, 0);
@@ -349,7 +350,7 @@ describe('CommitFloatingCommand', () => {
     expect([source.x, source.y]).toEqual([0, 0]);
   });
 
-  it("keeps the source's properties and merges into its own pixels", () => {
+  it("floats with the source's look and merges at full strength into its own pixels", () => {
     const { source, editor } = setup(
       [
         [0, 0, 255, 255],
@@ -359,7 +360,8 @@ describe('CommitFloatingCommand', () => {
     );
     source.opacity = 0.5;
     source.visible = false;
-    lift(editor);
+    const float = lift(editor);
+    expect(float).toMatchObject({ opacity: 0.5, visible: false, blendMode: 'normal' });
     moveFloat(editor, 1, 0);
     editor.commitFloating();
     expect(source).toMatchObject({
