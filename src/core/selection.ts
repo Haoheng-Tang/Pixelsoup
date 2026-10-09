@@ -4,6 +4,10 @@ import { intersectRects, unionRects } from './geometry';
 import { assertNever } from './layer';
 import type { Orientation } from './orientation';
 import { orientPixels, orientRect, orientedSize } from './orientation';
+import type { Affine } from './resample/affine';
+import { multiply, translation } from './resample/affine';
+import type { Interpolation } from './resample/kernels';
+import { transformMask } from './resample/transform';
 
 /** How a new shape combines with the existing selection. */
 export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
@@ -278,6 +282,40 @@ export class Selection {
     const mask = orientPixels(orientation, this.mask, this.width, this.height, 1);
     const box = orientRect(orientation, this.box, this.width, this.height);
     return new Selection(size.width, size.height, mask, box);
+  }
+
+  /**
+   * The selection mapped through `m` (document coordinates), with its coverage resampled
+   * the way `transformPixels` resamples a layer's pixels, so a floating selection's outline
+   * keeps matching its pixels. Coverage that ends up off the canvas is dropped.
+   */
+  transform(m: Affine, interpolation: Interpolation): Selection {
+    const box = this.box;
+    if (!box) return this;
+    const region = new Uint8ClampedArray(box.width * box.height);
+    for (let y = 0; y < box.height; y++) {
+      const from = (box.y + y) * this.width + box.x;
+      region.set(this.mask.subarray(from, from + box.width), y * box.width);
+    }
+    const canvas = { x: 0, y: 0, width: this.width, height: this.height };
+    const moved = transformMask(
+      region,
+      box.width,
+      box.height,
+      multiply(m, translation(box.x, box.y)),
+      interpolation,
+      canvas,
+    );
+    if (!moved) return Selection.empty(this.width, this.height);
+    const { data, area } = moved;
+    const mask = new Uint8ClampedArray(this.width * this.height);
+    for (let y = 0; y < area.height; y++) {
+      mask.set(
+        data.subarray(y * area.width, (y + 1) * area.width),
+        (area.y + y) * this.width + area.x,
+      );
+    }
+    return new Selection(this.width, this.height, mask, scanBounds(mask, this.width, area));
   }
 
   /** True if both select exactly the same pixels with the same coverage. */
