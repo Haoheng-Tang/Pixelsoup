@@ -114,7 +114,7 @@ npm ci
 npm run lint     # ESLint + Prettier check
 npm test         # 221 tests across 20 files (84 new)
 npm run build    # tsc -b for core/web/node projects, then vite build
-npm run dev      # http://localhost:5173
+npm run dev      # http://localhost:1619
 ```
 
 Unit tests cover:

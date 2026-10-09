@@ -167,7 +167,7 @@ npm ci
 npm run lint     # ESLint + Prettier check
 npm test         # 295 tests across 26 files (74 new)
 npm run build    # tsc -b for core/web/node projects, then vite build
-npm run dev      # http://localhost:5173
+npm run dev      # http://localhost:1619
 ```
 
 ### Layer management

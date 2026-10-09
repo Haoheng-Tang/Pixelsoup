@@ -34,6 +34,14 @@ function contentSecurityPolicy(): Plugin {
 
 export default defineConfig({
   plugins: [react(), contentSecurityPolicy()],
+  server: {
+    port: 1619,
+    strictPort: true,
+  },
+  preview: {
+    port: 1619,
+    strictPort: true,
+  },
   build: {
     outDir: 'dist',
     target: 'es2023',

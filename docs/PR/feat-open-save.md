@@ -82,7 +82,7 @@ npm ci
 npm run lint     # ESLint + Prettier check
 npm test         # 137 tests across 14 files
 npm run build    # tsc -b for core/web/node projects, then vite build
-npm run dev      # http://localhost:5173
+npm run dev      # http://localhost:1619
 ```
 
 Unit tests cover, among others: serialize → deserialize round trips (dimensions, layer metadata,

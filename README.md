@@ -135,7 +135,7 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173.
+Then open http://localhost:1619.
 
 To build and serve a production version:
 
