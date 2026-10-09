@@ -20,6 +20,8 @@ export * from './commands/selection-commands';
 export * from './commands/stroke-commands';
 export * from './commands/canvas-commands';
 export * from './commands/orientation-commands';
+export * from './commands/transform-commands';
+export * from './commands/image-size-commands';
 export * from './paint/dab';
 export * from './paint/dab-placer';
 export * from './paint/sample-color';

@@ -25,8 +25,8 @@ export interface DocumentChange {
   readonly layerPixels?: readonly LayerPixelsChange[];
   /**
    * The floating selection after this change, for changes that start, end or edit one
-   * (absent otherwise): lifting, committing, and painting on the floating layer.
-   * `Editor` keeps it as session state.
+   * (absent otherwise): lifting, committing, and painting on or transforming the floating
+   * layer. `Editor` keeps it as session state.
    */
   readonly floating?: FloatingSelection | null;
 }
