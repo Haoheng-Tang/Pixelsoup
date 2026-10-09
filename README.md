@@ -3,6 +3,10 @@
 An open-source, layered raster image editor that runs in your browser, like a lightweight
 Photoshop.
 
+## Live
+
+[Open Pixelsoup](https://REPLACE-ME.pages.dev)
+
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), make
 > rectangular and elliptical selections, move layers and selected pixels, and paint and erase
@@ -145,6 +149,7 @@ npm run preview
 ```
 
 The `dist/` folder is a static site and can be hosted anywhere.
+See [docs/deploy.md](docs/deploy.md) for the Cloudflare Pages configuration and rollback process.
 
 ## Development
 

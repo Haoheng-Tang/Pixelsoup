@@ -32,16 +32,12 @@ Keep dependencies minimal. **Ask before adding any library** beyond the stack ab
 ### No-Rust constraint
 
 - No Rust toolchain may be required to develop or build the project (no Rust source, no Tauri).
-- Prebuilt native binaries in npm packages are fine if they run under the development machine's
-  AppLocker policy: a standalone `.exe` needs an allow rule (esbuild's has a hash rule, so check
-  `npm run build` after upgrading it), while native `.node` addons such as Rollup's load normally.
+- Prebuilt npm binaries are fine if AppLocker allows them. A standalone `.exe` needs an allow rule
+  (esbuild has a hash rule); native `.node` addons such as Rollup's load normally.
 - Prefer a pure-JS alternative when one exists.
 
-### Colors
-
-8-bit sRGB only, straight (non-premultiplied) alpha. No color management, ICC profiles, high
-bit depth, or linear-light blending. Blending operates directly on sRGB-encoded values (as most
-editors do by default). Imported images will be treated as sRGB.
+**Colors:** 8-bit sRGB only, straight (non-premultiplied) alpha. No color management, ICC
+profiles, high bit depth or linear-light blending. Blend directly on sRGB-encoded values.
 
 ## Architecture rules
 
@@ -142,15 +138,19 @@ src/
 
 ## Commands
 
-| Script              | Purpose                                                                    |
-| ------------------- | -------------------------------------------------------------------------- |
-| `npm run dev`       | Vite dev server (http://localhost:1619)                                    |
-| `npm run build`     | type-check all projects, then production build                             |
-| `npm run preview`   | serve the production build                                                 |
-| `npm test`          | run unit tests once (`npm run test:watch` to watch)                        |
-| `npm run lint`      | ESLint + Prettier check                                                    |
-| `npm run format`    | Prettier write                                                             |
-| `npm run typecheck` | `tsc -b` only                                                              |
+| Script              | Purpose                                             |
+| ------------------- | --------------------------------------------------- |
+| `npm run dev`       | Vite dev server (http://localhost:1619)             |
+| `npm run build`     | type-check all projects, then production build      |
+| `npm run preview`   | serve the production build                          |
+| `npm test`          | run unit tests once (`npm run test:watch` to watch) |
+| `npm run lint`      | ESLint + Prettier check                             |
+| `npm run format`    | Prettier write                                      |
+| `npm run typecheck` | `tsc -b` only                                       |
+
+## Deployment
+
+Cloudflare Pages deploys `main` and previews each PR. Test previews before merging: @docs/deploy.md
 
 ## Planned build order
 
