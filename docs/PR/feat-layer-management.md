@@ -1,15 +1,9 @@
-# feat: layer management and a Windows launcher
+# feat: layer management
 
 ## Summary
 
-This PR adds two new features:
-
-1. **Layer management**: Pixelsoup can now add, duplicate, delete, reorder, rename, merge and
-   flatten layers, and it gains the active layer that the move tool and brushes will act on.
-2. **A Windows launcher**: double-clicking `start-pixelsoup.cmd` starts the dev server and opens
-   Pixelsoup in its own Microsoft Edge window, with no need to type `npm run dev`.
-
-They're independent: the launcher changes no app code, and the layer work doesn't rely on it.
+This PR adds layer management: Pixelsoup can now add, duplicate, delete, reorder, rename, merge
+and flatten layers, and it gains the active layer that the move tool and brushes will act on.
 
 ### 1. Layer management
 
@@ -37,24 +31,9 @@ This is a small step between steps 5 and 6 of the build order.
 The `.pixelsoup` format is unchanged. Layer order, names and pixels already round-trip, and the
 active layer isn't saved.
 
-### 2. Windows launcher
-
-A convenience for starting Pixelsoup on Windows without a terminal.
-
-- **One double-click**: `start-pixelsoup.cmd` in the repo root installs the dependencies the first
-  time, starts the dev server in a console window titled "Pixelsoup", and opens the app as soon as
-  the server answers.
-- **Its own window**: Pixelsoup opens in a Microsoft Edge app window, without tabs or an address
-  bar, or in the default browser if Edge is missing.
-- **Already running**: if Pixelsoup already answers at http://localhost:5173, the launcher only
-  opens another window instead of starting a second server.
-- **Quitting**: closing the console window stops the server.
-- **Shortcut**: the README shows how to make a desktop or taskbar shortcut that can be pinned.
-
 ## What's included
 
-Commits are meant to be reviewed one at a time. Commits 1–7 add layer management, and commit 8 adds
-the launcher.
+Commits are meant to be reviewed one at a time.
 
 ### Layer management
 
@@ -132,20 +111,6 @@ the launcher.
      The layer-ID and opacity notes moved into `docs/layers.md`, and it stays at 199 lines.
    - The README lists the layer features and has a layer shortcuts table.
 
-### Windows launcher
-
-8. **Windows launcher** (`start-pixelsoup.cmd`; no app code changes):
-   - If Pixelsoup already answers at http://localhost:5173, it opens another window and exits.
-   - Otherwise it checks that Node.js is installed, runs `npm ci` when `node_modules` is missing,
-     and runs the dev server in its console window, titled "Pixelsoup".
-   - A background job in the same console waits for the server to answer (up to 30 checks, about
-     a minute), then opens a Microsoft Edge app window, or the default browser without Edge.
-   - If the server can't start, the console shows the error and waits for a key.
-   - `.gitattributes` checks `*.cmd` files out with CRLF line endings.
-   - The README's "Getting started" describes the launcher and a pinnable shortcut. In `CLAUDE.md`,
-     the `npm run dev` row notes that the launcher runs the same server; the file stays at 199
-     lines.
-
 ## Design notes
 
 ### Layer management
@@ -194,28 +159,6 @@ the launcher.
     search, back and forward) doesn't run. They're ignored in text fields.
   - Only move and select repeat while held.
   - Alt+[ and Alt+] have no menu items, as menu shortcuts always include Ctrl/Cmd.
-
-### Windows launcher
-
-- **Same server as `npm run dev`**: the `dev` script is plain `vite`, so the launcher runs
-  `node node_modules\vite\bin\vite.js --strictPort` directly. npm's command shims reset the
-  console title, and the "Pixelsoup" title is what tells you which window keeps the server
-  running.
-- **`--strictPort`**: otherwise Vite moves to another port when 5173 is taken, and the launcher
-  would open the wrong address.
-- **Recognising a running Pixelsoup**: the script fetches http://localhost:5173 with Windows' own
-  `curl.exe` and looks for `<title>Pixelsoup</title>`, so another server on that port isn't
-  mistaken for it. The script's header says the port and title must stay in step with the dev
-  server and `index.html`, and `CLAUDE.md` notes that the launcher runs the dev server.
-- **Waiting for the server**: the server runs in the foreground of the console, so a background
-  job in the same console polls the page and opens the window once it answers. A connection to a
-  closed localhost port takes over 2 s to fail on Windows, so each poll has a 1 s connect timeout.
-- **Edge app mode** (`msedge --app=…`) gives Pixelsoup a window of its own. Edge comes with
-  Windows; if it isn't registered, the default browser opens instead.
-- **Pinnable shortcuts**: Windows doesn't offer to pin a shortcut to a `.cmd` file, but it pins one
-  whose target is `cmd.exe /c "…\start-pixelsoup.cmd"`, which is the form the README shows.
-- **CRLF line endings**: the repo checks text out with LF, but cmd.exe can misread labels in batch
-  files with LF endings, so `.gitattributes` makes `*.cmd` an exception.
 
 ## How to verify
 
@@ -289,31 +232,6 @@ events and by hand. Results, using a 640 × 480 JPEG and a centred 360 × 240 tr
 - Saving through the download fallback, then reloading and reopening, gave the same layer
   metadata and a byte-identical export.
 
-### Windows launcher
-
-The launcher has no automated tests. On Windows:
-
-- [ ] Double-click `start-pixelsoup.cmd`. A console titled "Pixelsoup" starts the server, and
-      Pixelsoup opens in its own Edge window once the server is ready.
-- [ ] Double-click it again. Another window opens within a few seconds, the second console closes
-      by itself, and no second server starts.
-- [ ] Close the console. The server stops.
-- [ ] With another program listening on port 5173, the launcher shows Vite's "Port 5173 is already
-      in use" error, waits for a key and opens no window.
-- [ ] Make a shortcut whose target is `cmd.exe /c "<path to>\start-pixelsoup.cmd"` and pin it to
-      the taskbar.
-
-Results on Windows 11 24H2 with Edge and Node 24.13.0, launching through a desktop shortcut of
-that form. The console opened in Windows Terminal, the system default.
-
-- The app window opened about 7 s after launch; Vite itself was ready in about 2 s.
-- A second launch opened another window after about 2 s. Its console closed by itself, and one
-  server kept running.
-- Closing the console stopped Vite and esbuild and freed the port.
-- With a stand-in server on port 5173, the launcher showed Vite's port error and opened no window.
-- The first-run branch was exercised in a scratch folder: it ran `npm ci`, then went on to start
-  Vite.
-
 ## Known limitations
 
 ### Layer management
@@ -329,17 +247,6 @@ that form. The console opened in Windows Terminal, the system default.
 - **Browser-reserved shortcuts**: Chrome, Edge and Safari may keep Ctrl/Cmd+Shift+N for a new
   private window. Layer → New Layer and the panel's button always work.
 
-### Windows launcher
-
-- **Windows only**: on macOS and Linux, run `npm run dev` as before.
-- **Dependencies are installed only when `node_modules` is missing**, so run `npm install` after
-  pulling changes to `package.json`.
-- **Port 5173 taken by another program**: the console shows Vite's error and waits for a key.
-  After that, the background job can keep the console open a while longer, typically under a
-  minute.
-- **Two quick double-clicks** can start two servers at once; the second fails with the same port
-  error.
-
 ## Deliberately out of scope
 
 ### Layer management
@@ -353,12 +260,3 @@ that form. The console opened in Windows Terminal, the system default.
 - **Blend modes beyond Normal, and layer masks** (step 12).
 - **Restoring the active layer on undo**, and thumbnail options (size, whole-canvas view).
 - **File format changes**: none were needed, and the active layer isn't saved.
-
-### Windows launcher
-
-- **Launchers for macOS and Linux.**
-- **An installable app**: the launcher runs the dev server. An installable PWA is still an open
-  decision in `CLAUDE.md`.
-- **Updating dependencies on every start**: running `npm install` each time would slow the start
-  and can rewrite `package-lock.json`.
-- **An app icon**: none was added to the repo.

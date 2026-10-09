@@ -163,7 +163,7 @@ npm ci
 npm run lint     # ESLint + Prettier check
 npm test         # 368 tests across 31 files (73 new)
 npm run build    # tsc -b for core/web/node projects, then vite build
-npm run dev      # http://localhost:5173 (or start-pixelsoup.cmd on Windows)
+npm run dev      # http://localhost:5173
 ```
 
 Unit tests cover:
