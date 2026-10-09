@@ -2,6 +2,8 @@ import { isValidImageSize } from './document';
 import type { Rect } from './geometry';
 import { intersectRects, unionRects } from './geometry';
 import { assertNever } from './layer';
+import type { Orientation } from './orientation';
+import { orientPixels, orientRect, orientedSize } from './orientation';
 
 /** How a new shape combines with the existing selection. */
 export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
@@ -267,6 +269,15 @@ export class Selection {
     // Unclipped, the bounds just move; clipped, the edge rows or columns left may be empty.
     const clipped = moved.width !== box.width || moved.height !== box.height;
     return new Selection(width, height, mask, clipped ? scanBounds(mask, width, moved) : moved);
+  }
+
+  /** The selection on the canvas turned or flipped by `orientation`, losslessly. */
+  orient(orientation: Orientation): Selection {
+    const size = orientedSize(orientation, this.width, this.height);
+    if (!this.box) return Selection.empty(size.width, size.height);
+    const mask = orientPixels(orientation, this.mask, this.width, this.height, 1);
+    const box = orientRect(orientation, this.box, this.width, this.height);
+    return new Selection(size.width, size.height, mask, box);
   }
 
   /** True if both select exactly the same pixels with the same coverage. */

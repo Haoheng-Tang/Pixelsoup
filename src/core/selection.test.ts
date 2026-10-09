@@ -326,6 +326,24 @@ describe('Selection.resizeCanvas', () => {
   });
 });
 
+describe('Selection.orient', () => {
+  const shape = fromRows(['.##..', '.#...', '.....']);
+
+  it('turns and flips the mask and its bounds with the canvas', () => {
+    const turned = shape.orient('rotate-cw');
+    expect([turned.width, turned.height]).toEqual([3, 5]);
+    expect(rowsOf(turned)).toEqual(['...', '.##', '..#', '...', '...']);
+    expect(turned.bounds()).toEqual({ x: 1, y: 1, width: 2, height: 2 });
+    expect(rowsOf(shape.orient('flip-horizontal'))).toEqual(['..##.', '...#.', '.....']);
+    expect(shape.orient('rotate-ccw').orient('rotate-cw').equals(shape)).toBe(true);
+  });
+
+  it('keeps an empty selection empty on the turned canvas', () => {
+    const none = Selection.empty(5, 3).orient('rotate-ccw');
+    expect([none.width, none.height, none.isEmpty]).toEqual([3, 5, true]);
+  });
+});
+
 describe('combineSelections', () => {
   const base = fromRows(['##..', '##..']);
   const shape = fromRows(['.##.', '.##.']);
