@@ -3,6 +3,10 @@
 An open-source, layered raster image editor that runs in your browser, like a lightweight
 Photoshop.
 
+## Live
+
+[Open Pixelsoup](https://REPLACE-ME.pages.dev)
+
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), make
 > rectangular and elliptical selections, move layers and selected pixels, and paint and erase
@@ -135,16 +139,7 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173.
-
-On Windows you can double-click `start-pixelsoup.cmd` instead. It installs the dependencies the
-first time, starts the dev server in a console window and opens Pixelsoup in its own Microsoft
-Edge window (or the default browser if Edge is missing). Keep the console open while you work;
-closing it stops the server. Running it again while the server is up only opens another window.
-It installs dependencies only when `node_modules` is missing, so run `npm install` after pulling
-changes to `package.json`. To start Pixelsoup from the desktop or taskbar, make a shortcut whose
-target is `cmd.exe /c "<path to>\start-pixelsoup.cmd"`; unlike a shortcut to the file itself,
-it can be pinned.
+Then open http://localhost:1619.
 
 To build and serve a production version:
 
@@ -154,6 +149,7 @@ npm run preview
 ```
 
 The `dist/` folder is a static site and can be hosted anywhere.
+See [docs/deploy.md](docs/deploy.md) for the Cloudflare Pages configuration and rollback process.
 
 ## Development
 
