@@ -33,6 +33,7 @@ function contentSecurityPolicy(): Plugin {
 }
 
 export default defineConfig({
+  base: '/',
   plugins: [react(), contentSecurityPolicy()],
   server: {
     port: 1619,
