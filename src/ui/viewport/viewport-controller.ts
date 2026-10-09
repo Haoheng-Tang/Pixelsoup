@@ -137,13 +137,18 @@ export class ViewportController {
 
     this.cleanups.push(
       editor.subscribe((change) => {
-        if (change.documentReplaced) {
-          // The new document may have another size: start over with a fresh composite.
+        if (change.documentReplaced || change.resized) {
+          // The canvas may have another size: start over with a fresh composite. A new
+          // document is fitted to the view; a resized one keeps the zoom, centred.
           const doc = this.editor.document;
           this.renderer = new CpuCompositeRenderer(doc.width, doc.height);
           this.renderer.update(doc);
-          if (this.cssWidth > 0 && this.cssHeight > 0) this.fitToView();
-          else this.hasFitted = false;
+          if (this.cssWidth <= 0 || this.cssHeight <= 0) this.hasFitted = false;
+          else if (change.documentReplaced) this.fitToView();
+          else {
+            const { zoom } = this.view;
+            this.setView(centered(zoom, doc.width, doc.height, this.cssWidth, this.cssHeight));
+          }
           this.invalidate();
           this.emitStatus();
           return;

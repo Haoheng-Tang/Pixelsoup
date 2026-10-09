@@ -295,6 +295,37 @@ describe('Selection.translate', () => {
   });
 });
 
+describe('Selection.resizeCanvas', () => {
+  const shape = Selection.fromMask(5, 4, [
+    ...[0, 0, 0, 0, 0],
+    ...[0, 255, 128, 64, 0],
+    ...[0, 255, 255, 255, 0],
+    ...[0, 0, 0, 0, 0],
+  ]);
+
+  it('moves the coverage onto a canvas of another size, cutting it to the new edges', () => {
+    const cut = shape.resizeCanvas(3, 2, -2, -1);
+    expect([cut.width, cut.height]).toEqual([3, 2]);
+    expect(rowsOf(cut)).toEqual(['++.', '##.']);
+    expect(cut.bounds()).toEqual({ x: 0, y: 0, width: 2, height: 2 });
+
+    const grown = shape.resizeCanvas(7, 5, 2, 1);
+    expect(rowsOf(grown)).toEqual(['.......', '.......', '...#++.', '...###.', '.......']);
+    expect(grown.bounds()).toEqual({ x: 3, y: 2, width: 3, height: 2 });
+  });
+
+  it('is empty when nothing is left on the new canvas, and a translation at the same size', () => {
+    expect(shape.resizeCanvas(1, 1, 0, 0).isEmpty).toBe(true);
+    expect(shape.resizeCanvas(5, 4, 1, -1).equals(shape.translate(1, -1))).toBe(true);
+    expect(shape.resizeCanvas(5, 4, 0, 0)).toBe(shape);
+  });
+
+  it('rejects invalid sizes and fractional offsets', () => {
+    expect(() => shape.resizeCanvas(0, 4, 0, 0)).toThrow(RangeError);
+    expect(() => shape.resizeCanvas(5, 4, 0, 0.5)).toThrow(RangeError);
+  });
+});
+
 describe('combineSelections', () => {
   const base = fromRows(['##..', '##..']);
   const shape = fromRows(['.##.', '.##.']);

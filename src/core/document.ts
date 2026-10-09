@@ -3,15 +3,19 @@ import type { Layer, LayerId } from './layer';
 import type { Selection } from './selection';
 
 /**
- * An image being edited: fixed canvas size, an ordered layer stack, and an optional
+ * An image being edited: a canvas size, an ordered layer stack, and an optional
  * selection. Named `ImageDocument` to avoid clashing with the DOM's global `Document`.
  *
  * Documents are plain mutable data, but only `Command`s (run through `History`)
  * may mutate them, so every change is undoable and reported to listeners.
  */
 export interface ImageDocument {
-  readonly width: number;
-  readonly height: number;
+  /**
+   * Canvas size in pixels. Only canvas commands (crop, canvas and image size, rotations)
+   * change it, and they report `resized` so views sized to the canvas rebuild.
+   */
+  width: number;
+  height: number;
   /** Layer stack ordered bottom (index 0) to top. */
   readonly layers: Layer[];
   /**

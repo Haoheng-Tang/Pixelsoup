@@ -8,6 +8,11 @@ export interface DocumentChange {
   /** Canvas-space region whose composite may have changed, or null if no pixels changed. */
   readonly dirty: Rect | null;
   /**
+   * True when the canvas changed size (crop, canvas or image size, a 90° rotation). Views
+   * sized to the canvas rebuild; `dirty` then covers the whole new canvas.
+   */
+  readonly resized?: boolean;
+  /**
    * Canvas-space region covering the selection's old and new bounds when the selection
    * changed (null or absent if it didn't). The composite is unaffected; views redraw the
    * selection outline.

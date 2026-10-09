@@ -46,7 +46,8 @@ export class ToolManager {
       },
     };
     this.unsubscribeEditor = editor.subscribe((change) => {
-      if (change.documentReplaced) this.cancel();
+      // A gesture in the old canvas's coordinates means nothing on a new or resized one.
+      if (change.documentReplaced || change.resized) this.cancel();
     });
     this.active = first;
     first.activate?.(this.context);

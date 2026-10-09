@@ -233,20 +233,35 @@ export class Selection {
    * by the total offset rather than step by step.
    */
   translate(dx: number, dy: number): Selection {
-    if (!Number.isInteger(dx) || !Number.isInteger(dy)) {
-      throw new RangeError(`Selections move by whole pixels, not ${dx}, ${dy}`);
-    }
+    assertWholePixels(dx, dy);
+    if (!this.box || (dx === 0 && dy === 0)) return this;
+    return this.shifted(this.width, this.height, dx, dy);
+  }
+
+  /**
+   * The selection on a canvas resized to `width` × `height`, with what was at (x, y) now
+   * at (x + dx, y + dy). Coverage that ends up off the new canvas is dropped.
+   */
+  resizeCanvas(width: number, height: number, dx: number, dy: number): Selection {
+    assertSize(width, height);
+    assertWholePixels(dx, dy);
+    if (width === this.width && height === this.height) return this.translate(dx, dy);
+    return this.shifted(width, height, dx, dy);
+  }
+
+  /** The mask moved by (dx, dy) onto a `width` × `height` canvas. */
+  private shifted(width: number, height: number, dx: number, dy: number): Selection {
     const box = this.box;
-    if (!box || (dx === 0 && dy === 0)) return this;
-    const { width, height } = this;
-    const moved = intersectRects(
-      { x: box.x + dx, y: box.y + dy, width: box.width, height: box.height },
-      { x: 0, y: 0, width, height },
-    );
-    if (!moved) return Selection.empty(width, height);
-    const mask = new Uint8ClampedArray(this.mask.length);
+    const moved =
+      box &&
+      intersectRects(
+        { x: box.x + dx, y: box.y + dy, width: box.width, height: box.height },
+        { x: 0, y: 0, width, height },
+      );
+    if (!box || !moved) return Selection.empty(width, height);
+    const mask = new Uint8ClampedArray(width * height);
     for (let y = moved.y; y < moved.y + moved.height; y++) {
-      const from = (y - dy) * width + moved.x - dx;
+      const from = (y - dy) * this.width + moved.x - dx;
       mask.set(this.mask.subarray(from, from + moved.width), y * width + moved.x);
     }
     // Unclipped, the bounds just move; clipped, the edge rows or columns left may be empty.
@@ -313,6 +328,12 @@ export function combineSelections(
 function assertSize(width: number, height: number): void {
   if (!isValidImageSize(width, height)) {
     throw new RangeError(`Invalid selection size ${width}x${height}`);
+  }
+}
+
+function assertWholePixels(dx: number, dy: number): void {
+  if (!Number.isInteger(dx) || !Number.isInteger(dy)) {
+    throw new RangeError(`Selections move by whole pixels, not ${dx}, ${dy}`);
   }
 }
 

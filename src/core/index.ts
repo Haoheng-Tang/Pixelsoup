@@ -13,6 +13,7 @@ export * from './commands/move-commands';
 export * from './commands/float-commands';
 export * from './commands/selection-commands';
 export * from './commands/stroke-commands';
+export * from './commands/canvas-commands';
 export * from './paint/dab';
 export * from './paint/dab-placer';
 export * from './paint/sample-color';
