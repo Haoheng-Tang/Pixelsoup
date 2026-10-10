@@ -8,6 +8,7 @@ import { useEditorRevision } from '../use-editor-revision';
 import type { ViewportController } from '../viewport/viewport-controller';
 import { ZoomIndicator } from '../viewport/ZoomIndicator';
 import { FileMenu } from './FileMenu';
+import { ImageMenu } from './ImageMenu';
 import { LayerMenu } from './LayerMenu';
 import { SelectMenu } from './SelectMenu';
 import { ToolPicker } from './ToolPicker';
@@ -33,6 +34,7 @@ export function Toolbar({ editor, controller, tools, colors, viewport }: Toolbar
       <span className="app-title">Pixelsoup</span>
       <FileMenu controller={controller} />
       <SelectMenu editor={editor} blocked={blocked} />
+      <ImageMenu editor={editor} controller={controller} blocked={blocked} />
       <LayerMenu editor={editor} blocked={blocked} />
       <ToolPicker tools={tools} />
       <ColorSwatches colors={colors} />

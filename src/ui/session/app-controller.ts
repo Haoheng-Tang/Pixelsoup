@@ -1,24 +1,43 @@
-import type { NewDocumentOptions } from '../../core';
-import { DEFAULT_NEW_DOCUMENT, assertNever } from '../../core';
+import type { Command, ImageDocument, NewDocumentOptions } from '../../core';
+import { DEFAULT_NEW_DOCUMENT, assertNever, canvasSizeCommand, imageSizeCommand } from '../../core';
+import type { RotateTarget } from '../image-actions';
+import { rotateLayerTarget } from '../image-actions';
+import type { FrameClock } from '../tools/frame-clock';
+import { browserClock } from '../tools/frame-clock';
 import type { DocumentSession } from './document-session';
 import { FileOperationError } from './document-session';
 import type { ExportOptions } from './file-types';
 import { DEFAULT_EXPORT_OPTIONS } from './file-types';
+import type {
+  CanvasSizeOptions,
+  CanvasSizeSettings,
+  ImageSizeOptions,
+  ImageSizeSettings,
+} from './image-options';
+import { DEFAULT_CANVAS_SIZE_SETTINGS, DEFAULT_IMAGE_SIZE_SETTINGS } from './image-options';
+import { LayerRotation } from './layer-rotation';
 
 export type FileCommand =
   'new' | 'open' | 'import' | 'save' | 'save-as' | 'export' | 'close' | 'demo';
+
+/** Image menu items that open a dialog. */
+export type ImageDialog = 'image-size' | 'canvas-size' | 'rotate-layer';
 
 /** The modal dialog currently shown, if any. */
 export type Modal =
   | { readonly kind: 'new-document' }
   | { readonly kind: 'export' }
+  | { readonly kind: 'image-size' }
+  | { readonly kind: 'canvas-size' }
+  | { readonly kind: 'rotate-layer'; readonly target: RotateTarget }
   | { readonly kind: 'confirm-discard'; readonly documentName: string }
   | { readonly kind: 'error'; readonly title: string; readonly message: string };
 
 /**
- * Runs File commands from the menu and shortcuts: asks before discarding unsaved work,
- * shows the New/Export dialogs, reports errors, and ignores new commands while a dialog
- * is open or an operation is still running. Plain TypeScript; React renders `modal`.
+ * Runs File commands from the menu and shortcuts and the Image menu's dialogs: asks
+ * before discarding unsaved work, shows the dialogs and carries out what they ask,
+ * reports errors, and ignores new commands while a dialog is open or an operation is
+ * still running. Plain TypeScript; React renders `modal`.
  */
 export class AppController {
   private currentModal: Modal | null = null;
@@ -28,8 +47,15 @@ export class AppController {
   private revisionCounter = 0;
   private lastNewDocument: NewDocumentOptions = DEFAULT_NEW_DOCUMENT;
   private lastExport: ExportOptions = DEFAULT_EXPORT_OPTIONS;
+  private lastImageSize: ImageSizeSettings = DEFAULT_IMAGE_SIZE_SETTINGS;
+  private lastCanvasSize: CanvasSizeSettings = DEFAULT_CANVAS_SIZE_SETTINGS;
+  /** Rotate Layer's preview while its dialog is open. */
+  private rotation: LayerRotation | null = null;
 
-  constructor(readonly session: DocumentSession) {}
+  constructor(
+    readonly session: DocumentSession,
+    private readonly clock: FrameClock = browserClock,
+  ) {}
 
   get modal(): Modal | null {
     return this.currentModal;
@@ -57,6 +83,16 @@ export class AppController {
   /** Initial settings for the Export dialog: the last ones exported with. */
   get exportOptions(): ExportOptions {
     return this.lastExport;
+  }
+
+  /** Initial settings for the Image Size dialog: the last ones resized with. */
+  get imageSizeSettings(): ImageSizeSettings {
+    return this.lastImageSize;
+  }
+
+  /** Initial settings for the Canvas Size dialog: the last ones resized with. */
+  get canvasSizeSettings(): CanvasSizeSettings {
+    return this.lastCanvasSize;
   }
 
   subscribe(listener: () => void): () => void {
@@ -140,10 +176,93 @@ export class AppController {
     resolve(discard);
   }
 
+  /**
+   * Opens one of the Image menu's dialogs, unless blocked. Rotate Layer only opens when
+   * there's something to turn (see `rotateLayerTarget`).
+   */
+  openDialog(dialog: ImageDialog): void {
+    if (this.blocked) return;
+    switch (dialog) {
+      case 'image-size':
+      case 'canvas-size':
+        this.show({ kind: dialog });
+        break;
+      case 'rotate-layer': {
+        const { editor } = this.session;
+        const target = rotateLayerTarget(editor);
+        if (!target) return;
+        this.rotation = new LayerRotation(editor, this.clock);
+        this.show({ kind: 'rotate-layer', target });
+        break;
+      }
+      default:
+        assertNever(dialog);
+    }
+  }
+
+  /** Confirms Image Size: resamples the document, committing a floating selection first. */
+  resizeImage(options: ImageSizeOptions): void {
+    if (this.currentModal?.kind !== 'image-size') return;
+    const { width, height, interpolation, unit, keepAspect } = options;
+    this.lastImageSize = { unit, keepAspect, interpolation };
+    this.show(null);
+    this.edit((doc) => imageSizeCommand(doc, width, height, interpolation));
+  }
+
+  /** Confirms Canvas Size, committing a floating selection first. */
+  resizeCanvas(options: CanvasSizeOptions): void {
+    if (this.currentModal?.kind !== 'canvas-size') return;
+    const { width, height, horizontal, vertical, relative } = options;
+    this.lastCanvasSize = { relative };
+    this.show(null);
+    this.edit((doc) => canvasSizeCommand(doc, width, height, horizontal, vertical));
+  }
+
+  /** Previews Rotate Layer at `degrees` clockwise; see `LayerRotation`. */
+  previewRotation(degrees: number): void {
+    if (this.currentModal?.kind === 'rotate-layer') this.rotation?.preview(degrees);
+  }
+
+  /** Confirms Rotate Layer at `degrees` clockwise. */
+  rotateLayer(degrees: number): void {
+    const rotation = this.rotation;
+    if (this.currentModal?.kind !== 'rotate-layer' || !rotation) return;
+    this.rotation = null;
+    this.show(null);
+    try {
+      rotation.preview(degrees);
+      rotation.finish();
+    } catch (error) {
+      this.showError(error);
+    }
+  }
+
   /** Closes the current dialog without acting (Cancel, Escape). */
   dismiss(): void {
-    if (this.currentModal?.kind === 'confirm-discard') this.answerDiscard(false);
-    else this.show(null);
+    if (this.currentModal?.kind === 'confirm-discard') {
+      this.answerDiscard(false);
+      return;
+    }
+    this.rotation?.cancel();
+    this.rotation = null;
+    this.show(null);
+  }
+
+  /**
+   * Executes the command `build` makes for the document, if it makes one, after
+   * committing a floating selection. `build` runs again after the commit, so the command
+   * sees the document as it then is.
+   */
+  private edit(build: (doc: ImageDocument) => Command | null): void {
+    const { editor } = this.session;
+    try {
+      if (!build(editor.document)) return;
+      editor.commitFloating();
+      const command = build(editor.document);
+      if (command) editor.history.execute(command);
+    } catch (error) {
+      this.showError(error);
+    }
   }
 
   /** Resolves to true if there is nothing to lose or the user agrees to discard it. */
