@@ -9,16 +9,13 @@ import type {
   ToolPointerSample,
 } from '../tools/tool';
 import type { ToolManager } from '../tools/tool-manager';
+import { createCheckerPattern } from './checkerboard';
 import type { DocumentPlacement } from './selection-overlay';
 import { ANT_STEP_MS, SelectionOverlay } from './selection-overlay';
 import type { ViewTransform } from './view-transform';
 import { centered, fitZoom, nextZoomStep, screenToDocument, zoomAt } from './view-transform';
 
 const BACKGROUND = '#1b1b1d';
-const CHECKER_LIGHT = '#ffffff';
-const CHECKER_DARK = '#cccccc';
-/** Checkerboard square size in CSS pixels (constant on screen regardless of zoom). */
-const CHECKER_SIZE = 8;
 /** Zoom change per pixel of wheel delta; one 100px notch ≈ ×1.16. */
 const WHEEL_ZOOM_SPEED = 0.0015;
 
@@ -35,11 +32,19 @@ type ZoomListener = (zoom: number) => void;
 export interface ViewportStatus {
   /** Document pixel under the pointer; null while the pointer is away from the canvas. */
   readonly pointer: { readonly x: number; readonly y: number } | null;
-  /** Size of the shape a tool is dragging, else of the selection's bounds; null if neither. */
+  /**
+   * Size of the shape a tool is dragging or the crop box, else of the selection's bounds;
+   * null if none.
+   */
   readonly selectionSize: { readonly width: number; readonly height: number } | null;
 }
 
 type StatusListener = (status: ViewportStatus) => void;
+
+/** While `blocked` (a dialog is open), keys belong to the dialog, not to panning or the tool. */
+export interface KeyGate {
+  readonly blocked: boolean;
+}
 
 interface PanDrag {
   pointerId: number;
@@ -102,7 +107,7 @@ export class ViewportController {
   private overlayDirty = false;
   private antPhase = 0;
   private placement: DocumentPlacement | null = null;
-  private checker: CanvasPattern | null = null;
+  private checker: CanvasPattern | string | null = null;
   private checkerDpr = 0;
   private status: ViewportStatus = { pointer: null, selectionSize: null };
   private cursor = '';
@@ -120,6 +125,7 @@ export class ViewportController {
     private readonly container: HTMLElement,
     private readonly editor: Editor,
     private readonly tools: ToolManager,
+    private readonly gate: KeyGate,
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-canvas';
@@ -184,6 +190,7 @@ export class ViewportController {
     this.listen(this.canvas, 'pointercancel', this.handlePointerCancel);
     this.listen(this.canvas, 'pointerenter', this.handlePointerEnter);
     this.listen(this.canvas, 'pointerleave', this.handlePointerLeave);
+    this.listen(this.canvas, 'dblclick', this.handleDoubleClick);
     // Stop the browser's middle-click autoscroll.
     this.listen(this.canvas, 'mousedown', (e) => {
       if (e.button === 1) e.preventDefault();
@@ -294,10 +301,8 @@ export class ViewportController {
   };
 
   private hasAnts(): boolean {
-    const overlay = this.tools.overlay;
-    return (
-      this.editor.document.selection !== null || (overlay !== null && overlay.shape !== 'brush')
-    );
+    const shape = this.tools.overlay?.shape;
+    return this.editor.document.selection !== null || shape === 'rect' || shape === 'ellipse';
   }
 
   /** A brush outline follows the pointer over the canvas, but not while panning. */
@@ -370,6 +375,8 @@ export class ViewportController {
     this.placement = {
       x: x0,
       y: y0,
+      width: w,
+      height: h,
       scaleX: w / this.renderer.width,
       scaleY: h / this.renderer.height,
     };
@@ -386,20 +393,11 @@ export class ViewportController {
   }
 
   private checkerPattern(): CanvasPattern | string {
-    if (this.checker && this.checkerDpr === this.dpr) return this.checker;
-    const size = Math.max(1, Math.round(CHECKER_SIZE * this.dpr));
-    const tile = document.createElement('canvas');
-    tile.width = tile.height = size * 2;
-    const tctx = tile.getContext('2d');
-    if (!tctx) return CHECKER_LIGHT;
-    tctx.fillStyle = CHECKER_LIGHT;
-    tctx.fillRect(0, 0, size * 2, size * 2);
-    tctx.fillStyle = CHECKER_DARK;
-    tctx.fillRect(size, 0, size, size);
-    tctx.fillRect(0, size, size, size);
-    this.checker = this.context.createPattern(tile, 'repeat');
-    this.checkerDpr = this.dpr;
-    return this.checker ?? CHECKER_LIGHT;
+    if (this.checker === null || this.checkerDpr !== this.dpr) {
+      this.checker = createCheckerPattern(this.context, this.dpr);
+      this.checkerDpr = this.dpr;
+    }
+    return this.checker;
   }
 
   private readonly handleWheel = (e: WheelEvent): void => {
@@ -485,6 +483,13 @@ export class ViewportController {
     this.invalidateOverlay();
   };
 
+  /** Follows the two clicks it ends; ignored while panning or mid-gesture. */
+  private readonly handleDoubleClick = (e: MouseEvent): void => {
+    if (e.button !== 0 || this.drag || this.spaceHeld || this.toolPointerId !== null) return;
+    this.modifiers = modifiersOf(e);
+    this.tools.doubleClick(this.toolEvent(e));
+  };
+
   private readonly handlePointerLeave = (): void => {
     this.pointerInside = false;
     this.invalidateOverlay();
@@ -564,7 +569,9 @@ export class ViewportController {
 
   private readonly handleKeyDown = (e: KeyboardEvent): void => {
     this.modifiers = modifiersOf(e);
-    if (isTextEntry(e.target)) return;
+    // The pointer may still be over the canvas when a dialog opens; Enter, Escape and
+    // Space must still reach the dialog.
+    if (isTextEntry(e.target) || this.gate.blocked) return;
     if (e.code === 'Space') {
       // Only claim Space while the user is working on the canvas, so it still
       // activates focused buttons and checkboxes elsewhere.
@@ -584,7 +591,7 @@ export class ViewportController {
       this.setSpaceHeld(false);
       return;
     }
-    if (isTextEntry(e.target)) return;
+    if (isTextEntry(e.target) || this.gate.blocked) return;
     if (this.toolWantsKeys() && this.tools.keyUp(toolKeyEvent(e))) e.preventDefault();
   };
 

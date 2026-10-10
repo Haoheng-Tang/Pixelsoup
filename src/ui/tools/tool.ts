@@ -81,10 +81,21 @@ export interface BrushOverlay {
 }
 
 /**
+ * The Crop tool's box, with handles; everything outside it is dimmed. It may extend past
+ * the canvas.
+ */
+export interface CropOverlay {
+  readonly shape: 'crop';
+  readonly rect: Rect;
+  /** Show a rule-of-thirds grid inside the box (while it's being adjusted). */
+  readonly grid: boolean;
+}
+
+/**
  * What the viewport draws over the document for the active tool. Plain data in document
  * coordinates, so tools stay free of canvas APIs.
  */
-export type ToolOverlay = ShapeOverlay | BrushOverlay;
+export type ToolOverlay = ShapeOverlay | BrushOverlay | CropOverlay;
 
 /** What `[` and `]` step: a brush's size, or with Shift its hardness. */
 export type BrushProperty = 'size' | 'hardness';
@@ -128,6 +139,8 @@ export interface Tool {
   pointerDown?(event: ToolPointerEvent): void;
   pointerMove?(event: ToolPointerEvent): void;
   pointerUp?(event: ToolPointerEvent): void;
+  /** A double-click with the primary button, after the two presses and releases it ends. */
+  doubleClick?(event: ToolPointerEvent): void;
   /**
    * Abandon any gesture in progress without committing it: the pointer was cancelled,
    * Escape was pressed, the window lost focus, or the tool or document is changing.

@@ -121,6 +121,12 @@ export class ToolManager {
     this.active.pointerUp?.(event);
   }
 
+  /** Routes a double-click to the active tool, unless a pointer gesture is in progress. */
+  doubleClick(event: ToolPointerEvent): void {
+    if (this.pointerIsDown) return;
+    this.active.doubleClick?.(event);
+  }
+
   /** Abandons the active tool's gesture, if any (pointer cancel, blur, document swap). */
   cancel(): void {
     this.pointerIsDown = false;

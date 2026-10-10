@@ -60,7 +60,7 @@ export function StatusBar({ viewport, tools }: StatusBarProps) {
           {NONE}
         </span>
       </span>
-      <span className="status-item" title="Selection size (pixels)">
+      <span className="status-item" title="Selection or crop size (pixels)">
         <span className="status-label">W × H</span>
         <span ref={sizeRef} className="status-value">
           {NONE}
