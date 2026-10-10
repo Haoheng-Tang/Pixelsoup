@@ -46,8 +46,8 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
   without the DOM lib or any `@types`, and ESLint restricts its imports.
 - **`src/ui/`** holds React panels plus the imperative canvas viewport. It may import core, never
   the other way round. Browser code must not use Node or shell APIs (lint-enforced).
-- **Document model**: `ImageDocument` has `width`, `height`, an ordered layer stack
-  (`layers[0]` is the bottom) and a `selection` slot.
+- **Document model**: `ImageDocument` (not `Document`, the DOM global) has `width`, `height`, an
+  ordered layer stack (`layers[0]` is the bottom) and a `selection` slot.
 - **Layers** are a discriminated union on `kind`. Today only `RasterLayer` exists: its own
   `PixelBuffer` (RGBA8, sRGB, straight alpha), an offset `x`/`y` (may be negative or extend past
   the canvas), `opacity` (0–1), `visible`, and `blendMode`. Text and adjustment layers are added
@@ -55,7 +55,7 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
   in `assertNever` so the compiler points to each place that needs updating.
 - **Selection** is an immutable coverage mask the size of the canvas (`Selection`, 0–255).
   `doc.selection` is `null` for "no selection" (everything editable), never empty, and set by
-  `SetSelectionCommand` (undoable; not an unsaved change) or moved with a floating selection.
+  `SetSelectionCommand` (undoable; not an unsaved change). Moves and transforms carry or clear it.
   **Invariant: every pixel edit clips to a non-null `doc.selection`, weighting by coverage / 255.**
 - **Undo/redo is command-based.** Every document mutation is a `Command` (`apply` / `revert`,
   returning a `DocumentChange` with dirty rects) run through `editor.history.execute(cmd)`;
@@ -78,12 +78,13 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
   × layer opacity) into its own output, touching only the dirty regions. `CpuCompositor` is the
   reference; on the UI side `CompositeRenderer` (a `CanvasImageSource`) is the GPU seam.
 - **Viewport** (`ViewportController`) is plain TypeScript owning its `<canvas>` and an overlay
-  for ants and tool previews. Input never goes through React state, redraws are coalesced with
-  `requestAnimationFrame`, and readouts (zoom %, status bar) update the DOM directly.
+  (ants, previews). Input skips React state, redraws coalesce per frame, readouts write the DOM.
 - **Tools** (`src/ui/tools`) implement `Tool` (document-space pointer and key handlers, options
   panel, preview overlay). `ToolManager` holds the active tool; the viewport routes input to it
   after its own pan and zoom. Tools edit only through commands; painting tools run the core
   stroke engine once per frame. Colours (`Colors`) are session state. Details: @docs/tools.md
+- **Transforms**: Crop, Canvas Size, turns and flips (lossless), Image Size and Rotate Layer are
+  core commands; resampling interpolates premultiplied alpha. Details: @docs/transform.md
 
 ## Folder layout
 
@@ -91,28 +92,29 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
 index.html               Vite entry; vite.config.ts: build + Vitest config, production CSP
 eslint.config.js         lint rules incl. core/browser import boundaries
 tsconfig*.json           project references: core (no DOM), web (src/), node (configs)
-docs/                    file-format.md, tools.md (tools, selections, painting), layers.md
+docs/                    file-format.md, layers.md, tools.md, transform.md, deploy.md
 src/
   core/                  pure logic – no DOM/React/Node; index.ts: the public barrel for ui/
     pixel-buffer.ts      RGBA8 buffers; pixel-snapshot.ts: saved pixel rects for undo
-    geometry.ts          Rect helpers; layer.ts: Layer union, RasterLayer, BlendMode
+    geometry.ts          Rect helpers; layer.ts: Layer union; orientation.ts: quarter turns, flips
     selection.ts         Selection masks; selection-outline.ts: outline tracing for the ants
     document.ts          ImageDocument, layer IDs; floating-selection.ts: the Move tool's float
     editor.ts            Editor: document + history + change events + save point + active layer
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            commands: layer props and stack, merge, selection, move, float, stroke
+    commands/            layers, merge, selection, move, float, stroke, crop/canvas, transforms
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
     paint/               dabs and their placement, stroke masks, paint math, colour sampling
+    resample/            kernels, resizing, affine transforms (premultiplied interpolation)
     serialization/       .pixelsoup read/write, PngCodec interface
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
-    use-*.ts             keyboard shortcut hooks; select-commands.ts, layer-actions.ts: menu actions
+    use-*.ts             shortcut hooks; select-commands, layer-actions, image-actions: menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
-    session/             DocumentSession, AppController, file types
-    dialogs/             New, Export, confirm-discard and error dialogs
+    session/             DocumentSession, AppController, file types, Rotate Layer preview
+    dialogs/             New, Export, Image/Canvas Size, Rotate Layer, confirm and error dialogs
     color/               Colors (foreground, background), swatches, HSV picker, colour math
-    tools/               Tool, ToolManager; marquee, move, brush/eraser, eyedropper tools, options
+    tools/               Tool, ToolManager; marquee, move, brush/eraser, eyedropper, crop; options
     viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
     panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel (drag, thumbnails)
@@ -132,9 +134,8 @@ src/
   closures. Reuse scratch buffers.
 - Exhaustive `switch` over unions with `assertNever`. No `any`; narrow interfaces between modules.
 - Comment only what isn't obvious from the code (invariants, units, coordinate spaces, why).
-- Coordinates: document space is integer pixels from the canvas's top-left. Layer offsets
-  translate layer space to document space. The viewport maps document space to CSS pixels with
-  `screen = doc * zoom + pan`.
+- Coordinates: document space is integer pixels from the canvas's top-left; layer offsets map
+  layer space into it, and the viewport maps it to CSS pixels with `screen = doc * zoom + pan`.
 
 ## Commands
 
@@ -162,7 +163,7 @@ Cloudflare Pages deploys `main` and previews each PR. Test previews before mergi
    - then layer management (done: active layer, layer commands, Layer menu, thumbnails)
 6. Move tool (done: layer moves and nudges, floating selections, pixel snapshots)
 7. Brush / eraser (done: stroke engine, colours and picker, eyedropper)
-8. Crop / rotate
+8. Crop / rotate (done: Crop tool, Image menu, resampling engine)
 9. Adjustments
 10. Lasso + magic wand
 11. Text
@@ -175,7 +176,6 @@ Cloudflare Pages deploys `main` and previews each PR. Test previews before mergi
   with Vite 7) and minimal main-process code; sandboxed preload scripts must be CommonJS.
 - **Vite 7 for now.** Vite 8 runs on Rolldown/Oxc prebuilt binaries; check them against the
   no-Rust constraint (AppLocker in particular) before upgrading.
-- **`ImageDocument`**, not `Document`, to avoid clashing with the DOM global.
 - **Startup** is a new blank 1920×1080 white document; the demo is under File → Demo Document.
 - **`.pixelsoup` is the native format**: a zip of `document.json` plus one PNG per raster layer.
   PNG, JPEG and WebP are import and export only. Layer PNGs use the lossless codec in
@@ -186,7 +186,7 @@ Cloudflare Pages deploys `main` and previews each PR. Test previews before mergi
 Simplest choices made so far that may be revisited:
 
 - **History storage**: `LinearHistory` keeps whole commands and their snapshots, up to 200 steps.
-  Strokes keep 64 px tiles (11 MB to cover 1920×1200); other pixel edits may need tiles later.
+  Strokes keep 64 px tiles (11 MB to cover 1920×1200); Image Size and transforms keep whole layers.
 - **Dirty rects for property changes** are the layer's bounds clipped to the canvas. Each change
   recomposites that rect synchronously; batching or tiling can come later if profiling demands it.
 - **Viewport rendering**: zoom range 1 %–6400 %; bilinear below 100 %, nearest-neighbour at and

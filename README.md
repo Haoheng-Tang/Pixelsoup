@@ -9,8 +9,9 @@ Photoshop.
 
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), make
-> rectangular and elliptical selections, move layers and selected pixels, and paint and erase
-> with soft or hard brushes. Cropping, adjustments and other tools are on the roadmap.
+> rectangular and elliptical selections, move layers and selected pixels, paint and erase with
+> soft or hard brushes, and crop, resize, rotate and flip images. Adjustments and other tools
+> are on the roadmap.
 
 ## Features so far
 
@@ -46,8 +47,16 @@ Photoshop.
 - Foreground and background colours as two toolbar swatches, each with a picker (a
   saturation/brightness square, a hue strip, and hex and R, G, B fields)
 - Eyedropper that picks a colour from the image, or from the active layer alone
-- Status bar with the pointer's document position, the selection size, and brief messages such
-  as a new brush size
+- Crop tool: draw a box, then resize it with eight handles or move it, freely or at a fixed
+  ratio (the original's, 1:1, 4:3, 3:2, 16:9 or custom), with a rule-of-thirds grid while
+  adjusting. A box past the canvas enlarges it with transparent space. Cropped-away pixels stay
+  on their layers unless "Delete cropped pixels" is on
+- Image menu: Crop to Selection; Image Size in pixels or percent, resampled with nearest
+  neighbour or bilinear; Canvas Size with a 3×3 anchor and relative sizes; lossless 90° and
+  180° rotations and horizontal and vertical flips; and Rotate Layer by any angle, with a live
+  preview. Resampling never darkens edges next to transparency
+- Status bar with the pointer's document position, the selection or crop size, and brief
+  messages such as a new brush size
 - Undo/redo for every edit, selection changes included (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y)
 
 ### Selection shortcuts
@@ -99,8 +108,9 @@ new private window; Layer → New Layer and the panel's button always work.
 
 A floating selection stays on its own layer until it's committed. That happens by itself when
 you deselect or change the selection, pick another layer or tool, add a layer, merge, flatten,
-save or export, so a saved file never contains one. Each lift, move and commit is an undo step,
-and undoing a commit floats the pixels again.
+crop, change the image or canvas size, rotate or flip the canvas, save or export, so a saved
+file never contains one. Each lift, move and commit is an undo step, and undoing a commit
+floats the pixels again.
 
 ### Painting shortcuts
 
@@ -119,6 +129,23 @@ and undoing a commit floats the pixels again.
 Each stroke is one undo step, clipped to the selection. The Eraser erases to transparency on
 every layer. Pen pressure only applies to pens; mouse strokes use the full size and opacity.
 The colours aren't saved, and changing them isn't an undo step.
+
+### Crop shortcuts
+
+| Keys                             | Action                                                  |
+| -------------------------------- | ------------------------------------------------------- |
+| C                                | crop tool (the box starts as the selection's bounds)    |
+| Drag                             | draw a crop box                                         |
+| Drag a handle, or inside the box | resize, move                                            |
+| Shift during a drag              | keep the box square, or its shape (with the Free ratio) |
+| Alt during a drag                | draw or resize from the centre                          |
+| Enter, or double-click inside    | crop                                                    |
+| Esc                              | remove the box (during a drag: put it back as it was)   |
+
+Each crop is one undo step. The Image menu holds the rest: Crop to Selection, Image Size…,
+Canvas Size…, the rotations and flips (exact: four quarter turns or two flips give back the
+same pixels), and Rotate Layer…, which turns the active layer, or just the selected pixels.
+They have no shortcuts. More on how they work: [docs/transform.md](docs/transform.md).
 
 ### Saving and browsers
 

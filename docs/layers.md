@@ -113,8 +113,12 @@ its source, the selection and position as lifted, and a `PixelSnapshot` of the p
   Layer and Flatten Image, first; making another layer active (clicking its row, Alt+[ or
   Alt+]); hiding or fading the source; any selection change (a marquee, Select All, Deselect,
   Inverse); switching from the Move tool to another; Save, Save As and Export, after the file
-  picker (cancelling it keeps the selection floating); and Alt+drag or Alt+arrow with the Move
-  tool, which then lifts a copy.
+  picker (cancelling it keeps the selection floating); Alt+drag or Alt+arrow with the Move
+  tool, which then lifts a copy; and cropping (the Crop tool or Crop to Selection), Image Size,
+  Canvas Size and the canvas turns and flips, first.
+- **Rotate Layer** on a floating selection turns it, outline and all ("Rotate Selection"), and
+  marks it `edited` like a stroke; with a plain selection it lifts the selected pixels first.
+  See [transform.md](transform.md).
 - **Not while floating**: Duplicate, Delete and Move Layer Up/Down are disabled, and the
   floating layer's row can't be renamed, dragged, hidden or faded.
 
@@ -179,7 +183,8 @@ The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts.
   "Background".
 - **Memory**: merge, flatten, and a commit or stroke that grows its layer keep the replaced
   layers whole in history; a lift, any other commit and any other stroke keep only what they
-  changed (a stroke in 64 px tiles).
+  changed (a stroke in 64 px tiles). Image Size and Rotate Layer keep whole layers too:
+  [transform.md](transform.md#open-decisions).
 - **Thumbnails** show the layer's own bounds; Photoshop's default shows the whole canvas.
 - **Long lists**: dragging doesn't auto-scroll the layer list.
 - **Floating edges**: until it's committed or moved, a floating selection's partly selected

@@ -1,7 +1,7 @@
 # Tools, selections and painting
 
-How editing tools plug into the viewport, how selections work, and how the painting tools
-paint. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
+How editing tools plug into the viewport, how selections work, how the painting tools paint,
+and the Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
 `src/core/commands/stroke-commands.ts` (the stroke engine), `src/ui/tools` (tools),
 `src/ui/color` (colours) and `src/ui/viewport` (input routing and drawing).
 
@@ -13,7 +13,8 @@ paint. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
 - Build one with `Selection.fromRect`, `fromEllipse` (exact anti-aliased edge coverage),
   `selectAll`, `empty` or `fromMask`. Combine with `union` (max), `subtract` (min(a, 255 − b)),
   `intersect` (min) and `invert` (255 − a); move with `translate(dx, dy)` (whole pixels;
-  coverage moved off the canvas is lost); read with `coverageAt(x, y)` (0 off the canvas) and
+  coverage moved off the canvas is lost); follow canvas changes and transforms with
+  `resizeCanvas`, `orient` and `transform`; read with `coverageAt(x, y)` (0 off the canvas) and
   `equals`. Every operation returns a new selection.
 - `combineSelections(base, shape, mode)` applies a tool's mode (`replace`, `add`, `subtract`,
   `intersect`) and returns null when nothing ends up selected.
@@ -22,14 +23,15 @@ paint. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
   would change nothing). It reports the old and new bounds as `DocumentChange.selectionDirty`
   with no pixel `dirty` rect, and sets `changesContent: false`: selection changes are undo steps
   but don't make the document unsaved, because selections aren't saved in `.pixelsoup` files.
-  The only other command that changes it is a `MoveLayerCommand` given a `selection`: moving a
-  floating selection moves its outline in the same step.
+  Other commands change it as they move pixels: a `MoveLayerCommand` given a `selection` moves
+  a floating selection's outline in the same step, and the canvas and transform commands carry
+  or clear it ([transform.md](transform.md)).
 - **Clipping invariant.** Every pixel-editing command clips to `doc.selection` when it isn't
   null, treating coverage as a per-pixel weight: `result = old + (new − old) × coverage / 255`.
   Lifting a floating selection weights the pixels it cuts out the same way, and brush and
   eraser strokes multiply each pixel's paint weight by its coverage / 255. Layer properties
-  such as opacity and visibility, and whole-layer operations (moving, merging, flattening,
-  committing a floating selection), aren't pixel edits and ignore the selection.
+  such as opacity and visibility, and whole-layer operations (moving, transforming, merging,
+  flattening, committing a floating selection), aren't pixel edits and ignore the selection.
 
 ## The `Tool` interface
 
@@ -43,12 +45,14 @@ paint. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
 | `activate(ctx)`, `deactivate()` | `ctx` gives the `Editor`, `overlayChanged()` (call when `overlay` or `cursor` changes) and `showMessage()`   |
 | `pointerDown/Move/Up(e)`        | `e.x`, `e.y`: fractional document coordinates (pixel (px, py) spans [px, px + 1)); plus `zoom` and modifiers |
 | `cancel()`                      | abandon the gesture in progress without committing it                                                        |
+| `doubleClick?(e)`               | a primary-button double-click, outside any gesture (the Crop tool crops)                                     |
 | `keyDown/keyUp(e)`              | return true if the key was used, so the viewport suppresses the browser's default action                     |
 | `stepBrush?(property, dir)`     | painting tools: `[` and `]` step the brush size down and up, with Shift its hardness                         |
 
 - **Overlays**: a `ShapeOverlay` (`rect` or `ellipse`) previews a marquee; `hidesSelection`
   hides the selection's outline meanwhile. A `BrushOverlay` (`brush`, with a centre and a
-  diameter) is a painting tool's outline.
+  diameter) is a painting tool's outline. A `CropOverlay` (`crop`, with the box and whether to
+  show its grid) is the Crop tool's box.
 - **Pointer events** from a pen carry its `pressure` (0–1; mice and touch report none). A move
   also lists every position the browser coalesced into it since the previous event
   (`samples`, oldest first, ending at `x`, `y`), so fast strokes keep their shape.
@@ -65,8 +69,8 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   and is refused while a pointer gesture is in progress.
 - Shortcuts (`useToolShortcuts`): tools that share a key form a group. The key selects the
   group's last-used tool and Shift+key cycles through it. They're ignored with Ctrl, Cmd or Alt,
-  while typing and while a dialog is open. `TOOL_KEYS` has M marquee, V move, B brush, E eraser
-  and I eyedropper, and reserves L lasso, W wand, T text and C crop.
+  while typing and while a dialog is open. `TOOL_KEYS` has M marquee, V move, B brush, E eraser,
+  I eyedropper and C crop, and reserves L lasso, W wand and T text.
 - `[` and `]`, with or without Shift (`useBrushShortcuts`), go to `ToolManager.stepBrush`
   wherever the pointer is: the active tool's `stepBrush` handles them, if it has one. X and D
   (`useColorShortcuts`) swap and reset the colours. Both are ignored while typing and while a
@@ -78,8 +82,11 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   or another tool becomes active, the viewport re-sends the pointer so the tool sees its
   document position (and a painting tool can show its outline straight away).
 - Keys go to the tool during a gesture, while the pointer is over the canvas, or while the
-  canvas has focus. Escape during a gesture cancels it, as do pointer cancel, window blur, a
-  tool switch and a document swap.
+  canvas has focus, but never while a dialog is open (the viewport's `KeyGate`), so Enter and
+  Escape reach the dialog. Escape during a gesture cancels it, as do pointer cancel, window
+  blur, a tool switch and a document swap.
+- A primary-button double-click goes to the tool's `doubleClick`, unless the view is panning or
+  a gesture is in progress.
 
 ## Drawing
 
@@ -102,13 +109,18 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   pointer is over the canvas (or during a stroke) and not while panning; the tool's own CSS
   cursor is `none` meanwhile.
 - A selection with no pixel at 50 % coverage or more has no outline.
+- The crop box shades everything outside it (`--crop-shade`), shows any area it adds beyond the
+  canvas as a transparent checkerboard continuing the composite's, and while a drag adjusts it
+  draws a rule-of-thirds grid (`--crop-grid` over `--crop-grid-halo`). Its outline and 7 CSS px
+  square handles sit on the device pixel grid; edge handles are left out where they wouldn't
+  fit between the corners.
 - A floating selection on the move is a new selection each frame it moves, so its outline is
   traced again each time (about 7 ms for a 2000 × 1500 selection). Reusing the cached path with
   an offset would be cheaper, except where the canvas edge clips the selection.
 
-The status bar shows the document pixel under the pointer and the size of the tool's preview
-(while dragging) or of the selection bounds. The viewport reports both and `StatusBar` writes them
-straight into the DOM, as it does the tools' `showMessage` text.
+The status bar shows the document pixel under the pointer and the size of the tool's preview (a
+marquee while dragging, or the crop box), else of the selection bounds. The viewport reports both
+and `StatusBar` writes them straight into the DOM, as it does the tools' `showMessage` text.
 
 ## Marquee tools
 
@@ -276,6 +288,38 @@ A new painting tool (a pencil, a clone stamp, a blur brush) reuses as much of th
 - **Shift while painting** only matters at the press (a straight line); it doesn't constrain
   a drag to an axis.
 
+## Crop tool
+
+`CropTool` (C) crops the canvas to a box with `cropCommand` ([transform.md](transform.md)). The
+box is session state: it starts as the selection's bounds when the tool becomes active, and
+goes away when the tool does, or when the document is replaced or changes size.
+
+- **Drawing**: dragging outside the box, or anywhere with no box, draws a new one, corners
+  snapped to whole pixels, at least 1 × 1. It may reach past the canvas, which cropping then
+  enlarges with transparent space.
+- **Adjusting**: a press within 6 CSS px of an edge (`HANDLE_REACH`), anywhere along it, drags
+  that edge, or near a corner both edges; inside that, a press moves the box. An edge reaches
+  in at most a third of the box, so even a small box keeps a middle to move it by. Dragging an
+  edge past the opposite one flips the box, and the cursor shows what a press would do. A drag
+  takes hold after 3 CSS px of travel; a click changes nothing.
+- **Shift and Alt**: in Free, Shift keeps the box square while drawing and keeps its shape
+  while resizing. Alt draws or resizes from the centre. Pressing or releasing either mid-drag
+  updates the box straight away.
+- **Ratio** (options bar): Free, Original (the image's), 1:1, 4:3, 3:2, 16:9 or Custom W:H
+  (terms up to 10000, decimals allowed). Original and the presets fit a portrait box as well as
+  a landscape one: the drag's direction decides while drawing, the box's shape while resizing.
+  1:1 and Custom are exact. Dragging an edge with a ratio sets the other side about its centre.
+  Changing the ratio reshapes the box about its centre, keeping its area and orientation.
+- **Delete cropped pixels** (off by default) trims every layer to the new canvas. Off, layers
+  keep the pixels outside it, which come back if the canvas grows again.
+- **Committing**: Enter, a double-click inside the box or the options bar's ✓ crops, as one
+  undo step ("Crop") after committing a floating selection; Escape or ✗ removes the box. A box
+  over 8192 pixels on a side is refused with a message. Escape mid-drag, pointer cancel and
+  window blur put back the box from before the press.
+
+The status bar shows the box's size, and the grid shows while a drag adjusts the box (see
+[Drawing](#drawing)). `crop-geometry.ts` holds the box arithmetic, tested on its own.
+
 ## Adding a tool
 
 1. Implement `Tool` in `src/ui/tools/`, using a key from `TOOL_KEYS`.
@@ -286,4 +330,4 @@ A new painting tool (a pencil, a clone stamp, a blur brush) reuses as much of th
 3. Add the tool in `createToolManager` and give it an icon in `ToolPicker`.
 4. Unit-test pointer sequences against `FakeViewport` (`fake-viewport.ts`) and, for tools that
    work per animation frame, `FakeClock` (`fake-clock.ts`), as `marquee-tool.test.ts`,
-   `move-tool.test.ts` and `paint-tool.test.ts` do.
+   `move-tool.test.ts`, `paint-tool.test.ts` and `crop-tool.test.ts` do.
