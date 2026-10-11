@@ -6,6 +6,7 @@ import {
   parseWhole,
   proportionalText,
   sizeText,
+  swapSideText,
   toPixels,
   toggleRelativeText,
 } from './size-math';
@@ -73,5 +74,19 @@ describe('Canvas Size fields', () => {
     expect(toggleRelativeText('200', true, 600)).toBe('800');
     expect(toggleRelativeText('-50', true, 600)).toBe('550');
     expect(toggleRelativeText('', false, 600)).toBe('');
+  });
+
+  it('swaps width and height, turning the size asked for on its side', () => {
+    // Sizes change places as they are, usable or not.
+    expect(swapSideText('2400', false, 2400, 3840)).toBe('2400');
+    expect(swapSideText('oops', false, 2400, 3840)).toBe('oops');
+    // +200 × +100 on 3840 × 2400 asks for 4040 × 2500. Swapped, 2500 × 4040 is a change of
+    // 2500 − 3840 = −1340 to the width and 4040 − 2400 = +1640 to the height.
+    expect(swapSideText('100', true, 2400, 3840)).toBe('-1340');
+    expect(swapSideText('+200', true, 3840, 2400)).toBe('1640');
+    // Swapping back gives the changes again.
+    expect(swapSideText('-1340', true, 3840, 2400)).toBe('100');
+    expect(swapSideText('1640', true, 2400, 3840)).toBe('200');
+    expect(swapSideText('', true, 3840, 2400)).toBe('');
   });
 });

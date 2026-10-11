@@ -119,9 +119,13 @@ transform.
 Crop to Selection crops to the selection's bounds, keeping the pixels past them. Image Size…
 takes a width and height in pixels or percent, with an aspect lock and Nearest neighbour or
 Bilinear (the default). Canvas Size… takes a width and height (or the change in each, with
-Relative) and a 3 × 3 anchor grid. The dialogs remember their settings for the session. The
-turns and flips act straight away. Items are disabled when they would do nothing. There are
-no shortcuts: Photoshop's use Ctrl+Alt, which is AltGr on many keyboards.
+Relative) and a 3 × 3 anchor grid. The ⇄ button between them swaps the width and height, to
+turn a landscape canvas portrait or back. With Relative it swaps the sizes the changes give and
+works the changes out again: on a 3840 × 2400 canvas, +200 and +100 (4040 × 2500) become −1340
+and +1640 (2500 × 4040). The button comes after Height in the Tab order, and a click leaves
+the focus where it was, so Enter still resizes. The dialogs remember their settings for the
+session. The turns and flips act straight away. Items are disabled when they would do nothing.
+There are no shortcuts: Photoshop's use Ctrl+Alt, which is AltGr on many keyboards.
 
 **Rotate Layer…** turns the active layer, or with a selection just the selected pixels, which
 it lifts into a floating selection first (as the Move tool would). Its dialog sits at the top

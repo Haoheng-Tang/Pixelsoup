@@ -56,3 +56,15 @@ export function toggleRelativeText(text: string, relative: boolean, size: number
   if (!Number.isFinite(pixels)) return text;
   return String(relative ? pixels : pixels - size);
 }
+
+/**
+ * A Canvas Size field's text when width and height swap, moving from the side that is
+ * `from` pixels to the one that is `to`. It asks for the same size: as it is, or with
+ * `relative` as the change that gives that size from `to`. Unchanged if it isn't a whole
+ * number.
+ */
+export function swapSideText(text: string, relative: boolean, from: number, to: number): string {
+  if (!relative) return text;
+  const pixels = canvasPixels(text, true, from);
+  return Number.isFinite(pixels) ? String(pixels - to) : text;
+}

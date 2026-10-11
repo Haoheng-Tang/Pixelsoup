@@ -4,7 +4,7 @@ import { MAX_IMAGE_SIZE, isValidImageSize } from '../../core';
 import type { CanvasSizeOptions, CanvasSizeSettings } from '../session/image-options';
 import { Dialog } from './Dialog';
 import { NumberField } from './NumberField';
-import { canvasPixels, toggleRelativeText } from './size-math';
+import { canvasPixels, swapSideText, toggleRelativeText } from './size-math';
 
 interface CanvasSizeDialogProps {
   /** The document's current size. */
@@ -48,6 +48,11 @@ export function CanvasSizeDialog({
     setHeightText(toggleRelativeText(heightText, relative, height));
     setRelative(next);
   };
+  // Asks for the size turned on its side; with Relative, the changes that give it.
+  const swapSides = () => {
+    setWidthText(swapSideText(heightText, relative, height, width));
+    setHeightText(swapSideText(widthText, relative, width, height));
+  };
   const fieldProps = (size: number) => ({
     unit: 'px',
     describedBy: hintId,
@@ -68,7 +73,7 @@ export function CanvasSizeDialog({
           onResize({ width: newWidth, height: newHeight, horizontal, vertical, relative });
         }}
       >
-        <div className="size-fields">
+        <div className="size-fields swappable">
           <NumberField
             label={relative ? 'Width change' : 'Width'}
             value={widthText}
@@ -84,6 +89,27 @@ export function CanvasSizeDialog({
             invalid={!isValidImageSize(1, newHeight)}
             {...fieldProps(height)}
           />
+          {/* Last, so Tab goes from width to height; the grid shows it between them. A click
+              leaves the focus where it was, so Enter still resizes rather than swapping back. */}
+          <button
+            type="button"
+            className="swap-button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={swapSides}
+            title="Swap width and height"
+            aria-label="Swap width and height"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M3 5.5h10M10.5 3 13 5.5 10.5 8M13 10.5H3M5.5 8 3 10.5 5.5 13"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
         <label className="check-field">
           <input

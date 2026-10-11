@@ -52,9 +52,10 @@ Photoshop.
   adjusting. A box past the canvas enlarges it with transparent space. Cropped-away pixels stay
   on their layers unless "Delete cropped pixels" is on
 - Image menu: Crop to Selection; Image Size in pixels or percent, resampled with nearest
-  neighbour or bilinear; Canvas Size with a 3×3 anchor and relative sizes; lossless 90° and
-  180° rotations and horizontal and vertical flips; and Rotate Layer by any angle, with a live
-  preview. Resampling never darkens edges next to transparency
+  neighbour or bilinear; Canvas Size with a 3×3 anchor, relative sizes and a button that swaps
+  width and height; lossless 90° and 180° rotations and horizontal and vertical flips; and
+  Rotate Layer by any angle, with a live preview. Resampling never darkens edges next to
+  transparency
 - Status bar with the pointer's document position, the selection or crop size, and brief
   messages such as a new brush size
 - Undo/redo for every edit, selection changes included (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y)

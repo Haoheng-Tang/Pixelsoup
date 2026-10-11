@@ -608,6 +608,23 @@ button.danger:hover:not(:disabled) {
   gap: 12px;
 }
 
+/* Width, a swap button, then height. */
+.size-fields.swappable {
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  column-gap: 8px;
+}
+
+/* As tall as the inputs beside it (one line plus their padding and border), between them. */
+.swap-button {
+  grid-area: 1 / 2;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: calc(1lh + 10px);
+  padding: 0;
+}
+
 .field {
   display: grid;
   grid-template-columns: 1fr auto;
