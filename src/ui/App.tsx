@@ -50,7 +50,7 @@ export function App({ editor, controller, tools, colors }: AppProps) {
       />
       <ToolOptionsBar tools={tools} />
       <main className="workspace">
-        <Viewport editor={editor} tools={tools} onReady={setViewport} />
+        <Viewport editor={editor} tools={tools} gate={controller} onReady={setViewport} />
         <aside className="sidebar">
           <LayerPanel editor={editor} blocked={controller.blocked} />
         </aside>

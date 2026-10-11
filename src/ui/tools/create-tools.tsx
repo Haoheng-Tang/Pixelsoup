@@ -2,6 +2,9 @@ import type { Editor } from '../../core';
 import type { Colors } from '../color/colors';
 import { BrushOptions } from './brush-options';
 import { BrushOptionsPanel } from './BrushOptionsPanel';
+import { CropOptions } from './crop-options';
+import { CropOptionsPanel } from './CropOptionsPanel';
+import { CropTool } from './crop-tool';
 import { EyedropperOptions } from './eyedropper-options';
 import { EyedropperOptionsPanel } from './EyedropperOptionsPanel';
 import { EyedropperTool } from './eyedropper-tool';
@@ -32,6 +35,11 @@ export function createToolManager(editor: Editor, colors: Colors): ToolManager {
   function EraserToolOptions() {
     return <BrushOptionsPanel options={eraserOptions} />;
   }
+  const cropOptions = new CropOptions();
+  const cropTool = new CropTool(cropOptions, CropToolOptions);
+  function CropToolOptions() {
+    return <CropOptionsPanel options={cropOptions} tool={cropTool} />;
+  }
   return new ToolManager(
     [
       new MarqueeTool('rect', selectionOptions, SelectionToolOptions),
@@ -40,6 +48,7 @@ export function createToolManager(editor: Editor, colors: Colors): ToolManager {
       new PaintTool('paint', brushOptions, colors, eyedropperOptions, BrushToolOptions),
       new PaintTool('erase', eraserOptions, colors, eyedropperOptions, EraserToolOptions),
       new EyedropperTool(colors, eyedropperOptions, EyedropperToolOptions),
+      cropTool,
     ],
     editor,
   );

@@ -22,9 +22,15 @@ export interface FloatingSelection {
   readonly layerId: LayerId;
   /** The layer the pixels came from, which they are committed into. */
   readonly sourceId: LayerId;
-  /** The selection when lifted. The selection follows the float by moving this. */
+  /**
+   * The selection when lifted, or when the floating layer was last transformed. The
+   * selection follows the float by moving this.
+   */
   readonly selection: Selection;
-  /** Canvas position of the floating layer when lifted: the selection's bounds. */
+  /**
+   * Canvas position of the floating layer when `selection` was taken, which it lines up
+   * with: the selection's bounds when lifted.
+   */
   readonly x: number;
   readonly y: number;
   /**
@@ -34,8 +40,8 @@ export interface FloatingSelection {
    */
   readonly before: PixelSnapshot | null;
   /**
-   * True once the floating layer has been painted on. Committing an edited float where
-   * it was lifted composites it like a moved one, instead of restoring `before`.
+   * True once the floating layer has been painted on or transformed. Committing an edited
+   * float where it was lifted composites it like a moved one, instead of restoring `before`.
    */
   readonly edited?: boolean;
 }

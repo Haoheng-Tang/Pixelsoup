@@ -6,6 +6,8 @@ interface DialogProps {
   /** Called for Escape and for the browser closing the dialog itself. */
   onCancel: () => void;
   role?: 'dialog' | 'alertdialog';
+  /** Added to the `dialog` class, e.g. `dialog-preview`. */
+  className?: string;
   children: ReactNode;
 }
 
@@ -14,7 +16,7 @@ interface DialogProps {
  * mounting and unmounting it. On open, focus goes to the element marked
  * `data-autofocus` (or the browser's default).
  */
-export function Dialog({ title, onCancel, role = 'dialog', children }: DialogProps) {
+export function Dialog({ title, onCancel, role = 'dialog', className, children }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const onCancelRef = useRef(onCancel);
@@ -43,7 +45,7 @@ export function Dialog({ title, onCancel, role = 'dialog', children }: DialogPro
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={className ? `dialog ${className}` : 'dialog'}
       role={role}
       aria-labelledby={titleId}
       onCancel={(e) => {

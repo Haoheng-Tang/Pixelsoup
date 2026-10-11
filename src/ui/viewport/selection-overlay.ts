@@ -1,11 +1,17 @@
 import type { Selection, SelectionOutline } from '../../core';
 import { traceSelectionOutline } from '../../core';
-import type { BrushOverlay, ShapeOverlay, ToolOverlay } from '../tools/tool';
+import type { BrushOverlay, CropOverlay, ShapeOverlay, ToolOverlay } from '../tools/tool';
+import { createCheckerPattern } from './checkerboard';
 
-/** Where the document sits on the canvas, in device pixels: device = origin + doc × scale. */
+/**
+ * Where the document sits on the canvas, in device pixels: device = origin + doc × scale,
+ * and the canvas covers `width` × `height` from the origin.
+ */
 export interface DocumentPlacement {
   readonly x: number;
   readonly y: number;
+  readonly width: number;
+  readonly height: number;
   readonly scaleX: number;
   readonly scaleY: number;
 }
@@ -22,6 +28,8 @@ const CROSSHAIR_GAP = 2;
 const CROSSHAIR_ARM = 7;
 /** The dark halo that keeps cursors visible on light pixels, in line widths. */
 const HALO_WIDTH = 3;
+/** The crop box's square handles, in CSS pixels across. */
+const CROP_HANDLE = 7;
 
 /** A Path2D in document coordinates tracing every loop of `outline`. */
 export function outlinePath(outline: SelectionOutline): Path2D {
@@ -47,8 +55,9 @@ function previewPath({ shape, rect }: ShapeOverlay): Path2D {
 }
 
 /**
- * Draws the selection's marching ants, any shape the active tool is previewing, and a
- * painting tool's brush outline, on a transparent canvas stacked above the composite.
+ * Draws the selection's marching ants, any shape the active tool is previewing, the crop
+ * box, and a painting tool's brush outline, on a transparent canvas stacked above the
+ * composite.
  *
  * The selection outline is traced into a Path2D in document coordinates once per
  * selection; each frame only re-strokes it through the current pan/zoom transform with
@@ -62,7 +71,12 @@ export class SelectionOverlay {
   /** Brush outline colours, from the `--cursor-line` and `--cursor-halo` tokens. */
   private readonly cursorLine: string;
   private readonly cursorHalo: string;
-
+  /** Crop box colours, from the `--crop-*` tokens. */
+  private readonly cropShade: string;
+  private readonly cropGrid: string;
+  private readonly cropGridHalo: string;
+  private checker: CanvasPattern | string | null = null;
+  private checkerDpr = 0;
   constructor(container: HTMLElement) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-overlay';
@@ -72,8 +86,13 @@ export class SelectionOverlay {
     this.context = context;
     container.appendChild(this.canvas);
     const style = getComputedStyle(container);
-    this.cursorLine = style.getPropertyValue('--cursor-line').trim() || '#fff';
-    this.cursorHalo = style.getPropertyValue('--cursor-halo').trim() || 'rgb(0 0 0 / 55%)';
+    const token = (name: string, fallback: string) =>
+      style.getPropertyValue(name).trim() || fallback;
+    this.cursorLine = token('--cursor-line', '#fff');
+    this.cursorHalo = token('--cursor-halo', 'rgb(0 0 0 / 55%)');
+    this.cropShade = token('--crop-shade', 'rgb(0 0 0 / 50%)');
+    this.cropGrid = token('--crop-grid', 'rgb(255 255 255 / 75%)');
+    this.cropGridHalo = token('--crop-grid-halo', 'rgb(0 0 0 / 25%)');
   }
 
   /** Matches the main canvas's backing size in device pixels. */
@@ -117,9 +136,11 @@ export class SelectionOverlay {
     const offset = (-(phase % (2 * DASH)) * dpr) / scale;
 
     const brush = preview?.shape === 'brush' ? preview : null;
-    const shape = preview?.shape === 'brush' ? null : preview;
+    const crop = preview?.shape === 'crop' ? preview : null;
+    const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
     if (selection && !shape?.hidesSelection) this.strokeAnts(this.outline(selection), dash, offset);
     if (shape) this.strokeAnts(previewPath(shape), dash, offset);
+    if (crop) this.drawCrop(crop, placement, dpr, lineWidth, nudge);
     if (brush) this.drawBrush(brush, placement, dpr, lineWidth, nudge);
   }
 
@@ -134,6 +155,14 @@ export class SelectionOverlay {
   private releasePath(): void {
     this.pathSelection = null;
     this.path = null;
+  }
+
+  private checkerPattern(dpr: number): CanvasPattern | string {
+    if (this.checker === null || this.checkerDpr !== dpr) {
+      this.checker = createCheckerPattern(this.context, dpr);
+      this.checkerDpr = dpr;
+    }
+    return this.checker;
   }
 
   private strokeAnts(path: Path2D, dash: number, offset: number): void {
@@ -190,5 +219,104 @@ export class SelectionOverlay {
     ctx.lineWidth = lineWidth;
     ctx.strokeStyle = this.cursorLine;
     ctx.stroke(path);
+  }
+
+  /**
+   * The crop box: everything outside it shaded, the area it adds beyond the canvas shown as
+   * transparent, a rule-of-thirds grid while it's being adjusted, its outline and eight
+   * square handles. Drawn in device pixels, with the box's edges on the device pixel grid.
+   */
+  private drawCrop(
+    crop: CropOverlay,
+    placement: DocumentPlacement,
+    dpr: number,
+    lineWidth: number,
+    nudge: number,
+  ): void {
+    const ctx = this.context;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setLineDash([]);
+    const { rect } = crop;
+    const left = Math.round(placement.x + rect.x * placement.scaleX);
+    const top = Math.round(placement.y + rect.y * placement.scaleY);
+    const right = Math.round(placement.x + (rect.x + rect.width) * placement.scaleX);
+    const bottom = Math.round(placement.y + (rect.y + rect.height) * placement.scaleY);
+    const width = right - left;
+    const height = bottom - top;
+
+    // New area beyond the canvas: the box minus its overlap with the canvas.
+    const canvasRight = placement.x + placement.width;
+    const canvasBottom = placement.y + placement.height;
+    if (left < placement.x || top < placement.y || right > canvasRight || bottom > canvasBottom) {
+      const added = new Path2D();
+      added.rect(left, top, width, height);
+      const overlapLeft = Math.max(left, placement.x);
+      const overlapTop = Math.max(top, placement.y);
+      const overlapRight = Math.min(right, canvasRight);
+      const overlapBottom = Math.min(bottom, canvasBottom);
+      if (overlapRight > overlapLeft && overlapBottom > overlapTop) {
+        added.rect(overlapLeft, overlapTop, overlapRight - overlapLeft, overlapBottom - overlapTop);
+      }
+      const checker = this.checkerPattern(dpr);
+      // Anchored like the composite's checkerboard, so the two meet seamlessly.
+      if (typeof checker !== 'string') {
+        checker.setTransform(new DOMMatrix([1, 0, 0, 1, placement.x, placement.y]));
+      }
+      ctx.fillStyle = checker;
+      ctx.fill(added, 'evenodd');
+    }
+
+    const shade = new Path2D();
+    shade.rect(0, 0, this.canvas.width, this.canvas.height);
+    shade.rect(left, top, width, height);
+    ctx.fillStyle = this.cropShade;
+    ctx.fill(shade, 'evenodd');
+
+    if (crop.grid) {
+      const grid = new Path2D();
+      for (const third of [1, 2]) {
+        const x = Math.round(left + (width * third) / 3) + nudge;
+        const y = Math.round(top + (height * third) / 3) + nudge;
+        grid.moveTo(x, top);
+        grid.lineTo(x, bottom);
+        grid.moveTo(left, y);
+        grid.lineTo(right, y);
+      }
+      ctx.lineWidth = lineWidth * HALO_WIDTH;
+      ctx.strokeStyle = this.cropGridHalo;
+      ctx.stroke(grid);
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = this.cropGrid;
+      ctx.stroke(grid);
+    }
+
+    const outline = new Path2D();
+    outline.rect(left + nudge, top + nudge, width, height);
+    ctx.lineWidth = lineWidth * HALO_WIDTH;
+    ctx.strokeStyle = this.cursorHalo;
+    ctx.stroke(outline);
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = this.cursorLine;
+    ctx.stroke(outline);
+
+    // Edge handles only where they leave room between the corners.
+    const size = Math.round(CROP_HANDLE * dpr);
+    const midX = Math.round((left + right) / 2);
+    const midY = Math.round((top + bottom) / 2);
+    const xs = width >= 3 * size ? [left, midX, right] : [left, right];
+    const ys = height >= 3 * size ? [top, midY, bottom] : [top, bottom];
+    ctx.fillStyle = this.cursorLine;
+    ctx.strokeStyle = this.cursorHalo;
+    for (const y of ys) {
+      for (const x of xs) {
+        const edgeX = x === left || x === right;
+        const edgeY = y === top || y === bottom;
+        if (!edgeX && !edgeY) continue;
+        const hx = Math.round(x - size / 2);
+        const hy = Math.round(y - size / 2);
+        ctx.fillRect(hx, hy, size, size);
+        ctx.strokeRect(hx + lineWidth / 2, hy + lineWidth / 2, size - lineWidth, size - lineWidth);
+      }
+    }
   }
 }

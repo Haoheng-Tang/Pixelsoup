@@ -18,6 +18,9 @@
   --shadow-popover: 0 6px 20px rgb(0 0 0 / 45%);
   --cursor-line: #fff;
   --cursor-halo: rgb(0 0 0 / 55%);
+  --crop-shade: rgb(0 0 0 / 50%);
+  --crop-grid: rgb(255 255 255 / 75%);
+  --crop-grid-halo: rgb(0 0 0 / 25%);
 
   /* Spacing, radii and type for new UI; older rules still use literal values. */
   --space-1: 2px;
@@ -77,7 +80,8 @@ button:disabled {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -604,6 +608,23 @@ button.danger:hover:not(:disabled) {
   gap: 12px;
 }
 
+/* Width, a swap button, then height. */
+.size-fields.swappable {
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  column-gap: 8px;
+}
+
+/* As tall as the inputs beside it (one line plus their padding and border), between them. */
+.swap-button {
+  grid-area: 1 / 2;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: calc(1lh + 10px);
+  padding: 0;
+}
+
 .field {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -618,7 +639,8 @@ button.danger:hover:not(:disabled) {
   color: var(--text-muted);
 }
 
-.field input {
+.field input,
+.angle-field input[type='number'] {
   width: 100%;
   min-width: 0;
   font: inherit;
@@ -629,7 +651,8 @@ button.danger:hover:not(:disabled) {
   padding: 4px 6px;
 }
 
-.field input[aria-invalid='true'] {
+.field input[aria-invalid='true'],
+.angle-field input[aria-invalid='true'] {
   border-color: #d9534f;
 }
 
@@ -695,6 +718,83 @@ button.danger:hover:not(:disabled) {
 
 .field-hint[role='alert'] {
   color: #e8827f;
+}
+
+.check-field {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+}
+
+.check-field input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.anchor-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.anchor-field legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--text-muted);
+}
+
+.anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 22px);
+  gap: 3px;
+}
+
+.anchor-grid input {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.anchor-grid input:hover {
+  border-color: var(--text-muted);
+}
+
+.anchor-grid input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.angle-field {
+  display: grid;
+  grid-template-columns: auto 1fr 76px auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.angle-field label,
+.angle-field .unit {
+  color: var(--text-muted);
+}
+
+.angle-field input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* A dialog that previews its effect on the canvas: at the side, with nothing dimmed. */
+.dialog-preview {
+  margin: 88px 16px auto auto;
+}
+
+.dialog-preview::backdrop {
+  background: transparent;
 }
 
 /* Colours */
@@ -913,6 +1013,24 @@ button.danger:hover:not(:disabled) {
 
 .options-number[aria-invalid='true'] {
   border-color: var(--invalid);
+}
+
+.options-select {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  font-size: var(--font-size-md);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.options-icon-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
 }
 
 .options-unit {

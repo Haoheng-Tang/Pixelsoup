@@ -65,6 +65,15 @@ export class FakeViewport {
     this.held = { ...this.held, shiftKey: false, altKey: false };
   }
 
+  /** Two clicks in place, then the double-click event, as a browser sends them. */
+  doubleClick(sx: number, sy: number, mods: Modifiers = {}): void {
+    for (let i = 0; i < 2; i++) {
+      this.down(sx, sy, mods);
+      this.up(sx, sy);
+    }
+    this.tools.doubleClick(this.event(sx, sy, {}));
+  }
+
   /**
    * Presses a key. Modifier keys (Shift, Alt, Control, Meta) stay held until `keyUp`;
    * `mods` apply to this key press only.

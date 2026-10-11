@@ -30,6 +30,29 @@ export function clonePixelBuffer(buffer: PixelBuffer): PixelBuffer {
   return { width: buffer.width, height: buffer.height, data: buffer.data.slice() };
 }
 
+/** A new buffer holding the pixels of `buffer` inside `area`, which must lie within it. */
+export function copyPixels(buffer: PixelBuffer, area: Rect): PixelBuffer {
+  const out = createPixelBuffer(area.width, area.height);
+  const rowBytes = area.width * 4;
+  for (let row = 0; row < area.height; row++) {
+    const start = ((area.y + row) * buffer.width + area.x) * 4;
+    out.data.set(buffer.data.subarray(start, start + rowBytes), row * rowBytes);
+  }
+  return out;
+}
+
+/** Copies all of `pixels` into `target` with its top-left pixel at (x, y); it must fit. */
+export function pastePixels(target: PixelBuffer, pixels: PixelBuffer, x: number, y: number): void {
+  const rowBytes = pixels.width * 4;
+  for (let row = 0; row < pixels.height; row++) {
+    const from = row * rowBytes;
+    target.data.set(
+      pixels.data.subarray(from, from + rowBytes),
+      ((y + row) * target.width + x) * 4,
+    );
+  }
+}
+
 export function getPixel(buffer: PixelBuffer, x: number, y: number): Rgba {
   if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) return TRANSPARENT;
   const i = (y * buffer.width + x) * 4;

@@ -2,6 +2,12 @@ import { isValidImageSize } from './document';
 import type { Rect } from './geometry';
 import { intersectRects, unionRects } from './geometry';
 import { assertNever } from './layer';
+import type { Orientation } from './orientation';
+import { orientPixels, orientRect, orientedSize } from './orientation';
+import type { Affine } from './resample/affine';
+import { multiply, translation } from './resample/affine';
+import type { Interpolation } from './resample/kernels';
+import { transformMask } from './resample/transform';
 
 /** How a new shape combines with the existing selection. */
 export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
@@ -233,25 +239,83 @@ export class Selection {
    * by the total offset rather than step by step.
    */
   translate(dx: number, dy: number): Selection {
-    if (!Number.isInteger(dx) || !Number.isInteger(dy)) {
-      throw new RangeError(`Selections move by whole pixels, not ${dx}, ${dy}`);
-    }
+    assertWholePixels(dx, dy);
+    if (!this.box || (dx === 0 && dy === 0)) return this;
+    return this.shifted(this.width, this.height, dx, dy);
+  }
+
+  /**
+   * The selection on a canvas resized to `width` × `height`, with what was at (x, y) now
+   * at (x + dx, y + dy). Coverage that ends up off the new canvas is dropped.
+   */
+  resizeCanvas(width: number, height: number, dx: number, dy: number): Selection {
+    assertSize(width, height);
+    assertWholePixels(dx, dy);
+    if (width === this.width && height === this.height) return this.translate(dx, dy);
+    return this.shifted(width, height, dx, dy);
+  }
+
+  /** The mask moved by (dx, dy) onto a `width` × `height` canvas. */
+  private shifted(width: number, height: number, dx: number, dy: number): Selection {
     const box = this.box;
-    if (!box || (dx === 0 && dy === 0)) return this;
-    const { width, height } = this;
-    const moved = intersectRects(
-      { x: box.x + dx, y: box.y + dy, width: box.width, height: box.height },
-      { x: 0, y: 0, width, height },
-    );
-    if (!moved) return Selection.empty(width, height);
-    const mask = new Uint8ClampedArray(this.mask.length);
+    const moved =
+      box &&
+      intersectRects(
+        { x: box.x + dx, y: box.y + dy, width: box.width, height: box.height },
+        { x: 0, y: 0, width, height },
+      );
+    if (!box || !moved) return Selection.empty(width, height);
+    const mask = new Uint8ClampedArray(width * height);
     for (let y = moved.y; y < moved.y + moved.height; y++) {
-      const from = (y - dy) * width + moved.x - dx;
+      const from = (y - dy) * this.width + moved.x - dx;
       mask.set(this.mask.subarray(from, from + moved.width), y * width + moved.x);
     }
     // Unclipped, the bounds just move; clipped, the edge rows or columns left may be empty.
     const clipped = moved.width !== box.width || moved.height !== box.height;
     return new Selection(width, height, mask, clipped ? scanBounds(mask, width, moved) : moved);
+  }
+
+  /** The selection on the canvas turned or flipped by `orientation`, losslessly. */
+  orient(orientation: Orientation): Selection {
+    const size = orientedSize(orientation, this.width, this.height);
+    if (!this.box) return Selection.empty(size.width, size.height);
+    const mask = orientPixels(orientation, this.mask, this.width, this.height, 1);
+    const box = orientRect(orientation, this.box, this.width, this.height);
+    return new Selection(size.width, size.height, mask, box);
+  }
+
+  /**
+   * The selection mapped through `m` (document coordinates), with its coverage resampled
+   * the way `transformPixels` resamples a layer's pixels, so a floating selection's outline
+   * keeps matching its pixels. Coverage that ends up off the canvas is dropped.
+   */
+  transform(m: Affine, interpolation: Interpolation): Selection {
+    const box = this.box;
+    if (!box) return this;
+    const region = new Uint8ClampedArray(box.width * box.height);
+    for (let y = 0; y < box.height; y++) {
+      const from = (box.y + y) * this.width + box.x;
+      region.set(this.mask.subarray(from, from + box.width), y * box.width);
+    }
+    const canvas = { x: 0, y: 0, width: this.width, height: this.height };
+    const moved = transformMask(
+      region,
+      box.width,
+      box.height,
+      multiply(m, translation(box.x, box.y)),
+      interpolation,
+      canvas,
+    );
+    if (!moved) return Selection.empty(this.width, this.height);
+    const { data, area } = moved;
+    const mask = new Uint8ClampedArray(this.width * this.height);
+    for (let y = 0; y < area.height; y++) {
+      mask.set(
+        data.subarray(y * area.width, (y + 1) * area.width),
+        (area.y + y) * this.width + area.x,
+      );
+    }
+    return new Selection(this.width, this.height, mask, scanBounds(mask, this.width, area));
   }
 
   /** True if both select exactly the same pixels with the same coverage. */
@@ -313,6 +377,12 @@ export function combineSelections(
 function assertSize(width: number, height: number): void {
   if (!isValidImageSize(width, height)) {
     throw new RangeError(`Invalid selection size ${width}x${height}`);
+  }
+}
+
+function assertWholePixels(dx: number, dy: number): void {
+  if (!Number.isInteger(dx) || !Number.isInteger(dy)) {
+    throw new RangeError(`Selections move by whole pixels, not ${dx}, ${dy}`);
   }
 }
 

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { createPixelBuffer, fillRect, getPixel } from './pixel-buffer';
+import { aboutPivot, multiply, rotation, translation } from './resample/affine';
+import { transformPixels } from './resample/transform';
 import { combineSelections, Selection } from './selection';
 
 /** Builds a selection from rows of '#' (fully selected) and '.' (not selected). */
@@ -292,6 +295,100 @@ describe('Selection.translate', () => {
   it('rejects fractional offsets', () => {
     expect(() => shape.translate(0.5, 0)).toThrow(RangeError);
     expect(() => shape.translate(0, Number.NaN)).toThrow(RangeError);
+  });
+});
+
+describe('Selection.resizeCanvas', () => {
+  const shape = Selection.fromMask(5, 4, [
+    ...[0, 0, 0, 0, 0],
+    ...[0, 255, 128, 64, 0],
+    ...[0, 255, 255, 255, 0],
+    ...[0, 0, 0, 0, 0],
+  ]);
+
+  it('moves the coverage onto a canvas of another size, cutting it to the new edges', () => {
+    const cut = shape.resizeCanvas(3, 2, -2, -1);
+    expect([cut.width, cut.height]).toEqual([3, 2]);
+    expect(rowsOf(cut)).toEqual(['++.', '##.']);
+    expect(cut.bounds()).toEqual({ x: 0, y: 0, width: 2, height: 2 });
+
+    const grown = shape.resizeCanvas(7, 5, 2, 1);
+    expect(rowsOf(grown)).toEqual(['.......', '.......', '...#++.', '...###.', '.......']);
+    expect(grown.bounds()).toEqual({ x: 3, y: 2, width: 3, height: 2 });
+  });
+
+  it('is empty when nothing is left on the new canvas, and a translation at the same size', () => {
+    expect(shape.resizeCanvas(1, 1, 0, 0).isEmpty).toBe(true);
+    expect(shape.resizeCanvas(5, 4, 1, -1).equals(shape.translate(1, -1))).toBe(true);
+    expect(shape.resizeCanvas(5, 4, 0, 0)).toBe(shape);
+  });
+
+  it('rejects invalid sizes and fractional offsets', () => {
+    expect(() => shape.resizeCanvas(0, 4, 0, 0)).toThrow(RangeError);
+    expect(() => shape.resizeCanvas(5, 4, 0, 0.5)).toThrow(RangeError);
+  });
+});
+
+describe('Selection.orient', () => {
+  const shape = fromRows(['.##..', '.#...', '.....']);
+
+  it('turns and flips the mask and its bounds with the canvas', () => {
+    const turned = shape.orient('rotate-cw');
+    expect([turned.width, turned.height]).toEqual([3, 5]);
+    expect(rowsOf(turned)).toEqual(['...', '.##', '..#', '...', '...']);
+    expect(turned.bounds()).toEqual({ x: 1, y: 1, width: 2, height: 2 });
+    expect(rowsOf(shape.orient('flip-horizontal'))).toEqual(['..##.', '...#.', '.....']);
+    expect(shape.orient('rotate-ccw').orient('rotate-cw').equals(shape)).toBe(true);
+  });
+
+  it('keeps an empty selection empty on the turned canvas', () => {
+    const none = Selection.empty(5, 3).orient('rotate-ccw');
+    expect([none.width, none.height, none.isEmpty]).toEqual([3, 5, true]);
+  });
+});
+
+describe('Selection.transform', () => {
+  const shape = fromRows(['.##..', '.#...', '.....']);
+
+  it('moves and turns the mask', () => {
+    expect(shape.transform(translation(2, 1), 'bilinear').equals(shape.translate(2, 1))).toBe(true);
+    // A quarter turn about the canvas centre (2.5, 1.5) takes pixel (x, y) to (3 − y, x − 1).
+    const turned = shape.transform(aboutPivot(rotation(90), 2.5, 1.5), 'nearest');
+    expect(rowsOf(turned)).toEqual(['..##.', '...#.', '.....']);
+    expect(turned.bounds()).toEqual({ x: 2, y: 0, width: 2, height: 2 });
+  });
+
+  it('anti-aliases edges that end up between pixels', () => {
+    const tilted = Selection.fromRect(12, 12, { x: 3, y: 3, width: 6, height: 6 }).transform(
+      aboutPivot(rotation(45), 6, 6),
+      'bilinear',
+    );
+    expect(rowsOf(tilted).join('')).toContain('+');
+    expect(tilted.coverageAt(6, 6)).toBe(255);
+  });
+
+  it('drops coverage moved off the canvas', () => {
+    const gone = shape.transform(translation(4, 0), 'bilinear');
+    expect([gone.width, gone.height, gone.isEmpty]).toEqual([5, 3, true]);
+    expect(Selection.empty(5, 3).transform(rotation(30), 'bilinear').isEmpty).toBe(true);
+  });
+
+  it('resamples coverage as transformPixels resamples alpha', () => {
+    // An opaque layer exactly under the selection, as a floating selection is lifted.
+    const area = { x: 2, y: 1, width: 5, height: 4 };
+    const selection = Selection.fromRect(10, 8, area);
+    const pixels = createPixelBuffer(area.width, area.height);
+    fillRect(pixels, { ...area, x: 0, y: 0 }, [0, 0, 255, 255]);
+    const m = aboutPivot(rotation(-25), 4, 3);
+    const moved = selection.transform(m, 'bilinear');
+    const layer = transformPixels(pixels, multiply(m, translation(area.x, area.y)), 'bilinear');
+    expect(layer).not.toBeNull();
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 10; x++) {
+        const alpha = layer ? getPixel(layer.pixels, x - layer.x, y - layer.y)[3] : -1;
+        expect(moved.coverageAt(x, y)).toBe(alpha);
+      }
+    }
   });
 });
 

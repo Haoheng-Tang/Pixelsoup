@@ -8,6 +8,11 @@ export interface DocumentChange {
   /** Canvas-space region whose composite may have changed, or null if no pixels changed. */
   readonly dirty: Rect | null;
   /**
+   * True when the canvas changed size (crop, canvas or image size, a 90° rotation). Views
+   * sized to the canvas rebuild; `dirty` then covers the whole new canvas.
+   */
+  readonly resized?: boolean;
+  /**
    * Canvas-space region covering the selection's old and new bounds when the selection
    * changed (null or absent if it didn't). The composite is unaffected; views redraw the
    * selection outline.
@@ -20,8 +25,8 @@ export interface DocumentChange {
   readonly layerPixels?: readonly LayerPixelsChange[];
   /**
    * The floating selection after this change, for changes that start, end or edit one
-   * (absent otherwise): lifting, committing, and painting on the floating layer.
-   * `Editor` keeps it as session state.
+   * (absent otherwise): lifting, committing, and painting on or transforming the floating
+   * layer. `Editor` keeps it as session state.
    */
   readonly floating?: FloatingSelection | null;
 }

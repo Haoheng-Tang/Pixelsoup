@@ -46,7 +46,8 @@ export class ToolManager {
       },
     };
     this.unsubscribeEditor = editor.subscribe((change) => {
-      if (change.documentReplaced) this.cancel();
+      // A gesture in the old canvas's coordinates means nothing on a new or resized one.
+      if (change.documentReplaced || change.resized) this.cancel();
     });
     this.active = first;
     first.activate?.(this.context);
@@ -118,6 +119,12 @@ export class ToolManager {
     if (!this.pointerIsDown) return;
     this.pointerIsDown = false;
     this.active.pointerUp?.(event);
+  }
+
+  /** Routes a double-click to the active tool, unless a pointer gesture is in progress. */
+  doubleClick(event: ToolPointerEvent): void {
+    if (this.pointerIsDown) return;
+    this.active.doubleClick?.(event);
   }
 
   /** Abandons the active tool's gesture, if any (pointer cancel, blur, document swap). */

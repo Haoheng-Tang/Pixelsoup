@@ -71,6 +71,10 @@ export class DocumentSession {
     return this.documentName;
   }
 
+  get editor(): Editor {
+    return this.deps.editor;
+  }
+
   get isDirty(): boolean {
     return this.deps.editor.isDirty;
   }
