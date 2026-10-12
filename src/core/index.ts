@@ -25,6 +25,7 @@ export * from './commands/image-size-commands';
 export * from './paint/dab';
 export * from './paint/dab-placer';
 export * from './paint/sample-color';
+export * from './paint/flood-region';
 export * from './floating-selection';
 export * from './editor';
 export * from './blank-document';

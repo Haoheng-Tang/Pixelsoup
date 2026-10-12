@@ -1,3 +1,9 @@
+/** A point in document coordinates, which may be fractional. */
+export interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
 /** Axis-aligned integer rectangle in pixel coordinates. */
 export interface Rect {
   readonly x: number;

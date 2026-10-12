@@ -1,5 +1,5 @@
 import { isValidImageSize } from './document';
-import type { Rect } from './geometry';
+import type { Point, Rect } from './geometry';
 import { intersectRects, unionRects } from './geometry';
 import { assertNever } from './layer';
 import type { Orientation } from './orientation';
@@ -16,10 +16,11 @@ export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
 export const SELECTED_THRESHOLD = 128;
 
 /**
- * Sub-rows sampled per pixel row when computing ellipse coverage. Coverage along each
- * sub-row is exact, so edges are anti-aliased with at least this many levels.
+ * Sub-rows sampled per pixel row when computing the coverage of ellipses and polygons.
+ * Coverage along each sub-row is exact, so edges are anti-aliased with at least this many
+ * levels.
  */
-const ELLIPSE_SUBROWS = 16;
+const SUBROWS = 16;
 
 /**
  * Which canvas pixels are selected: an 8-bit coverage mask the size of the canvas.
@@ -87,54 +88,114 @@ export class Selection {
     const mask = new Uint8ClampedArray(width * height);
     const top = Math.max(0, Math.floor(cy - ry));
     const bottom = Math.min(height, Math.ceil(cy + ry));
-    // Per-row scratch, reset after each row. `whole` is a difference array of pixels a
-    // sub-row covers completely; `part` holds the partly covered pixels at span ends.
-    const whole = new Float64Array(width + 1);
-    const part = new Float64Array(width + 1);
-    let left = width;
-    let right = 0;
-
+    const coverage = new RowCoverage(width);
     for (let y = top; y < bottom; y++) {
-      let lo = width;
-      let hi = 0;
-      for (let k = 0; k < ELLIPSE_SUBROWS; k++) {
-        const dy = (y + (k + 0.5) / ELLIPSE_SUBROWS - cy) / ry;
+      for (let k = 0; k < SUBROWS; k++) {
+        const dy = (y + (k + 0.5) / SUBROWS - cy) / ry;
         const t = 1 - dy * dy;
         if (t <= 0) continue;
         const half = rx * Math.sqrt(t);
-        const l = Math.max(0, cx - half);
-        const r = Math.min(width, cx + half);
-        if (r <= l) continue;
-        const il = Math.floor(l);
-        const ir = Math.floor(r);
-        if (il === ir) {
-          part[il] += r - l;
-        } else {
-          part[il] += il + 1 - l;
-          whole[il + 1] += 1;
-          whole[ir] -= 1;
-          if (ir < width) part[ir] += r - ir;
-        }
-        lo = Math.min(lo, il);
-        hi = Math.max(hi, Math.min(width, ir + 1));
+        coverage.add(cx - half, cx + half);
       }
-      let covered = 0;
-      const row = y * width;
-      for (let x = lo; x < hi; x++) {
-        covered += whole[x];
-        // Uint8ClampedArray rounds and clamps.
-        mask[row + x] = ((covered + part[x]) * 255) / ELLIPSE_SUBROWS;
-        whole[x] = 0;
-        part[x] = 0;
-      }
-      whole[hi] = 0;
-      part[hi] = 0;
-      left = Math.min(left, lo);
-      right = Math.max(right, hi);
+      coverage.flush(mask, y);
     }
-    const scanned =
-      right > left ? { x: left, y: top, width: right - left, height: bottom - top } : null;
-    return new Selection(width, height, mask, scanned && scanBounds(mask, width, scanned));
+    return new Selection(width, height, mask, coverage.bounds(mask, top, bottom));
+  }
+
+  /**
+   * The polygon through `points` (document coordinates, may be fractional and extend past
+   * the canvas), closed from the last point back to the first, with anti-aliased edges
+   * measured like an ellipse's. A pixel is inside where the polygon's winding number is
+   * non-zero, so a path that crosses itself, like a loosely drawn lasso, fills every loop,
+   * including loops it winds round twice. Empty for fewer than three points or a point
+   * that isn't finite.
+   */
+  static fromPolygon(width: number, height: number, points: readonly Point[]): Selection {
+    assertSize(width, height);
+    const n = points.length;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const { x, y } of points) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return Selection.empty(width, height);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    const top = Math.max(0, Math.floor(minY));
+    const bottom = Math.min(height, Math.ceil(maxY));
+    if (n < 3 || bottom <= top) return Selection.empty(width, height);
+
+    // Edges run downwards from (edgeX, edgeTop) to edgeBottom; `winding` remembers which
+    // way the polygon went. Horizontal edges cross no sub-row and are left out.
+    const edgeX = new Float64Array(n);
+    const edgeTop = new Float64Array(n);
+    const edgeBottom = new Float64Array(n);
+    const slope = new Float64Array(n);
+    const winding = new Int8Array(n);
+    let edges = 0;
+    for (let i = 0; i < n; i++) {
+      const a = points[i];
+      const b = points[(i + 1) % n];
+      if (a.y === b.y) continue;
+      const [upper, lower] = a.y < b.y ? [a, b] : [b, a];
+      edgeX[edges] = upper.x;
+      edgeTop[edges] = upper.y;
+      edgeBottom[edges] = lower.y;
+      slope[edges] = (lower.x - upper.x) / (lower.y - upper.y);
+      winding[edges] = a.y < b.y ? 1 : -1;
+      edges++;
+    }
+    const byTop = Uint32Array.from({ length: edges }, (_, i) => i).sort(
+      (i, j) => edgeTop[i] - edgeTop[j],
+    );
+
+    // Edges crossing the current sub-row, kept sorted by where they cross it. An edge
+    // crosses sub-rows from its top (inclusive) to its bottom (exclusive), so a vertex
+    // between two edges is crossed once.
+    const active = new Int32Array(edges);
+    const crossing = new Float64Array(edges);
+    let activeCount = 0;
+    let nextEdge = 0;
+    const mask = new Uint8ClampedArray(width * height);
+    const coverage = new RowCoverage(width);
+    for (let y = top; y < bottom; y++) {
+      for (let k = 0; k < SUBROWS; k++) {
+        const sy = y + (k + 0.5) / SUBROWS;
+        while (nextEdge < edges && edgeTop[byTop[nextEdge]] <= sy) {
+          active[activeCount++] = byTop[nextEdge++];
+        }
+        let kept = 0;
+        for (let a = 0; a < activeCount; a++) {
+          const e = active[a];
+          if (edgeBottom[e] <= sy) continue;
+          active[kept] = e;
+          crossing[kept] = edgeX[e] + (sy - edgeTop[e]) * slope[e];
+          kept++;
+        }
+        activeCount = kept;
+        // Insertion sort: the order barely changes from one sub-row to the next.
+        for (let a = 1; a < activeCount; a++) {
+          const e = active[a];
+          const x = crossing[a];
+          let b = a - 1;
+          for (; b >= 0 && crossing[b] > x; b--) {
+            active[b + 1] = active[b];
+            crossing[b + 1] = crossing[b];
+          }
+          active[b + 1] = e;
+          crossing[b + 1] = x;
+        }
+        let wound = 0;
+        let start = 0;
+        for (let a = 0; a < activeCount; a++) {
+          const before = wound;
+          wound += winding[active[a]];
+          if (before === 0) start = crossing[a];
+          else if (wound === 0) coverage.add(start, crossing[a]);
+        }
+      }
+      coverage.flush(mask, y);
+    }
+    return new Selection(width, height, mask, coverage.bounds(mask, top, bottom));
   }
 
   /** A selection with a copy of `mask` (one coverage value per canvas pixel, row-major). */
@@ -143,7 +204,7 @@ export class Selection {
     if (mask.length !== width * height) {
       throw new RangeError(`Mask has ${mask.length} values, expected ${width * height}`);
     }
-    const copy = Uint8ClampedArray.from(mask);
+    const copy = mask instanceof Uint8ClampedArray ? mask.slice() : Uint8ClampedArray.from(mask);
     return new Selection(
       width,
       height,
@@ -419,4 +480,82 @@ function scanBounds(mask: Uint8ClampedArray, width: number, area: Rect): Rect | 
   }
   if (minY < 0) return null;
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+/**
+ * Turns the horizontal spans a shape covers on each of a pixel row's `SUBROWS` sub-rows
+ * into the row's coverage: the fraction of each pixel the spans cover, exact along each
+ * sub-row. One per shape, reused for every row.
+ */
+class RowCoverage {
+  /** Difference array of the pixels a sub-row covers completely. */
+  private readonly whole: Float64Array;
+  /** The partly covered pixels at the ends of spans. */
+  private readonly part: Float64Array;
+  /** The current row's spans touch columns [lo, hi). */
+  private lo: number;
+  private hi = 0;
+  /** Every row so far touches columns [left, right). */
+  private left: number;
+  private right = 0;
+
+  constructor(private readonly width: number) {
+    this.whole = new Float64Array(width + 1);
+    this.part = new Float64Array(width + 1);
+    this.lo = width;
+    this.left = width;
+  }
+
+  /** Adds the span [l, r) of one sub-row, clipped to the canvas. */
+  add(l: number, r: number): void {
+    const { width, whole, part } = this;
+    if (l < 0) l = 0;
+    if (r > width) r = width;
+    if (!(r > l)) return;
+    const il = Math.floor(l);
+    const ir = Math.floor(r);
+    if (il === ir) {
+      part[il] += r - l;
+    } else {
+      part[il] += il + 1 - l;
+      whole[il + 1] += 1;
+      whole[ir] -= 1;
+      if (ir < width) part[ir] += r - ir;
+    }
+    if (il < this.lo) this.lo = il;
+    const end = Math.min(width, ir + 1);
+    if (end > this.hi) this.hi = end;
+  }
+
+  /** Writes the row's coverage into row `y` of `mask` and clears it for the next row. */
+  flush(mask: Uint8ClampedArray, y: number): void {
+    const { whole, part, lo, hi } = this;
+    let covered = 0;
+    const row = y * this.width;
+    for (let x = lo; x < hi; x++) {
+      covered += whole[x];
+      // Uint8ClampedArray rounds and clamps.
+      mask[row + x] = ((covered + part[x]) * 255) / SUBROWS;
+      whole[x] = 0;
+      part[x] = 0;
+    }
+    whole[hi] = 0;
+    part[hi] = 0;
+    this.left = Math.min(this.left, lo);
+    this.right = Math.max(this.right, hi);
+    this.lo = this.width;
+    this.hi = 0;
+  }
+
+  /** Bounds of the coverage written to rows [top, bottom) of `mask`, or null if none. */
+  bounds(mask: Uint8ClampedArray, top: number, bottom: number): Rect | null {
+    const { left, right } = this;
+    if (right <= left) return null;
+    return scanBounds(mask, this.width, {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top,
+    });
+  }
 }

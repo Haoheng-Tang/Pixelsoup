@@ -169,6 +169,118 @@ describe('Selection.fromEllipse', () => {
   });
 });
 
+describe('Selection.fromPolygon', () => {
+  const square = [
+    { x: 2, y: 1 },
+    { x: 6, y: 1 },
+    { x: 6, y: 5 },
+    { x: 2, y: 5 },
+  ];
+
+  it('selects a square on whole pixels exactly like fromRect, either way round', () => {
+    const rect = Selection.fromRect(8, 6, { x: 2, y: 1, width: 4, height: 4 });
+    expect(Selection.fromPolygon(8, 6, square).equals(rect)).toBe(true);
+    expect(Selection.fromPolygon(8, 6, [...square].reverse()).equals(rect)).toBe(true);
+    expect(Selection.fromPolygon(8, 6, square).bounds()).toEqual(rect.bounds());
+  });
+
+  it('gives edge pixels their covered fraction', () => {
+    // The square from (0.5, 0.5) to (2.5, 2.5) covers a quarter of each corner pixel
+    // (63.75, rounded to 64), half of each edge pixel (127.5, rounded to 128) and all of
+    // the middle one.
+    const s = Selection.fromPolygon(3, 3, [
+      { x: 0.5, y: 0.5 },
+      { x: 2.5, y: 0.5 },
+      { x: 2.5, y: 2.5 },
+      { x: 0.5, y: 2.5 },
+    ]);
+    expect([...s.mask]).toEqual([64, 128, 64, 128, 255, 128, 64, 128, 64]);
+  });
+
+  it('anti-aliases the slanted edge of a triangle', () => {
+    // The hypotenuse x + y = 4 runs corner to corner through pixels with x + y = 3,
+    // halving them; pixels with x + y < 3 are inside.
+    const s = Selection.fromPolygon(5, 5, [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 0, y: 4 },
+    ]);
+    expect(rowsOf(s)).toEqual(['###+.', '##+..', '#+...', '+....', '.....']);
+    expect(s.coverageAt(3, 0)).toBe(128);
+    expect(s.coverageAt(0, 3)).toBe(128);
+    expect(s.bounds()).toEqual({ x: 0, y: 0, width: 4, height: 4 });
+  });
+
+  it('measures coverage along a shallower edge', () => {
+    // The hypotenuse x = 8 − 2y. Pixel (1, 3) is inside for y from 3 to 3.5 where
+    // x < 8 − 2y: ∫ (7 − 2y) dy over [3, 3.5] = 0.25, so 63.75, rounded to 64. Pixel
+    // (0, 3): all of the top half, plus ∫ (8 − 2y) dy over [3.5, 4] = 0.25, so 0.75 and
+    // 191.25, rounded to 191.
+    const s = Selection.fromPolygon(8, 4, [
+      { x: 0, y: 0 },
+      { x: 8, y: 0 },
+      { x: 0, y: 4 },
+    ]);
+    expect(s.coverageAt(1, 3)).toBe(64);
+    expect(s.coverageAt(0, 3)).toBe(191);
+    expect(s.coverageAt(2, 3)).toBe(0);
+    expect(totalCoverage(s)).toBeCloseTo(16, 1);
+  });
+
+  it('fills both lobes of a self-intersecting bow tie', () => {
+    // Crossing diagonals: the lobes are the triangles (0, 0)–(2, 2)–(0, 4) and
+    // (4, 0)–(2, 2)–(4, 4), 4 pixels each, and the diagonals halve the pixels they cross.
+    const s = Selection.fromPolygon(4, 4, [
+      { x: 0, y: 0 },
+      { x: 4, y: 4 },
+      { x: 4, y: 0 },
+      { x: 0, y: 4 },
+    ]);
+    expect(rowsOf(s)).toEqual(['+..+', '#++#', '#++#', '+..+']);
+    expect(s.coverageAt(1, 1)).toBe(128);
+    expect(totalCoverage(s)).toBeCloseTo(8, 1);
+  });
+
+  it('fills loops wound round more than once (non-zero winding)', () => {
+    const twice = Selection.fromPolygon(8, 6, [...square, ...square]);
+    expect(twice.equals(Selection.fromPolygon(8, 6, square))).toBe(true);
+    // A pentagram winds round its middle twice; even-odd filling would leave it empty.
+    const star = Selection.fromPolygon(
+      20,
+      20,
+      [0, 1, 2, 3, 4].map((k) => {
+        const angle = ((k * 144 - 90) * Math.PI) / 180;
+        return { x: 10 + 9 * Math.cos(angle), y: 10 + 9 * Math.sin(angle) };
+      }),
+    );
+    expect(star.coverageAt(9, 9)).toBe(255);
+    expect(star.coverageAt(10, 10)).toBe(255);
+    expect(star.coverageAt(9, 5)).toBe(255);
+    expect(star.coverageAt(0, 0)).toBe(0);
+  });
+
+  it('clips to the canvas', () => {
+    const s = Selection.fromPolygon(4, 4, [
+      { x: -2, y: -2 },
+      { x: 3, y: -2 },
+      { x: 3, y: 3 },
+      { x: -2, y: 3 },
+    ]);
+    expect(s.equals(Selection.fromRect(4, 4, { x: 0, y: 0, width: 3, height: 3 }))).toBe(true);
+  });
+
+  it('is empty when degenerate or off the canvas', () => {
+    const empty = (points: { x: number; y: number }[]) =>
+      Selection.fromPolygon(8, 6, points).isEmpty;
+    expect(empty([])).toBe(true);
+    expect(empty(square.slice(0, 2))).toBe(true);
+    expect(empty([square[0], square[1], { x: 10, y: 1 }])).toBe(true);
+    expect(empty(square.map(({ x, y }) => ({ x: x + 10, y })))).toBe(true);
+    expect(empty([...square.slice(0, 3), { x: NaN, y: 5 }])).toBe(true);
+    expect(empty([...square.slice(0, 3), { x: 2, y: Infinity }])).toBe(true);
+  });
+});
+
 describe('Selection set operations', () => {
   const a = fromRows(['##..', '##..', '....']);
   const b = fromRows(['.##.', '.##.', '.##.']);
