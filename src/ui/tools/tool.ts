@@ -20,6 +20,9 @@ export const TOOL_KEYS = {
 
 export type ToolKey = (typeof TOOL_KEYS)[keyof typeof TOOL_KEYS];
 
+/** Pointer travel in CSS pixels below which a press is a click rather than a drag. */
+export const CLICK_TOLERANCE = 3;
+
 export interface ToolModifiers {
   readonly shiftKey: boolean;
   readonly altKey: boolean;

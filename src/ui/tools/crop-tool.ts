@@ -5,9 +5,8 @@ import type { CropHandle } from './crop-geometry';
 import { drawBox, hitCursor, hitTest, moveBox, reshapeBox, resizeBox } from './crop-geometry';
 import type { CropOptions, CropSettings } from './crop-options';
 import { cropRatio, orientedRatio } from './crop-options';
-import { CLICK_TOLERANCE } from './marquee-tool';
 import type { CropOverlay, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent } from './tool';
-import { TOOL_KEYS } from './tool';
+import { CLICK_TOLERANCE, TOOL_KEYS } from './tool';
 
 /** How far from the box's edge, in CSS pixels, a press still grabs it. */
 export const HANDLE_REACH = 6;

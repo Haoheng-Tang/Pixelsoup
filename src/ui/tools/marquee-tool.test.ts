@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { Rect } from '../../core';
 import { createDocument, Editor, Selection, SetSelectionCommand } from '../../core';
 import { FakeViewport, NO_MODIFIERS as noMods } from './fake-viewport';
-import { CLICK_TOLERANCE, MarqueeTool, marqueeRect } from './marquee-tool';
+import { MarqueeTool, marqueeRect } from './marquee-tool';
 import { SelectionOptions } from './selection-options';
+import { CLICK_TOLERANCE } from './tool';
 import { ToolManager } from './tool-manager';
 
 const W = 20;
