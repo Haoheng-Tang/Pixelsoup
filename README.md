@@ -8,10 +8,10 @@ Photoshop.
 [Open Pixelsoup](https://REPLACE-ME.pages.dev)
 
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
-> layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), make
-> rectangular and elliptical selections, move layers and selected pixels, paint and erase with
-> soft or hard brushes, and crop, resize, rotate and flip images. Adjustments and other tools
-> are on the roadmap.
+> layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), select
+> with marquees, lassos and a magic wand, move layers and selected pixels, paint and erase with
+> soft or hard brushes, fill and clear selections or fill with a paint bucket, and crop,
+> resize, rotate and flip images. Adjustments and other tools are on the roadmap.
 
 ## Features so far
 
@@ -34,6 +34,12 @@ Photoshop.
   flatten image. Merging bakes in each layer's opacity, so the image looks the same afterwards
 - Rectangular and elliptical marquee tools (the ellipse has anti-aliased edges) in New, Add,
   Subtract and Intersect modes, picked in the tool-options bar or with modifier keys
+- Lasso and Polygonal Lasso with anti-aliased edges, in the same modes. An outline that
+  crosses itself selects every loop, and as in Photoshop, Alt switches the Lasso to straight
+  sides
+- Magic Wand that selects similar colours, within a tolerance, either connected to the pixel
+  clicked or across the whole image, with optional anti-aliasing, sampling the active layer or
+  all visible layers
 - Select menu: Select All, Deselect and Inverse
 - Marching ants that stay a hairline wide and track the canvas exactly at every zoom level
 - Move tool: drag or nudge the active layer anywhere, even off the canvas. With a selection it
@@ -47,6 +53,11 @@ Photoshop.
 - Foreground and background colours as two toolbar swatches, each with a picker (a
   saturation/brightness square, a hue strip, and hex and R, G, B fields)
 - Eyedropper that picks a colour from the image, or from the active layer alone
+- Paint Bucket that fills similar colours with the foreground colour, at any opacity, blending
+  into anti-aliased edges instead of leaving a fringe
+- Edit menu: Undo, Redo, Fill… (the foreground or background colour, black, white, 50% grey
+  or any colour, at any opacity, optionally preserving transparency) and Clear, with
+  Photoshop's shortcuts. Both respect the selection's soft edges
 - Crop tool: draw a box, then resize it with eight handles or move it, freely or at a fixed
   ratio (the original's, 1:1, 4:3, 3:2, 16:9 or custom), with a rule-of-thirds grid while
   adjusting. A box past the canvas enlarges it with transparent space. Cropped-away pixels stay
@@ -78,6 +89,26 @@ after being released and pressed again. With no selection, they constrain straig
 Selections aren't saved in `.pixelsoup` files, and changing one doesn't count as an unsaved
 change. Some browsers keep Ctrl/Cmd+D (bookmark) or Ctrl/Cmd+Shift+I (developer tools) for
 themselves; the Select menu always works.
+
+### Lasso and Magic Wand shortcuts
+
+| Keys                                           | Action                                               |
+| ---------------------------------------------- | ---------------------------------------------------- |
+| L                                              | lasso tool (Shift+L switches freehand and polygonal) |
+| W                                              | magic wand                                           |
+| Shift, Alt, Shift+Alt at the first press       | add to, subtract from, intersect with the selection  |
+| Drag (Lasso)                                   | draw freehand; releasing closes the outline          |
+| Click (Polygonal Lasso)                        | add a corner                                         |
+| Shift (Polygonal Lasso)                        | keep the next side to 45° steps                      |
+| Click the first corner, double-click, or Enter | close the outline                                    |
+| Backspace or Delete                            | take back the last corner                            |
+| Release a Lasso drag with Alt held             | carry on with straight sides, until Alt is released  |
+| Esc                                            | cancel the outline                                   |
+| Click (Magic Wand)                             | select the colours like the one clicked              |
+
+The Magic Wand's options bar sets the tolerance (how far each of red, green, blue and alpha may
+be from the pixel clicked, 0–255), whether only pixels connected to it count (Contiguous),
+Anti-alias, and Sample all layers (otherwise it looks at the active layer only).
 
 ### Layer shortcuts
 
@@ -117,7 +148,7 @@ floats the pixels again.
 
 | Keys                        | Action                                         |
 | --------------------------- | ---------------------------------------------- |
-| B, E, I                     | brush, eraser, eyedropper                      |
+| B, E, G, I                  | brush, eraser, paint bucket, eyedropper        |
 | [, ]                        | smaller, larger brush                          |
 | Shift+[, Shift+]            | softer, harder brush                           |
 | Shift-click                 | straight line from where the last stroke ended |
@@ -129,7 +160,24 @@ floats the pixels again.
 
 Each stroke is one undo step, clipped to the selection. The Eraser erases to transparency on
 every layer. Pen pressure only applies to pens; mouse strokes use the full size and opacity.
-The colours aren't saved, and changing them isn't an undo step.
+The colours aren't saved, and changing them isn't an undo step. Each Paint Bucket click is one
+undo step too; the bucket has the Magic Wand's options, plus an opacity.
+
+### Edit shortcuts
+
+| Keys (Mac)                           | Action                                                  |
+| ------------------------------------ | ------------------------------------------------------- |
+| Alt+Backspace (Option+Delete)        | fill the selection (or the canvas) with the foreground  |
+| Ctrl+Backspace (Cmd+Delete)          | fill it with the background colour                      |
+| Shift added to either                | the same, preserving transparency                       |
+| Shift+Backspace (Shift+Delete)       | Edit → Fill…                                            |
+| Delete or Backspace (Delete)         | Edit → Clear: clear the selected pixels to transparency |
+| Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y | undo, redo                                              |
+
+Fills and clears are one undo step each, act on the active layer and respect the selection's
+soft edges. Preserving transparency recolours only the pixels that aren't transparent and
+keeps their transparency, to recolour a brush stroke for example. The Fill dialog remembers
+its settings until the page is reloaded.
 
 ### Crop shortcuts
 
