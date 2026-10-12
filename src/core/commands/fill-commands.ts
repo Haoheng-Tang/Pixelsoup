@@ -86,20 +86,28 @@ export class FillCommand implements Command {
         : null;
   }
 
-  /** Canvas-space area the fill would cover in `doc`, or null if none. */
+  /**
+   * Canvas-space area the fill would change in `doc`, or null if none: the smallest rect
+   * holding every pixel the region and the selection cover, within the layer for a
+   * floating selection's layer, and when preserving transparency, only pixels with alpha.
+   */
   area(doc: ImageDocument): Rect | null {
     const layer = rasterLayer(doc, this.layerId);
     const region = this.region;
     if (region && (region.width !== doc.width || region.height !== doc.height)) {
       throw new RangeError('The fill region must be the size of the canvas');
     }
+    const keepsAlpha = this.mode === 'preserve-transparency';
     let area = selectedArea(doc);
     if (area && region) {
       const bounds = region.bounds();
       area = bounds && intersectRects(area, bounds);
     }
-    if (area && (this.floats || this.mode === 'preserve-transparency')) {
+    if (area && (this.floats || keepsAlpha)) {
       area = intersectRects(area, rasterBounds(layer));
+    }
+    if (area && (region || keepsAlpha)) {
+      area = paintedArea(doc, area, region, keepsAlpha ? layer : null);
     }
     return area;
   }
@@ -158,9 +166,9 @@ export class FillCommand implements Command {
 
 /**
  * A fill of the layer (see `FillCommand`), or null if it would change nothing: there's no
- * such layer, it's hidden, the opacity is 0, or there's nothing to fill: the region or
- * the selection misses the canvas or, for a floating selection's layer or one whose
- * transparency is kept, the layer.
+ * such layer, it's hidden, the opacity is 0, or there's nothing to fill: no pixel that
+ * the region and the selection both cover, within the layer for a floating selection's
+ * layer, and with some alpha when preserving transparency.
  */
 export function fillCommand(
   doc: ImageDocument,
@@ -199,11 +207,15 @@ export class ClearCommand implements Command {
       floats && !floats.edited ? { before: floats, after: { ...floats, edited: true } } : null;
   }
 
-  /** Canvas-space area the clear would cover in `doc`: the selection's bounds in the layer. */
+  /**
+   * Canvas-space area the clear would change in `doc`, or null if none: the smallest rect
+   * holding every selected pixel of the layer with some alpha.
+   */
   area(doc: ImageDocument): Rect | null {
     const layer = rasterLayer(doc, this.layerId);
     const selected = doc.selection?.bounds();
-    return selected ? intersectRects(selected, rasterBounds(layer)) : null;
+    const area = selected ? intersectRects(selected, rasterBounds(layer)) : null;
+    return area && paintedArea(doc, area, null, layer);
   }
 
   apply(doc: ImageDocument): DocumentChange {
@@ -241,8 +253,8 @@ export class ClearCommand implements Command {
 
 /**
  * Clears the selected pixels of the layer (see `ClearCommand`), or null if that would
- * change nothing: there's no selection, no such layer, the layer is hidden, or the
- * selection misses it.
+ * change nothing: there's no selection, no such layer, the layer is hidden, or no
+ * selected pixel of it has any alpha.
  */
 export function clearCommand(
   doc: ImageDocument,
@@ -261,6 +273,41 @@ function selectedArea(doc: ImageDocument): Rect | null {
   if (!doc.selection) return canvas;
   const selected = doc.selection.bounds();
   return selected && intersectRects(canvas, selected);
+}
+
+/**
+ * The smallest rect within `area` (on the canvas) holding every pixel that the selection,
+ * if any, and `region`, if given, both cover, and where `alphaOf` (a layer covering
+ * `area`), if given, has some alpha. Null if there's none.
+ */
+function paintedArea(
+  doc: ImageDocument,
+  area: Rect,
+  region: Selection | null,
+  alphaOf: RasterLayer | null,
+): Rect | null {
+  const selection = doc.selection ? doc.selection.mask : null;
+  const coverage = region ? region.mask : null;
+  const data = alphaOf ? alphaOf.pixels.data : null;
+  const layerWidth = alphaOf ? alphaOf.pixels.width : 0;
+  let left = area.x + area.width;
+  let right = -1;
+  let top = -1;
+  let bottom = -1;
+  for (let y = area.y; y < area.y + area.height; y++) {
+    let s = y * doc.width + area.x;
+    let o = alphaOf ? ((y - alphaOf.y) * layerWidth + area.x - alphaOf.x) * 4 + 3 : 0;
+    for (let x = area.x; x < area.x + area.width; x++, s++, o += 4) {
+      if (selection !== null && selection[s] === 0) continue;
+      if (coverage !== null && coverage[s] === 0) continue;
+      if (data !== null && data[o] === 0) continue;
+      if (top < 0) top = y;
+      bottom = y;
+      if (x < left) left = x;
+      if (x > right) right = x;
+    }
+  }
+  return top < 0 ? null : { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
 }
 
 function pixelChange(

@@ -247,6 +247,29 @@ describe('FillCommand', () => {
       fillCommand(doc, layer.id, RED, 1, 'normal', { region: Selection.selectAll(5, 1) }),
     ).toThrow(RangeError);
   });
+
+  it('covers only the pixels it changes, and is null with none', () => {
+    const { doc, layer, editor, changes } = setup([OPAQUE, CLEAR, CLEAR, OPAQUE, CLEAR, CLEAR]);
+    // The region's and the selection's bounds overlap, but none of their pixels do.
+    doc.selection = Selection.fromMask(6, 1, [255, 0, 0, 255, 0, 0]);
+    const apart = Selection.fromMask(6, 1, [0, 255, 255, 0, 255, 0]);
+    expect(fillCommand(doc, layer.id, RED, 1, 'normal', { region: apart })).toBeNull();
+    // Only transparent pixels are selected.
+    doc.selection = Selection.fromMask(6, 1, [0, 255, 255, 0, 255, 255]);
+    expect(fillCommand(doc, layer.id, RED, 1, 'preserve-transparency')).toBeNull();
+    expect(clearCommand(doc, layer.id)).toBeNull();
+
+    doc.selection = Selection.fromMask(6, 1, [0, 255, 255, 255, 255, 0]);
+    fill(editor, 1, 'preserve-transparency');
+    expect(changes.at(-1)?.dirty).toEqual({ x: 3, y: 0, width: 1, height: 1 });
+    editor.history.undo();
+    editor.history.execute(clearCommand(doc, layer.id)!);
+    expect(changes.at(-1)?.dirty).toEqual({ x: 3, y: 0, width: 1, height: 1 });
+    editor.history.undo();
+    fill(editor, 1, 'normal', { region: Selection.fromMask(6, 1, [255, 255, 255, 0, 0, 0]) });
+    expect(changes.at(-1)?.dirty).toEqual({ x: 1, y: 0, width: 2, height: 1 });
+    expect(pixelsOf(layer.pixels)).toEqual([OPAQUE, RED_PIXEL, RED_PIXEL, OPAQUE, CLEAR, CLEAR]);
+  });
 });
 
 describe('ClearCommand', () => {
