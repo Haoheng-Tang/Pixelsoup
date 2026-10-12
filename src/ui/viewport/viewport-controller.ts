@@ -215,8 +215,10 @@ export class ViewportController {
     this.listen(this.canvas, 'mousedown', (e) => {
       if (e.button === 1) e.preventDefault();
     });
-    this.listen(window, 'keydown', this.handleKeyDown);
-    this.listen(window, 'keyup', this.handleKeyUp);
+    // On the document rather than the window, so the tool sees keys before the app's
+    // shortcuts on the window do, and they can skip a key the tool took (defaultPrevented).
+    this.listen(document, 'keydown', this.handleKeyDown);
+    this.listen(document, 'keyup', this.handleKeyUp);
     this.listen(window, 'blur', () => {
       this.modifiers = NO_MODIFIERS;
       this.setSpaceHeld(false);
@@ -671,7 +673,7 @@ export class ViewportController {
   }
 
   private listen<K extends keyof HTMLElementEventMap>(
-    target: HTMLElement | Window,
+    target: HTMLElement | Document | Window,
     type: K,
     handler: (event: HTMLElementEventMap[K]) => void,
     options?: AddEventListenerOptions,
