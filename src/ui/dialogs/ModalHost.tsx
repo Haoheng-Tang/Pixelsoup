@@ -1,15 +1,24 @@
 import { assertNever } from '../../core';
+import type { Colors } from '../color/colors';
+import { fillColor } from '../edit-actions';
 import type { AppController } from '../session/app-controller';
 import { CanvasSizeDialog } from './CanvasSizeDialog';
 import { ConfirmDiscardDialog } from './ConfirmDiscardDialog';
 import { ErrorDialog } from './ErrorDialog';
 import { ExportDialog } from './ExportDialog';
+import { FillDialog } from './FillDialog';
 import { ImageSizeDialog } from './ImageSizeDialog';
 import { NewDocumentDialog } from './NewDocumentDialog';
 import { RotateLayerDialog } from './RotateLayerDialog';
 
+interface ModalHostProps {
+  controller: AppController;
+  /** The foreground and background colours, for the Fill dialog. */
+  colors: Colors;
+}
+
 /** Renders whichever dialog the controller has open. */
-export function ModalHost({ controller }: { controller: AppController }) {
+export function ModalHost({ controller, colors }: ModalHostProps) {
   const modal = controller.modal;
   if (!modal) return null;
   const doc = controller.session.editor.document;
@@ -56,6 +65,16 @@ export function ModalHost({ controller }: { controller: AppController }) {
           target={modal.target}
           onPreview={(degrees) => controller.previewRotation(degrees)}
           onRotate={(degrees) => controller.rotateLayer(degrees)}
+          onCancel={() => controller.dismiss()}
+        />
+      );
+    case 'fill':
+      return (
+        <FillDialog
+          initial={controller.fillSettings}
+          colors={colors}
+          selection={doc.selection !== null}
+          onFill={(settings) => controller.fill(settings, fillColor(settings, colors))}
           onCancel={() => controller.dismiss()}
         />
       );

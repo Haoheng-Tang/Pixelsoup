@@ -9,6 +9,8 @@ import {
   createBlankDocument,
   liftSelectionCommand,
 } from '../../core';
+import type { FillSettings } from '../edit-actions';
+import { DEFAULT_FILL_SETTINGS } from '../edit-actions';
 import { decodePng, encodePng } from '../io/png';
 import { FakeClock } from '../tools/fake-clock';
 import { AppController } from './app-controller';
@@ -420,6 +422,66 @@ describe('AppController image dialogs', () => {
     const { controller, editor } = setup();
     editor.history.execute(new SetLayerVisibilityCommand('layer-1', false));
     controller.openDialog('rotate-layer');
+    expect(controller.modal).toBeNull();
+  });
+});
+
+describe('AppController Fill dialog', () => {
+  const HALF_RED: FillSettings = {
+    contents: 'custom',
+    custom: [255, 0, 0],
+    opacity: 50,
+    preserveTransparency: false,
+  };
+
+  it('fills the active layer as chosen, and remembers the settings', () => {
+    const { controller, editor } = setup();
+    expect(controller.fillSettings).toEqual(DEFAULT_FILL_SETTINGS);
+    select(editor, { x: 1, y: 1, width: 1, height: 1 });
+    controller.openFill();
+    expect(controller.modal).toEqual({ kind: 'fill' });
+    expect(controller.blocked).toBe(true);
+    controller.fill(HALF_RED, [255, 0, 0]);
+    expect(controller.modal).toBeNull();
+    expect(editor.history.undoLabel).toBe('Fill');
+    // Half red over white: green and blue 255 × 0.5 = 127.5, rounded to 128.
+    const data = editor.document.layers[0]?.pixels.data ?? [];
+    expect([...data.slice(20, 24)]).toEqual([255, 128, 128, 255]);
+    expect([...data.slice(16, 20)]).toEqual([255, 255, 255, 255]);
+    expect(controller.fillSettings).toEqual(HALF_RED);
+  });
+
+  it('preserves transparency when asked', () => {
+    const { controller, editor } = setup();
+    const layer = pattern(editor);
+    layer.pixels.data[3] = 0;
+    const before = snapshot(editor);
+    controller.openFill();
+    controller.fill({ ...HALF_RED, opacity: 100, preserveTransparency: true }, [255, 0, 0]);
+    const after = snapshot(editor).data;
+    expect(after.slice(0, 4)).toEqual(before.data.slice(0, 4));
+    expect(after.slice(4, 8)).toEqual([255, 0, 0, before.data[7]]);
+  });
+
+  it('keeps the previous settings and the pixels on Cancel', () => {
+    const { controller, editor } = setup();
+    controller.openFill();
+    controller.dismiss();
+    expect(controller.modal).toBeNull();
+    expect(controller.fillSettings).toEqual(DEFAULT_FILL_SETTINGS);
+    expect(editor.history.canUndo).toBe(false);
+    controller.fill(HALF_RED, [255, 0, 0]);
+    expect(editor.history.canUndo).toBe(false);
+  });
+
+  it("doesn't open over another dialog, or with the active layer hidden", () => {
+    const { controller, editor } = setup();
+    controller.run('export');
+    controller.openFill();
+    expect(controller.modal).toEqual({ kind: 'export' });
+    controller.dismiss();
+    editor.history.execute(new SetLayerVisibilityCommand('layer-1', false));
+    controller.openFill();
     expect(controller.modal).toBeNull();
   });
 });

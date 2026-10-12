@@ -82,7 +82,7 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
 - **Tools** (`src/ui/tools`) implement `Tool` (document-space pointer and key handlers, options
   panel, preview overlay). `ToolManager` holds the active tool; the viewport routes input to it
   after its own pan and zoom. Tools edit only through commands; painting tools run the core
-  stroke engine once per frame. Colours (`Colors`) are session state. Details: @docs/tools.md
+  stroke engine once per frame. Colours (`Colors`) are session state. Tools, fills: @docs/tools.md
 - **Transforms**: Crop, Canvas Size, turns and flips (lossless), Image Size and Rotate Layer are
   core commands; resampling interpolates premultiplied alpha. Details: @docs/transform.md
 
@@ -102,19 +102,19 @@ src/
     editor.ts            Editor: document + history + change events + save point + active layer
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            layers, merge, selection, move, float, stroke, crop/canvas, transforms
+    commands/            layers, merge, selection, move, float, stroke, fill, canvas, transforms
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
-    paint/               dabs and their placement, stroke masks, paint math, colour sampling
+    paint/               dab placement, stroke masks, paint math, colour sampling, flood regions
     resample/            kernels, resizing, affine transforms (premultiplied interpolation)
     serialization/       .pixelsoup read/write, PngCodec interface
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
-    use-*.ts             shortcut hooks; select-commands, layer-actions, image-actions: menu actions
+    use-*.ts             shortcut hooks; select-commands, layer-/image-/edit-actions: menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
     session/             DocumentSession, AppController, file types, Rotate Layer preview
-    dialogs/             New, Export, Image/Canvas Size, Rotate Layer, confirm and error dialogs
+    dialogs/             New, Export, Image/Canvas Size, Rotate Layer, Fill, confirm and error
     color/               Colors (foreground, background), swatches, HSV picker, colour math
-    tools/               Tool, ToolManager; marquee, move, brush/eraser, eyedropper, crop; options
+    tools/               ToolManager; marquee, lasso, wand, move, brush, bucket, eyedropper, crop
     viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
     panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel (drag, thumbnails)
@@ -165,7 +165,7 @@ Cloudflare Pages deploys `main` and previews each PR. Test previews before mergi
 7. Brush / eraser (done: stroke engine, colours and picker, eyedropper)
 8. Crop / rotate (done: Crop tool, Image menu, resampling engine)
 9. Adjustments
-10. Lasso + magic wand
+10. Lasso + magic wand (done: lassos, Magic Wand, Paint Bucket, Edit menu with Fill and Clear)
 11. Text
 12. Transform, filters, layer masks
 

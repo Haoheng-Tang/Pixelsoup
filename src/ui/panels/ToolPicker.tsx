@@ -24,6 +24,22 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <ellipse cx="8" cy="8" rx="5.6" ry="4.6" />
     </svg>
   ),
+  lasso: (
+    <svg {...ICON_PROPS} strokeLinecap="round">
+      <path d="M4.2 10.4C2 9.4 1.6 6.6 3.6 4.8s6.6-2.4 9-.8 1 5.6-3 6.2c-1.6.3-3.2.2-4.6-.3" />
+      <path d="M4.6 10.2c-1 1-.8 2.4.4 2.9s.8 1.6-.2 2.1" strokeDasharray="none" />
+    </svg>
+  ),
+  'polygon-lasso': (
+    <svg {...ICON_PROPS} strokeLinejoin="round">
+      <path d="M2.5 12.5 3.8 3.5l5 2.6 4.7-3.1-1.2 9.2-4.6-2.4z" />
+    </svg>
+  ),
+  'magic-wand': (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round">
+      <path d="M7.2 7.2 14.5 14.5M4.5 1.5v6M1.5 4.5h6M10.5 2.5v2M9.5 3.5h2M3.5 9.5v2M2.5 10.5h2" />
+    </svg>
+  ),
   move: (
     <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />
@@ -37,6 +53,11 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
   eraser: (
     <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
       <path d="M2.2 10.2 10.2 2.2l3.6 3.6-8 8zM5.4 7l3.6 3.6M5.8 13.8H14" />
+    </svg>
+  ),
+  'paint-bucket': (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 7.5 9.5 3l5 5L10 12.5zM5 7.5h8.5M5 7.5c-1.2 0-2 .6-2.2 1.6M2.8 10.4c-.8 1.2-1.2 2.1-1.2 2.7a1.2 1.2 0 0 0 2.4 0c0-.6-.4-1.5-1.2-2.7z" />
     </svg>
   ),
   eyedropper: (

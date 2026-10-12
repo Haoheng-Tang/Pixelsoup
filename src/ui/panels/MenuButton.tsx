@@ -7,6 +7,8 @@ export interface MenuEntry<T extends string> {
   readonly label: string;
   /** Shortcut without the platform modifier, e.g. 'Shift+S' for Ctrl/Cmd+Shift+S. */
   readonly shortcut?: string;
+  /** The shortcut takes no Ctrl/Cmd: 'Delete' is the Delete key alone. */
+  readonly plain?: boolean;
   readonly disabled?: boolean;
 }
 
@@ -127,11 +129,15 @@ export function MenuButton<T extends string>({ label, sections, onChoose }: Menu
                   className="menu-item"
                   aria-disabled={item.disabled ? true : undefined}
                   onClick={() => choose(item)}
-                  aria-keyshortcuts={item.shortcut ? ariaShortcut(item.shortcut) : undefined}
+                  aria-keyshortcuts={
+                    item.shortcut ? ariaShortcut(item.shortcut, item.plain === true) : undefined
+                  }
                 >
                   <span>{item.label}</span>
                   {item.shortcut && (
-                    <kbd className="menu-shortcut">{formatShortcut(item.shortcut)}</kbd>
+                    <kbd className="menu-shortcut">
+                      {formatShortcut(item.shortcut, { plain: item.plain === true })}
+                    </kbd>
                   )}
                 </button>
               ))}
@@ -148,7 +154,10 @@ function menuItems(menu: HTMLElement | null): HTMLElement[] {
   return [...(menu?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
 }
 
-/** "Shift+S" → "Control+Shift+S Meta+Shift+S" for aria-keyshortcuts. */
-function ariaShortcut(keys: string): string {
-  return `Control+${keys} Meta+${keys}`;
+/**
+ * "Shift+S" → "Control+Shift+S Meta+Shift+S" for aria-keyshortcuts; a plain shortcut is
+ * just its keys.
+ */
+function ariaShortcut(keys: string, plain: boolean): string {
+  return plain ? keys : `Control+${keys} Meta+${keys}`;
 }

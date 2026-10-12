@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { FULL_WEIGHT, OPACITY_STEPS, erasePixel, opacitySteps, paintPixel } from './paint-math';
+import {
+  FULL_WEIGHT,
+  OPACITY_STEPS,
+  erasePixel,
+  opacitySteps,
+  paintPixel,
+  tintPixel,
+} from './paint-math';
 
 const RED = [255, 0, 0] as const;
 
@@ -98,5 +105,38 @@ describe('erasePixel', () => {
 
   it('leaves a pixel alone at zero weight', () => {
     expect(erase([100, 150, 200, 77], 0)).toEqual([100, 150, 200, 77]);
+  });
+});
+
+describe('tintPixel', () => {
+  function tint(original: readonly number[], color: readonly number[], w: number): number[] {
+    const out = new Uint8ClampedArray(4);
+    tintPixel(out, 0, new Uint8ClampedArray(original), 0, color[0], color[1], color[2], w);
+    return [...out];
+  }
+
+  it('replaces the colour at full weight and keeps the alpha', () => {
+    expect(tint([100, 150, 200, 255], RED, FULL_WEIGHT)).toEqual([255, 0, 0, 255]);
+    expect(tint([100, 150, 200, 1], RED, FULL_WEIGHT)).toEqual([255, 0, 0, 1]);
+  });
+
+  it('mixes the colour in proportion to the weight', () => {
+    // p = 0.5: (255 + 100) / 2 = 177.5 → 178, 150 / 2 = 75, 200 / 2 = 100; alpha 128 stays.
+    expect(tint([100, 150, 200, 128], RED, weight(255, 255, 0.5))).toEqual([178, 75, 100, 128]);
+    // p = 64/255 × 0.3 = 0.075294…: 100 + 155p = 111.67 → 112, 150 (1 − p) = 138.71 → 139,
+    // 200 (1 − p) = 184.94 → 185.
+    expect(tint([100, 150, 200, 9], RED, weight(64, 255, 0.3))).toEqual([112, 139, 185, 9]);
+  });
+
+  it('leaves transparent pixels and zero weights alone', () => {
+    expect(tint([9, 8, 7, 0], RED, FULL_WEIGHT)).toEqual([9, 8, 7, 0]);
+    expect(tint([100, 150, 200, 77], RED, 0)).toEqual([100, 150, 200, 77]);
+  });
+
+  it('works in place', () => {
+    const pixels = new Uint8ClampedArray([0, 0, 0, 0, 0, 100, 0, 50]);
+    tintPixel(pixels, 4, pixels, 4, 0, 0, 255, weight(255, 255, 0.5));
+    // 100 / 2 = 50 and 255 / 2 = 127.5 → 128.
+    expect([...pixels]).toEqual([0, 0, 0, 0, 0, 50, 128, 50]);
   });
 });

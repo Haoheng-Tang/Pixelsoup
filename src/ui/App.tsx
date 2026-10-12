@@ -10,6 +10,7 @@ import type { ToolManager } from './tools/tool-manager';
 import { useBrushShortcuts } from './use-brush-shortcuts';
 import { useColorShortcuts } from './use-color-shortcuts';
 import { useDocumentWindow } from './use-document-window';
+import { useEditShortcuts } from './use-edit-shortcuts';
 import { useFileShortcuts } from './use-file-shortcuts';
 import { useHistoryShortcuts } from './use-history-shortcuts';
 import { useLayerShortcuts } from './use-layer-shortcuts';
@@ -31,6 +32,7 @@ export function App({ editor, controller, tools, colors }: AppProps) {
   const [viewport, setViewport] = useState<ViewportController | null>(null);
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
+  useEditShortcuts(editor, colors, controller);
   useSelectionShortcuts(editor, controller);
   useLayerShortcuts(editor, controller);
   useToolShortcuts(tools, controller);
@@ -56,7 +58,7 @@ export function App({ editor, controller, tools, colors }: AppProps) {
         </aside>
       </main>
       <StatusBar viewport={viewport} tools={tools} />
-      <ModalHost controller={controller} />
+      <ModalHost controller={controller} colors={colors} />
     </div>
   );
 }

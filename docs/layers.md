@@ -52,16 +52,16 @@ would do nothing, like the selection helpers.
 - **Dirty rects**: adding, removing, duplicating or reordering a layer dirties its canvas area,
   and moving it dirties its old and new canvas area. Renaming dirties nothing. Merge and flatten
   dirty the result's canvas area. Lifting dirties the selection's bounds, and committing the
-  floating layer's bounds plus the area of the source it changed. A brush or eraser stroke
-  dirties the area it painted.
+  floating layer's bounds plus the area of the source it changed. A brush or eraser stroke, a
+  fill and a clear dirty the area they changed.
 - **`layerPixels`**: merge and flatten list the result layer in `DocumentChange.layerPixels`,
   both ways, because the layer with that ID has different pixels. **Every command that changes
   a layer's pixels must list it there** (layer space; `rect: null` for the whole layer), or its
   thumbnail won't update. Lifting and committing list the source both ways: lifting with the
   rect it cut (a copy lists nothing), committing with the rect it changed, or `rect: null` if
-  the source grew (a copy committed where it was lifted changes nothing). A stroke lists the
-  rect it painted, or `rect: null` if it grew the layer. Moving a layer changes no pixels and
-  lists nothing.
+  the source grew (a copy committed where it was lifted changes nothing). A stroke, a fill and
+  a clear list the rect they changed, or `rect: null` if they grew the layer. Moving a layer
+  changes no pixels and lists nothing.
 
 ### Merge down
 
@@ -106,16 +106,18 @@ its source, the selection and position as lifted, and a `PixelSnapshot` of the p
   exactly the pixels it had, so a lift and a commit without a move change nothing. Undo floats
   it again.
 - **Painting**: switching from the Move tool commits a floating selection, but undo can float
-  it again with another tool active. The Brush and Eraser then paint the floating layer, within
-  its bounds (it doesn't grow). The first stroke marks it as `edited` (undo clears that again),
-  so that committing it where it was lifted composites it like a moved one and keeps the paint.
+  it again with another tool active. The Brush, Eraser and Paint Bucket, Fill and Clear then
+  change the floating layer, within its bounds (it doesn't grow), rather than committing it.
+  The first change marks it as `edited` (undo clears that again), so that committing it where
+  it was lifted composites it like a moved one and keeps the paint.
 - **What commits it**: Layer → Commit Floating Selection (Ctrl/Cmd+Enter) and Merge Down; New
   Layer and Flatten Image, first; making another layer active (clicking its row, Alt+[ or
-  Alt+]); hiding or fading the source; any selection change (a marquee, Select All, Deselect,
-  Inverse); switching from the Move tool to another; Save, Save As and Export, after the file
-  picker (cancelling it keeps the selection floating); Alt+drag or Alt+arrow with the Move
-  tool, which then lifts a copy; and cropping (the Crop tool or Crop to Selection), Image Size,
-  Canvas Size and the canvas turns and flips, first.
+  Alt+]); hiding or fading the source; any selection change (a marquee, a lasso, a Magic Wand
+  click on the canvas, Select All, Deselect, Inverse); switching from the Move tool to
+  another; Save, Save As and Export, after the file picker (cancelling it keeps the selection
+  floating); Alt+drag or Alt+arrow with the Move tool, which then lifts a copy; and cropping
+  (the Crop tool or Crop to Selection), Image Size, Canvas Size and the canvas turns and
+  flips, first.
 - **Rotate Layer** on a floating selection turns it, outline and all ("Rotate Selection"), and
   marks it `edited` like a stroke; with a plain selection it lifts the selected pixels first.
   See [transform.md](transform.md).
@@ -181,10 +183,10 @@ The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts.
   overlap, because the merged pair is rounded before it's composited.
 - **Flatten naming** keeps the bottom visible layer's name; Photoshop names the result
   "Background".
-- **Memory**: merge, flatten, and a commit or stroke that grows its layer keep the replaced
-  layers whole in history; a lift, any other commit and any other stroke keep only what they
-  changed (a stroke in 64 px tiles). Image Size and Rotate Layer keep whole layers too:
-  [transform.md](transform.md#open-decisions).
+- **Memory**: merge, flatten, and a commit, stroke or fill that grows its layer keep the
+  replaced layers whole in history; a lift, a clear and any other commit, stroke or fill keep
+  only what they changed (a stroke in 64 px tiles). Image Size and Rotate Layer keep whole
+  layers too: [transform.md](transform.md#open-decisions).
 - **Thumbnails** show the layer's own bounds; Photoshop's default shows the whole canvas.
 - **Long lists**: dragging doesn't auto-scroll the layer list.
 - **Floating edges**: until it's committed or moved, a floating selection's partly selected

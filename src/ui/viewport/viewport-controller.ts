@@ -1,10 +1,13 @@
-import type { Editor } from '../../core';
+import type { Editor, Rect } from '../../core';
+import { assertNever } from '../../core';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
+import { lassoBounds } from '../tools/lasso-tool';
 import type {
   ToolKeyEvent,
   ToolModifiers,
+  ToolOverlay,
   ToolPointerEvent,
   ToolPointerSample,
 } from '../tools/tool';
@@ -33,8 +36,8 @@ export interface ViewportStatus {
   /** Document pixel under the pointer; null while the pointer is away from the canvas. */
   readonly pointer: { readonly x: number; readonly y: number } | null;
   /**
-   * Size of the shape a tool is dragging or the crop box, else of the selection's bounds;
-   * null if none.
+   * Size of the shape or lasso a tool is drawing or the crop box, else of the selection's
+   * bounds; null if none.
    */
   readonly selectionSize: { readonly width: number; readonly height: number } | null;
 }
@@ -76,6 +79,23 @@ function coalescedEvents(e: PointerEvent): readonly PointerEvent[] {
   // Only in secure contexts, so it may be missing despite the type.
   if (e.type !== 'pointermove' || typeof e.getCoalescedEvents !== 'function') return [];
   return e.getCoalescedEvents();
+}
+
+/** The area of what a tool is drawing, for the status bar: a shape, lasso or crop box. */
+function overlayArea(overlay: ToolOverlay | null): Rect | null {
+  if (!overlay) return null;
+  switch (overlay.shape) {
+    case 'rect':
+    case 'ellipse':
+    case 'crop':
+      return overlay.rect;
+    case 'lasso':
+      return lassoBounds(overlay);
+    case 'brush':
+      return null;
+    default:
+      return assertNever(overlay);
+  }
 }
 
 /**
@@ -195,8 +215,10 @@ export class ViewportController {
     this.listen(this.canvas, 'mousedown', (e) => {
       if (e.button === 1) e.preventDefault();
     });
-    this.listen(window, 'keydown', this.handleKeyDown);
-    this.listen(window, 'keyup', this.handleKeyUp);
+    // On the document rather than the window, so the tool sees keys before the app's
+    // shortcuts on the window do, and they can skip a key the tool took (defaultPrevented).
+    this.listen(document, 'keydown', this.handleKeyDown);
+    this.listen(document, 'keyup', this.handleKeyUp);
     this.listen(window, 'blur', () => {
       this.modifiers = NO_MODIFIERS;
       this.setSpaceHeld(false);
@@ -302,7 +324,12 @@ export class ViewportController {
 
   private hasAnts(): boolean {
     const shape = this.tools.overlay?.shape;
-    return this.editor.document.selection !== null || shape === 'rect' || shape === 'ellipse';
+    return (
+      this.editor.document.selection !== null ||
+      shape === 'rect' ||
+      shape === 'ellipse' ||
+      shape === 'lasso'
+    );
   }
 
   /** A brush outline follows the pointer over the canvas, but not while panning. */
@@ -570,8 +597,9 @@ export class ViewportController {
   private readonly handleKeyDown = (e: KeyboardEvent): void => {
     this.modifiers = modifiersOf(e);
     // The pointer may still be over the canvas when a dialog opens; Enter, Escape and
-    // Space must still reach the dialog.
-    if (isTextEntry(e.target) || this.gate.blocked) return;
+    // Space must still reach the dialog. Nor is a key that something on the page has
+    // already used (Escape closing a menu) the tool's.
+    if (e.defaultPrevented || isTextEntry(e.target) || this.gate.blocked) return;
     if (e.code === 'Space') {
       // Only claim Space while the user is working on the canvas, so it still
       // activates focused buttons and checkboxes elsewhere.
@@ -617,9 +645,8 @@ export class ViewportController {
       const [x, y] = this.documentPoint(this.pointer);
       pointer = { x: Math.floor(x), y: Math.floor(y) };
     }
-    const overlay = this.tools.overlay;
-    const shape = overlay && overlay.shape !== 'brush' ? overlay.rect : null;
-    const area = shape ?? this.editor.document.selection?.bounds() ?? null;
+    const area =
+      overlayArea(this.tools.overlay) ?? this.editor.document.selection?.bounds() ?? null;
     const selectionSize = area ? { width: area.width, height: area.height } : null;
     return { pointer, selectionSize };
   }
@@ -647,7 +674,7 @@ export class ViewportController {
   }
 
   private listen<K extends keyof HTMLElementEventMap>(
-    target: HTMLElement | Window,
+    target: HTMLElement | Document | Window,
     type: K,
     handler: (event: HTMLElementEventMap[K]) => void,
     options?: AddEventListenerOptions,

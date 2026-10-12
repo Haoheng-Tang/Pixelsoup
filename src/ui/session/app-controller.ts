@@ -1,5 +1,7 @@
-import type { Command, ImageDocument, NewDocumentOptions } from '../../core';
+import type { Command, ImageDocument, NewDocumentOptions, Rgb } from '../../core';
 import { DEFAULT_NEW_DOCUMENT, assertNever, canvasSizeCommand, imageSizeCommand } from '../../core';
+import type { FillSettings } from '../edit-actions';
+import { DEFAULT_FILL_SETTINGS, canFill, runFill } from '../edit-actions';
 import type { RotateTarget } from '../image-actions';
 import { rotateLayerTarget } from '../image-actions';
 import type { FrameClock } from '../tools/frame-clock';
@@ -30,12 +32,13 @@ export type Modal =
   | { readonly kind: 'image-size' }
   | { readonly kind: 'canvas-size' }
   | { readonly kind: 'rotate-layer'; readonly target: RotateTarget }
+  | { readonly kind: 'fill' }
   | { readonly kind: 'confirm-discard'; readonly documentName: string }
   | { readonly kind: 'error'; readonly title: string; readonly message: string };
 
 /**
- * Runs File commands from the menu and shortcuts and the Image menu's dialogs: asks
- * before discarding unsaved work, shows the dialogs and carries out what they ask,
+ * Runs File commands from the menu and shortcuts and the Image and Edit menus' dialogs:
+ * asks before discarding unsaved work, shows the dialogs and carries out what they ask,
  * reports errors, and ignores new commands while a dialog is open or an operation is
  * still running. Plain TypeScript; React renders `modal`.
  */
@@ -49,6 +52,7 @@ export class AppController {
   private lastExport: ExportOptions = DEFAULT_EXPORT_OPTIONS;
   private lastImageSize: ImageSizeSettings = DEFAULT_IMAGE_SIZE_SETTINGS;
   private lastCanvasSize: CanvasSizeSettings = DEFAULT_CANVAS_SIZE_SETTINGS;
+  private lastFill: FillSettings = DEFAULT_FILL_SETTINGS;
   /** Rotate Layer's preview while its dialog is open. */
   private rotation: LayerRotation | null = null;
 
@@ -93,6 +97,11 @@ export class AppController {
   /** Initial settings for the Canvas Size dialog: the last ones resized with. */
   get canvasSizeSettings(): CanvasSizeSettings {
     return this.lastCanvasSize;
+  }
+
+  /** Initial settings for the Fill dialog: the last ones filled with. */
+  get fillSettings(): FillSettings {
+    return this.lastFill;
   }
 
   subscribe(listener: () => void): () => void {
@@ -232,6 +241,28 @@ export class AppController {
     try {
       rotation.preview(degrees);
       rotation.finish();
+    } catch (error) {
+      this.showError(error);
+    }
+  }
+
+  /** Opens the Fill dialog, unless blocked or the active layer is hidden. */
+  openFill(): void {
+    if (this.blocked || !canFill(this.session.editor)) return;
+    this.show({ kind: 'fill' });
+  }
+
+  /**
+   * Confirms the Fill dialog: fills the active layer with `color`, which `settings` chose
+   * from the current colours (see `runFill`), and remembers `settings`.
+   */
+  fill(settings: FillSettings, color: Rgb): void {
+    if (this.currentModal?.kind !== 'fill') return;
+    this.lastFill = settings;
+    this.show(null);
+    const mode = settings.preserveTransparency ? 'preserve-transparency' : 'normal';
+    try {
+      runFill(this.session.editor, color, settings.opacity / 100, mode);
     } catch (error) {
       this.showError(error);
     }

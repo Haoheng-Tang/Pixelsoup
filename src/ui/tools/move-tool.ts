@@ -3,10 +3,9 @@ import type { Editor, FloatingSelection, ImageDocument, LayerId } from '../../co
 import { findLayer, liftSelectionCommand, moveLayerCommand } from '../../core';
 import type { FrameClock } from './frame-clock';
 import { browserClock } from './frame-clock';
-import { CLICK_TOLERANCE } from './marquee-tool';
 import { NudgeGrouper, nudgeOffset } from './nudge';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent } from './tool';
-import { TOOL_KEYS } from './tool';
+import { CLICK_TOLERANCE, TOOL_KEYS } from './tool';
 
 /** A layer a drag or nudge moves, and where it was when the gesture took hold of it. */
 interface MoveTarget {

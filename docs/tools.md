@@ -1,21 +1,30 @@
 # Tools, selections and painting
 
 How editing tools plug into the viewport, how selections work, how the painting tools paint,
-and the Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
-`src/core/commands/stroke-commands.ts` (the stroke engine), `src/ui/tools` (tools),
-`src/ui/color` (colours) and `src/ui/viewport` (input routing and drawing).
+how Fill, Clear and the Paint Bucket fill, and the Crop tool. The code lives in
+`src/core/selection.ts` (masks), `src/core/paint` and `src/core/commands/stroke-commands.ts`
+(the stroke engine), `src/core/paint/flood-region.ts` and
+`src/core/commands/fill-commands.ts` (flood regions, Fill and Clear), `src/ui/tools` (tools),
+`src/ui/edit-actions.ts` and `src/ui/use-edit-shortcuts.ts` (the Edit menu's actions and
+shortcuts), `src/ui/color` (colours) and `src/ui/viewport` (input routing and drawing).
 
 ## Selections (core)
 
 - `Selection` is an immutable 8-bit coverage mask the size of the canvas: 0 is unselected, 255
   fully selected, values in between partly selected (anti-aliased edges). It caches its bounding
   rect (`bounds()`, null when empty) and `isEmpty`.
-- Build one with `Selection.fromRect`, `fromEllipse` (exact anti-aliased edge coverage),
-  `selectAll`, `empty` or `fromMask`. Combine with `union` (max), `subtract` (min(a, 255 − b)),
+- Build one with `Selection.fromRect`, `fromEllipse`, `fromPolygon`, `selectAll`, `empty` or
+  `fromMask`. Combine with `union` (max), `subtract` (min(a, 255 − b)),
   `intersect` (min) and `invert` (255 − a); move with `translate(dx, dy)` (whole pixels;
   coverage moved off the canvas is lost); follow canvas changes and transforms with
   `resizeCanvas`, `orient` and `transform`; read with `coverageAt(x, y)` (0 off the canvas) and
   `equals`. Every operation returns a new selection.
+- **Anti-aliased shapes**: `fromEllipse` and `fromPolygon` give each pixel the fraction of it
+  inside the shape. They split each pixel row into 16 sub-rows, measure each sub-row's span
+  exactly and average, so edges get at least 16 levels. `fromPolygon(points)` closes the path
+  from the last point back to the first and fills where its winding number is non-zero, so a
+  lasso that crosses itself fills every loop, even one it winds round twice. Points may be
+  fractional and lie off the canvas; fewer than three give an empty selection.
 - `combineSelections(base, shape, mode)` applies a tool's mode (`replace`, `add`, `subtract`,
   `intersect`) and returns null when nothing ends up selected.
 - `doc.selection` is null or a non-empty selection. `SetSelectionCommand` changes it, also
@@ -28,29 +37,32 @@ and the Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/
   or clear it ([transform.md](transform.md)).
 - **Clipping invariant.** Every pixel-editing command clips to `doc.selection` when it isn't
   null, treating coverage as a per-pixel weight: `result = old + (new − old) × coverage / 255`.
-  Lifting a floating selection weights the pixels it cuts out the same way, and brush and
-  eraser strokes multiply each pixel's paint weight by its coverage / 255. Layer properties
+  Lifting a floating selection weights the pixels it cuts out the same way, brush and eraser
+  strokes multiply each pixel's paint weight by its coverage / 255, and so do Fill, Clear and
+  the Paint Bucket. Layer properties
   such as opacity and visibility, and whole-layer operations (moving, transforming, merging,
   flattening, committing a floating selection), aren't pixel edits and ignore the selection.
 
 ## The `Tool` interface
 
-| Member                          | Purpose                                                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `id`, `name`                    | stable ID (`rect-marquee`) and display name (`Rectangular Marquee`)                                          |
-| `shortcut`                      | a key from `TOOL_KEYS`                                                                                       |
-| `cursor`                        | CSS cursor over the canvas; it may change, like `overlay`                                                    |
-| `OptionsPanel?`                 | React component shown in the tool-options bar                                                                |
-| `overlay?`                      | what to draw over the document (`ToolOverlay`, document coordinates): a marquee shape or a brush outline     |
-| `activate(ctx)`, `deactivate()` | `ctx` gives the `Editor`, `overlayChanged()` (call when `overlay` or `cursor` changes) and `showMessage()`   |
-| `pointerDown/Move/Up(e)`        | `e.x`, `e.y`: fractional document coordinates (pixel (px, py) spans [px, px + 1)); plus `zoom` and modifiers |
-| `cancel()`                      | abandon the gesture in progress without committing it                                                        |
-| `doubleClick?(e)`               | a primary-button double-click, outside any gesture (the Crop tool crops)                                     |
-| `keyDown/keyUp(e)`              | return true if the key was used, so the viewport suppresses the browser's default action                     |
-| `stepBrush?(property, dir)`     | painting tools: `[` and `]` step the brush size down and up, with Shift its hardness                         |
+| Member                          | Purpose                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `id`, `name`                    | stable ID (`rect-marquee`) and display name (`Rectangular Marquee`)                                               |
+| `shortcut`                      | a key from `TOOL_KEYS`                                                                                            |
+| `cursor`                        | CSS cursor over the canvas; it may change, like `overlay`                                                         |
+| `OptionsPanel?`                 | React component shown in the tool-options bar                                                                     |
+| `overlay?`                      | what to draw over the document (`ToolOverlay`, document coordinates): a marquee shape, a lasso or a brush outline |
+| `activate(ctx)`, `deactivate()` | `ctx` gives the `Editor`, `overlayChanged()` (call when `overlay` or `cursor` changes) and `showMessage()`        |
+| `pointerDown/Move/Up(e)`        | `e.x`, `e.y`: fractional document coordinates (pixel (px, py) spans [px, px + 1)); plus `zoom` and modifiers      |
+| `cancel()`                      | abandon the gesture in progress without committing it                                                             |
+| `doubleClick?(e)`               | a primary-button double-click, outside any gesture (the Crop tool crops)                                          |
+| `keyDown/keyUp(e)`              | return true if the key was used, so the viewport suppresses the browser's default action                          |
+| `stepBrush?(property, dir)`     | painting tools: `[` and `]` step the brush size down and up, with Shift its hardness                              |
 
 - **Overlays**: a `ShapeOverlay` (`rect` or `ellipse`) previews a marquee; `hidesSelection`
-  hides the selection's outline meanwhile. A `BrushOverlay` (`brush`, with a centre and a
+  hides the selection's outline meanwhile. A `LassoOverlay` (`lasso`) is a lasso being drawn:
+  its points, the rubber band's end (`next`) and whether a click would close it (`closing`),
+  with `hidesSelection` too. A `BrushOverlay` (`brush`, with a centre and a
   diameter) is a painting tool's outline. A `CropOverlay` (`crop`, with the box and whether to
   show its grid) is the Crop tool's box.
 - **Pointer events** from a pen carry its `pressure` (0–1; mice and touch report none). A move
@@ -60,7 +72,8 @@ and the Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/
 
 Tools are UI and never mutate the document directly: every change is a core command run through
 `editor.history`. A gesture that should be one undo step either commits once at the end (the
-marquee) or gives its commands a shared `mergeKey` (the Move tool and the painting tools).
+marquees, the lassos) or gives its commands a shared `mergeKey` (the Move tool and the painting
+tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click.
 
 ## ToolManager and input routing
 
@@ -69,8 +82,8 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   and is refused while a pointer gesture is in progress.
 - Shortcuts (`useToolShortcuts`): tools that share a key form a group. The key selects the
   group's last-used tool and Shift+key cycles through it. They're ignored with Ctrl, Cmd or Alt,
-  while typing and while a dialog is open. `TOOL_KEYS` has M marquee, V move, B brush, E eraser,
-  I eyedropper and C crop, and reserves L lasso, W wand and T text.
+  while typing and while a dialog is open. `TOOL_KEYS` has M marquee, L lasso, W magic wand,
+  V move, B brush, E eraser, G paint bucket, I eyedropper and C crop, and reserves T text.
 - `[` and `]`, with or without Shift (`useBrushShortcuts`), go to `ToolManager.stepBrush`
   wherever the pointer is: the active tool's `stepBrush` handles them, if it has one. X and D
   (`useColorShortcuts`) swap and reset the colours. Both are ignored while typing and while a
@@ -83,8 +96,12 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   document position (and a painting tool can show its outline straight away).
 - Keys go to the tool during a gesture, while the pointer is over the canvas, or while the
   canvas has focus, but never while a dialog is open (the viewport's `KeyGate`), so Enter and
-  Escape reach the dialog. Escape during a gesture cancels it, as do pointer cancel, window
-  blur, a tool switch and a document swap.
+  Escape reach the dialog, nor once something on the page has used them (`defaultPrevented`,
+  such as Escape closing a menu). Escape during a gesture cancels it, as do pointer cancel,
+  window blur, a tool switch and a document swap.
+- The viewport listens for keys on the document and the app's shortcut hooks on the window,
+  so the tool always sees a key first. The hooks skip keys it used (`defaultPrevented`): while
+  a polygon is being drawn, Backspace takes back a point instead of clearing the selection.
 - A primary-button double-click goes to the tool's `doubleClick`, unless the view is panning or
   a gesture is in progress.
 
@@ -102,7 +119,9 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   device placement as the composite, so they track pan and zoom exactly. Where pixel edges fall
   between device pixels (fractional device scales, such as 100 % zoom on a 125 % display) the
   line is anti-aliased across two device pixels.
-- The tool's preview shape is drawn the same way; it's rebuilt each draw, which is cheap.
+- The tool's preview shape is drawn the same way; it's rebuilt each draw, which is cheap. A
+  lasso is drawn as ants along its points and rubber band, left open, and where a click would
+  close it, a 9 CSS px ring marks the first point.
 - A painting tool's brush outline is a circle in document space, so it scales with the zoom:
   a `--cursor-line` line over a wider `--cursor-halo` one, so it shows on any colour. Smaller
   than 4 CSS px across, it becomes a crosshair on the device pixel grid. It shows only while the
@@ -119,8 +138,9 @@ marquee) or gives its commands a shared `mergeKey` (the Move tool and the painti
   an offset would be cheaper, except where the canvas edge clips the selection.
 
 The status bar shows the document pixel under the pointer and the size of the tool's preview (a
-marquee while dragging, or the crop box), else of the selection bounds. The viewport reports both
-and `StatusBar` writes them straight into the DOM, as it does the tools' `showMessage` text.
+marquee while dragging, a lasso's bounds, or the crop box), else of the selection bounds. The
+viewport reports both and `StatusBar` writes them straight into the DOM, as it does the tools'
+`showMessage` text.
 
 ## Marquee tools
 
@@ -128,9 +148,9 @@ and `StatusBar` writes them straight into the DOM, as it does the tools' `showMe
 
 - Drag from corner to corner; both ends snap to the nearest pixel corner. In New mode the live
   preview hides the current selection's outline.
-- The mode comes from the options bar (New, Add, Subtract, Intersect; shared by both marquees),
-  overridden at the press when a selection exists: Shift adds, Alt subtracts, Shift+Alt
-  intersects.
+- The mode comes from the options bar (New, Add, Subtract, Intersect; shared by the marquees,
+  the lassos and the Magic Wand), overridden at the press when a selection exists: Shift adds,
+  Alt subtracts, Shift+Alt intersects (`pressMode`).
 - During the drag Shift constrains to a square or circle (the longer side wins) and Alt draws
   from the centre. A modifier that picked the mode at the press only constrains after it has
   been released and pressed again. With no selection, modifiers held at the press constrain
@@ -139,6 +159,87 @@ and `StatusBar` writes them straight into the DOM, as it does the tools' `showMe
   click (less than 3 CSS pixels of travel) or a shape entirely off the canvas deselects in New
   mode and does nothing in the other modes.
 - A floating selection is committed first whenever the selection changes, as one more step.
+
+The lassos and the Magic Wand finish the same way (`applySelection` in `selection-tool.ts`):
+their shape goes through `combineSelections` and one `SetSelectionCommand` named after the
+tool, after committing a floating selection.
+
+## Lasso tools
+
+`LassoTool` and `PolygonLassoTool` share L (Shift+L switches). Both draw an outline in
+fractional document coordinates, shown as ants (see [Drawing](#drawing)), and close it into
+`Selection.fromPolygon`, so edges are anti-aliased and a path that crosses itself fills
+every loop. The mode and modifiers work as for the marquees: Shift or Alt held at the first
+press with a selection picks the mode, and in New mode the current selection's outline hides
+while drawing. Escape abandons the outline, and so do switching tools, replacing the document
+and changing the canvas size. With no outline in progress, Escape deselects instead, as
+Select → Deselect does (one undo step, after committing a floating selection); not with Ctrl,
+Cmd or Alt, and not on a held key's repeats, so holding it to abandon an outline keeps the
+selection.
+
+- **Polygonal Lasso**: each click adds a vertex, and a rubber band follows the pointer from
+  the last one. Shift constrains it, and the vertex a click adds, to multiples of 45° (unless
+  Shift picked the mode and hasn't been released since). Backspace or Delete takes back the
+  last vertex, and taking back the first abandons the polygon. A click within 6 CSS px of the
+  first vertex (`CLOSE_REACH`, once there are three) closes it, as do a double-click and Enter.
+  Clicks within 3 CSS px of the last vertex add nothing, so the double-click's second press
+  doesn't add a vertex either.
+- **Lasso**: dragging draws a freehand outline (every coalesced pointer position, at least
+  1 CSS px apart), and releasing closes it. Like Photoshop, releasing the button with Alt held
+  switches to straight segments instead: each click then adds a vertex, a drag from it draws
+  freehand again, Backspace or Delete takes back the last point, and releasing Alt, Enter, a
+  double-click or a click on the first point closes the outline. An Alt that picked the
+  subtract mode at the press does this only after it has been released and pressed again.
+- **Cursors**, in the style of Photoshop's: a solid black arrow whose tip is the hot spot,
+  with a rope at its lower right, its loop rounded for the Lasso and straight-sided for the
+  Polygonal Lasso, black on a white edge. While the Lasso adds straight segments (the button
+  up), it shows the Polygonal Lasso's cursor.
+- An outline that never got more than 3 CSS px from its first point is a click: it deselects
+  in New mode and does nothing in the others, like a marquee click.
+- Keys reach the lassos before the Edit shortcuts (see the key routing above): while straight
+  segments are being drawn, Backspace and Delete take back a point rather than clearing the
+  selection. The Polygonal Lasso leaves them to the Edit shortcuts with Ctrl, Cmd or Alt held,
+  so Alt+Backspace still fills the selection; the Lasso's straight segments need Alt held, so
+  it takes Alt+Backspace itself.
+
+## Flood regions (core)
+
+`floodRegion(pixels, start, tolerance, contiguous, antiAlias)` (`src/core/paint/flood-region.ts`)
+picks the pixels like the one at `start` and returns a coverage mask the buffer's size.
+
+- **Matching**: a pixel matches when each of its R, G, B and A (straight alpha) is within
+  `tolerance` (0–255) of the start pixel's. Fully transparent pixels count as (0, 0, 0, 0)
+  whatever colour they hold, so they match each other at any tolerance. Tolerance 0 picks
+  exactly the start pixel's colour; 255 picks everything.
+- **Contiguous**: the matching pixels connected to the start through their edges (4-connected:
+  diagonal neighbours don't connect), found by a scanline fill: each popped seed fills its
+  whole run of the row, then pushes one seed per run of fillable pixels just above and below.
+  No recursion; the seed stack is a growable `Int32Array`, and the mask itself marks what's
+  done. Otherwise, every matching pixel in the buffer.
+- **Anti-alias** softens the region's edge by a pixel: each pixel outside the region gets
+  coverage 255 × n / 8 (rounded) for its n neighbours (of eight) in the region. The region
+  itself stays at 255, so a fill leaves no fringe of the old colour inside it.
+- `floodSelection(doc, x, y, options)` runs it on canvas pixels (`canvasPixels`) and returns
+  a `Selection`, or null off the canvas. Its `source` is one layer's own pixels in place,
+  transparent beyond its edges and sampled even while it's hidden, or `'composite'`: the
+  visible layers composited ("sample all layers").
+- A 2000 × 2000 contiguous fill of a uniform image takes well under a second (a test checks
+  it); filling is linear in the pixels visited.
+
+## Magic Wand
+
+`MagicWandTool` (W) selects with a click: the flood region around the pixel clicked
+(`regionAt` in `region-options.ts`), combined with the selection like a marquee's shape.
+
+- **Options** (`RegionOptions`, the wand's own set): tolerance 0–255 (default 32), contiguous
+  (on), anti-alias (on) and sample all layers (off), next to the selection mode.
+- The mode comes from the options bar or, with a selection, Shift (add), Alt (subtract) or
+  both (intersect) at the press. Each click is one undo step, "Magic Wand", unless the
+  selection wouldn't change.
+- A click on the canvas commits a floating selection first, so the wand sees the merged
+  pixels. A click off the canvas deselects in New mode and does nothing in the others.
+- Without "sample all layers" it compares the active layer's own pixels, even while it's
+  hidden, with transparency beyond its edges.
 
 ## Move tool
 
@@ -288,6 +389,100 @@ A new painting tool (a pencil, a clone stamp, a blur brush) reuses as much of th
 - **Shift while painting** only matters at the press (a straight line); it doesn't constrain
   a drag to an axis.
 
+## Fill, Clear and the Paint Bucket
+
+Edit → Fill… and Clear, their shortcuts and the Paint Bucket all change the active layer's
+pixels through two core commands in `src/core/commands/fill-commands.ts`.
+
+### The commands (core)
+
+- **`fillCommand(doc, layerId, color, opacity, mode, { region, floating, label })`** fills
+  with an opaque colour. Each pixel's weight is p = region coverage × selection coverage ×
+  opacity, each as a fraction of 1; without a selection the whole canvas counts as selected,
+  and without a `region` (the Paint Bucket's flood region) so does all of it. In `normal`
+  mode the colour goes over the pixel as the brush paints it (alpha becomes 255p + a(1 − p),
+  each channel the alpha-weighted mix). `preserve-transparency` moves each channel of a pixel
+  that has some alpha towards the colour by p and leaves its alpha alone; transparent pixels
+  stay transparent. The pixel math is the stroke engine's (`paint-math.ts`), exact and
+  correctly rounded.
+- **`clearCommand(doc, layerId, floating)`** clears the selected pixels to transparency,
+  weighted by coverage c: alpha becomes a(1 − c / 255) and the colour stays, and a pixel
+  cleared completely becomes transparent black, as the eraser leaves it. It needs a selection.
+- Both cover only the smallest rect holding every pixel they change (`paintedArea`), and are
+  null when that's nothing: a missing or hidden layer, no selected pixel in the region, an
+  opacity of 0, or (preserving transparency, or clearing) no selected pixel with any alpha.
+- **Growth**: a normal fill that reaches past the layer's edges grows the layer to the union
+  of its bounds and the filled area, as painting does (`growthArea`: to the canvas if that
+  union would exceed 8192 pixels on a side). So a fill with no selection grows a layer smaller
+  than the canvas to cover it. Preserving transparency and clearing never grow a layer.
+- **Undo**: the pixels the fill or clear replaced (`PixelSnapshot`), or the whole layer as it
+  was if it grew, come back exactly. `layerPixels` lists the layer with the rect it changed,
+  or `rect: null` if it grew.
+- **Floating selections**: on the floating layer, both stay within its bounds (it doesn't
+  grow) and mark it as edited, like a brush stroke, so committing it in place keeps the change.
+
+### Edit menu and shortcuts
+
+`runFill` and `runClear` (`src/ui/edit-actions.ts`) back the Edit menu and the shortcuts. They
+act on the active layer and do nothing while it's hidden. While a selection floats its layer
+is the active one, so they change the floating layer rather than committing it.
+
+| Keys (Mac)                                 | Action                                    |
+| ------------------------------------------ | ----------------------------------------- |
+| Alt+Backspace (Option+Delete)              | fill with the foreground colour           |
+| Ctrl+Backspace (Cmd+Delete)                | fill with the background colour           |
+| Shift added to either                      | the same, preserving transparency         |
+| Shift+Backspace (Shift+Delete)             | open the Fill dialog                      |
+| Delete or Backspace (delete, or fn+delete) | clear the selected pixels to transparency |
+
+- `editShortcutFor` maps a key press. Backspace and the forward Delete key work alike, since
+  the Mac's delete key types Backspace. Ctrl+Alt (AltGr on Windows) and Cmd+Option match
+  nothing. The shortcut fills are at 100 % opacity in Normal mode, as in Photoshop.
+- `useEditShortcuts` calls `preventDefault` on all of them, so the browser does nothing else
+  with them. They're ignored while typing in a text field, while a dialog is open or a file
+  operation runs, and for a key the active tool used; held keys don't repeat.
+- The Edit menu has Undo and Redo (named after the step), Fill… and Clear; Cut, Copy and
+  Paste will go between them. Fill… is enabled while the active layer is visible, and Clear
+  while the selection's bounds reach the visible active layer (a quick check: Clear may then
+  find nothing with any alpha to clear, and adds no step). Menu shortcuts without Ctrl/Cmd
+  are marked `plain` and show as Shift+Backspace and Delete, or ⇧⌫ and ⌫ on a Mac.
+- **Fill dialog**: Contents (Foreground colour, Background colour, Black, White, 50% grey,
+  which is 128, 128, 128, or Custom colour with a colour picker that selects it when changed),
+  Opacity (1–100 %) and Preserve transparency. A hint says whether the selection or the whole
+  canvas will be filled. It remembers its settings for the session (`AppController`), and a
+  custom colour starts as the foreground colour. One undo step, "Fill".
+
+### Paint Bucket
+
+`PaintBucketTool` (G) fills with a click: the flood region around the pixel clicked
+(`regionAt`, as for the Magic Wand) gets the foreground colour on the active layer, at the
+options' opacity, in Normal mode and within the selection: `fillCommand` with the region.
+
+- **Options** (`RegionOptions`, the bucket's own set): tolerance (default 32), contiguous (on),
+  anti-alias (on), sample all layers (off) and opacity 1–100 % (100).
+- With anti-alias, the region's 1-pixel soft edge (see [Flood regions](#flood-regions-core))
+  is filled in part, so the fill blends into an anti-aliased outline rather than leaving a
+  halo of the old colour.
+- With "sample all layers", the region comes from the composite but the fill still goes on
+  the active layer. A region past the layer's edges grows it, as a fill does.
+- One undo step per click ("Paint Bucket"); a click that would change nothing (off the canvas,
+  or a region the selection doesn't reach) adds none. Nothing is filled on a hidden layer,
+  and the status bar says why. A floating selection's layer is filled within its bounds and
+  marked as edited.
+
+### Open decisions
+
+- **Growth**: a fill grows its layer to the union of its bounds and the filled area, like a
+  brush stroke, rather than always to the whole canvas.
+- **Matching** compares each channel with the clicked pixel's (no perceptual distance, no
+  running average), and treats every fully transparent pixel alike.
+- **Mid-gesture**: like undo and the other shortcuts, the Edit shortcuts aren't blocked
+  during a drag.
+- **Hybrid lasso**: only the freehand Lasso switches to straight segments with Alt; the
+  Polygonal Lasso doesn't switch to freehand.
+- **Lasso cursors** don't show Photoshop's mode badges (+, −, ×) or its close circle; the
+  overlay's ring marks where a click would close the outline.
+
 ## Crop tool
 
 `CropTool` (C) crops the canvas to a box with `cropCommand` ([transform.md](transform.md)). The
@@ -325,9 +520,9 @@ The status bar shows the box's size, and the grid shows while a drag adjusts the
 1. Implement `Tool` in `src/ui/tools/`, using a key from `TOOL_KEYS`.
 2. Express every edit as a core command with tests; pixel edits clip to the selection and
    commit a floating selection first if they would change its source. Painting tools get the
-   clipping from the stroke engine, and paint only the active layer, which while a selection
-   floats is the floating layer, never its source.
+   clipping from the stroke engine, and filling ones from `fillCommand`; both change only the
+   active layer, which while a selection floats is the floating layer, never its source.
 3. Add the tool in `createToolManager` and give it an icon in `ToolPicker`.
 4. Unit-test pointer sequences against `FakeViewport` (`fake-viewport.ts`) and, for tools that
    work per animation frame, `FakeClock` (`fake-clock.ts`), as `marquee-tool.test.ts`,
-   `move-tool.test.ts`, `paint-tool.test.ts` and `crop-tool.test.ts` do.
+   `lasso-tool.test.ts`, `move-tool.test.ts`, `paint-tool.test.ts` and `crop-tool.test.ts` do.

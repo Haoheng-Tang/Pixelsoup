@@ -1,7 +1,8 @@
 import type { ComponentType } from 'react';
 import type { ImageDocument, Rect, SelectionMode } from '../../core';
-import { combineSelections, Selection, SetSelectionCommand } from '../../core';
+import { Selection } from '../../core';
 import type { SelectionOptions } from './selection-options';
+import { applySelection, pressMode } from './selection-tool';
 import type {
   Tool,
   ToolContext,
@@ -10,12 +11,9 @@ import type {
   ToolModifiers,
   ToolPointerEvent,
 } from './tool';
-import { TOOL_KEYS } from './tool';
+import { CLICK_TOLERANCE, TOOL_KEYS } from './tool';
 
 export type MarqueeShape = 'rect' | 'ellipse';
-
-/** Pointer travel in CSS pixels below which a press is a click rather than a drag. */
-export const CLICK_TOLERANCE = 3;
 
 interface MarqueeDrag {
   readonly document: ImageDocument;
@@ -72,14 +70,6 @@ export function marqueeRect(
   };
 }
 
-/** The mode chosen by modifiers held at the press: Shift adds, Alt subtracts, both intersect. */
-function modifierMode(e: ToolModifiers): SelectionMode | null {
-  if (e.shiftKey && e.altKey) return 'intersect';
-  if (e.shiftKey) return 'add';
-  if (e.altKey) return 'subtract';
-  return null;
-}
-
 /**
  * Rectangular or elliptical marquee. Dragging previews the shape and commits it on
  * release, combined with the current selection according to the mode: the options bar's
@@ -119,12 +109,12 @@ export class MarqueeTool implements Tool {
 
   pointerDown(e: ToolPointerEvent): void {
     if (!this.context) return;
-    const doc = this.context.editor.document;
+    const { editor } = this.context;
     // Without a selection there is nothing to add to, so Shift and Alt constrain at once.
-    const picked = doc.selection ? modifierMode(e) : null;
+    const { mode, picked } = pressMode(editor, e, this.options);
     this.drag = {
-      document: doc,
-      mode: picked ?? this.options.mode,
+      document: editor.document,
+      mode,
       startX: e.x,
       startY: e.y,
       anchorX: Math.round(e.x),
@@ -134,8 +124,8 @@ export class MarqueeTool implements Tool {
       dragged: false,
       shiftKey: e.shiftKey,
       altKey: e.altKey,
-      shiftPickedMode: picked !== null && e.shiftKey,
-      altPickedMode: picked !== null && e.altKey,
+      shiftPickedMode: picked && e.shiftKey,
+      altPickedMode: picked && e.altKey,
     };
     this.updatePreview();
   }
@@ -157,21 +147,9 @@ export class MarqueeTool implements Tool {
     const { editor } = this.context;
     const doc = editor.document;
     if (doc !== drag.document) return;
-    const current = doc.selection;
+    // A click (or a shape off the canvas) deselects, unless it was meant to modify.
     const shape = drag.dragged ? this.shapeSelection(doc, this.shapeRect(drag)) : null;
-    if (!shape || shape.isEmpty) {
-      // A click (or a shape off the canvas) deselects, unless it was meant to modify.
-      if (drag.mode === 'replace' && current) {
-        editor.commitFloating();
-        editor.history.execute(new SetSelectionCommand(null, 'Deselect'));
-      }
-      return;
-    }
-    const next = combineSelections(current, shape, drag.mode);
-    if (next === null ? current === null : current?.equals(next)) return;
-    // A floating selection is dropped back into its layer before the selection changes.
-    editor.commitFloating();
-    editor.history.execute(new SetSelectionCommand(next, this.name));
+    applySelection(editor, shape, drag.mode, this.name);
   }
 
   cancel(): void {

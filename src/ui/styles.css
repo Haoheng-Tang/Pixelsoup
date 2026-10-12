@@ -788,6 +788,49 @@ button.danger:hover:not(:disabled) {
   accent-color: var(--accent);
 }
 
+/* The Fill dialog's contents, in two columns, each with its colour. */
+.fill-contents {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.fill-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--swatch-edge);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--swatch-inner-edge);
+}
+
+.fill-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fill-color {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--swatch-edge);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.fill-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.fill-color::-webkit-color-swatch {
+  border: 0;
+}
+
+.fill-color::-moz-color-swatch {
+  border: 0;
+}
+
 /* A dialog that previews its effect on the canvas: at the side, with nothing dimmed. */
 .dialog-preview {
   margin: 88px 16px auto auto;
