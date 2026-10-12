@@ -18,6 +18,7 @@ export * from './commands/move-commands';
 export * from './commands/float-commands';
 export * from './commands/selection-commands';
 export * from './commands/stroke-commands';
+export * from './commands/fill-commands';
 export * from './commands/canvas-commands';
 export * from './commands/orientation-commands';
 export * from './commands/transform-commands';

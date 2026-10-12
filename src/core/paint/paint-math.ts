@@ -2,9 +2,9 @@
  * Exact integer math for painting into straight-alpha RGBA8 pixels.
  *
  * Each pixel is painted with a weight `w` out of FULL_WEIGHT: the product of the stroke's
- * mask (0–255), the selection's coverage there (0–255, 255 without a selection) and the
- * stroke's opacity in OPACITY_STEPS. Every value stays well below 2^53, so the arithmetic
- * is exact in doubles and each result is correctly rounded (halves up).
+ * mask or the fill's region (0–255), the selection's coverage there (0–255, 255 without a
+ * selection) and the opacity in OPACITY_STEPS. Every value stays well below 2^53, so the
+ * arithmetic is exact in doubles and each result is correctly rounded (halves up).
  */
 
 /** Stroke opacity is applied in steps of 1 / OPACITY_STEPS. */
@@ -72,5 +72,36 @@ export function erasePixel(
   out[i] = src[j];
   out[i + 1] = src[j + 1];
   out[i + 2] = src[j + 2];
+  out[i + 3] = a;
+}
+
+/**
+ * Tints the pixel at `src[j]` towards the opaque colour (r, g, b) with weight w, writing
+ * the result to `out[i]`: with p = w / FULL_WEIGHT, each channel becomes C·p + c(1 − p)
+ * and alpha stays as it is, so a transparent pixel stays transparent. Fills that preserve
+ * transparency paint this way.
+ */
+export function tintPixel(
+  out: Uint8ClampedArray,
+  i: number,
+  src: Uint8ClampedArray,
+  j: number,
+  r: number,
+  g: number,
+  b: number,
+  w: number,
+): void {
+  const a = src[j + 3];
+  if (a === 0) {
+    out[i] = src[j];
+    out[i + 1] = src[j + 1];
+    out[i + 2] = src[j + 2];
+    out[i + 3] = 0;
+    return;
+  }
+  const keep = FULL_WEIGHT - w;
+  out[i] = Math.floor((2 * (r * w + src[j] * keep) + FULL_WEIGHT) / (2 * FULL_WEIGHT));
+  out[i + 1] = Math.floor((2 * (g * w + src[j + 1] * keep) + FULL_WEIGHT) / (2 * FULL_WEIGHT));
+  out[i + 2] = Math.floor((2 * (b * w + src[j + 2] * keep) + FULL_WEIGHT) / (2 * FULL_WEIGHT));
   out[i + 3] = a;
 }
