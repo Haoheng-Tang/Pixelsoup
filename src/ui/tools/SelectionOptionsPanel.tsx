@@ -18,21 +18,31 @@ const MODES: readonly { mode: SelectionMode; label: string; hint: string }[] = [
 ];
 
 /** Options bar for the selection tools: how a new shape combines with the selection. */
-export function SelectionOptionsPanel({ options }: { options: SelectionOptions }) {
+export function SelectionOptionsPanel({
+  options,
+  hint,
+}: {
+  options: SelectionOptions;
+  /** How to use the tool, after the modes. */
+  hint?: string;
+}) {
   const current = useSyncExternalStore(options.subscribe, () => options.mode);
   return (
-    <div className="toolbar-group segmented" role="group" aria-label="Selection mode">
-      {MODES.map(({ mode, label, hint }) => (
-        <button
-          key={mode}
-          type="button"
-          aria-pressed={mode === current}
-          title={hint}
-          onClick={() => options.setMode(mode)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="toolbar-group segmented" role="group" aria-label="Selection mode">
+        {MODES.map(({ mode, label, hint: modeHint }) => (
+          <button
+            key={mode}
+            type="button"
+            aria-pressed={mode === current}
+            title={modeHint}
+            onClick={() => options.setMode(mode)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {hint && <p className="tool-options-hint">{hint}</p>}
+    </>
   );
 }

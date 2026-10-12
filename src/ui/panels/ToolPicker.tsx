@@ -35,6 +35,11 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <path d="M2.5 12.5 3.8 3.5l5 2.6 4.7-3.1-1.2 9.2-4.6-2.4z" />
     </svg>
   ),
+  'magic-wand': (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round">
+      <path d="M7.2 7.2 14.5 14.5M4.5 1.5v6M1.5 4.5h6M10.5 2.5v2M9.5 3.5h2M3.5 9.5v2M2.5 10.5h2" />
+    </svg>
+  ),
   move: (
     <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />
