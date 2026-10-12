@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { Editor, Rect } from '../../core';
+import type { Editor, Point, Rect } from '../../core';
 
 /**
  * Tool shortcut keys. Tools that share a key form a group (e.g. the marquees): the key
@@ -95,10 +95,24 @@ export interface CropOverlay {
 }
 
 /**
+ * A lasso being drawn, as marching ants: the points placed so far joined in order, and a
+ * rubber band from the last of them to `next`, where the next vertex would go. `closing`
+ * rings the first point: a click would close the polygon there.
+ */
+export interface LassoOverlay {
+  readonly shape: 'lasso';
+  readonly points: readonly Point[];
+  readonly next: Point | null;
+  readonly closing: boolean;
+  /** Hide the current selection's outline while this is shown (it will replace it). */
+  readonly hidesSelection?: boolean;
+}
+
+/**
  * What the viewport draws over the document for the active tool. Plain data in document
  * coordinates, so tools stay free of canvas APIs.
  */
-export type ToolOverlay = ShapeOverlay | BrushOverlay | CropOverlay;
+export type ToolOverlay = ShapeOverlay | LassoOverlay | BrushOverlay | CropOverlay;
 
 /** What `[` and `]` step: a brush's size, or with Shift its hardness. */
 export type BrushProperty = 'size' | 'hardness';

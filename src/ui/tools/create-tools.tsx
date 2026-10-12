@@ -8,6 +8,7 @@ import { CropTool } from './crop-tool';
 import { EyedropperOptions } from './eyedropper-options';
 import { EyedropperOptionsPanel } from './EyedropperOptionsPanel';
 import { EyedropperTool } from './eyedropper-tool';
+import { LassoTool, PolygonLassoTool } from './lasso-tool';
 import { MarqueeTool } from './marquee-tool';
 import { MoveOptionsPanel } from './MoveOptionsPanel';
 import { MoveTool } from './move-tool';
@@ -44,6 +45,8 @@ export function createToolManager(editor: Editor, colors: Colors): ToolManager {
     [
       new MarqueeTool('rect', selectionOptions, SelectionToolOptions),
       new MarqueeTool('ellipse', selectionOptions, SelectionToolOptions),
+      new LassoTool(selectionOptions, SelectionToolOptions),
+      new PolygonLassoTool(selectionOptions, SelectionToolOptions),
       new MoveTool(MoveOptionsPanel),
       new PaintTool('paint', brushOptions, colors, eyedropperOptions, BrushToolOptions),
       new PaintTool('erase', eraserOptions, colors, eyedropperOptions, EraserToolOptions),

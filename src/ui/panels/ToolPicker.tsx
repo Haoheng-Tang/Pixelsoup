@@ -24,6 +24,17 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <ellipse cx="8" cy="8" rx="5.6" ry="4.6" />
     </svg>
   ),
+  lasso: (
+    <svg {...ICON_PROPS} strokeLinecap="round">
+      <path d="M4.2 10.4C2 9.4 1.6 6.6 3.6 4.8s6.6-2.4 9-.8 1 5.6-3 6.2c-1.6.3-3.2.2-4.6-.3" />
+      <path d="M4.6 10.2c-1 1-.8 2.4.4 2.9s.8 1.6-.2 2.1" strokeDasharray="none" />
+    </svg>
+  ),
+  'polygon-lasso': (
+    <svg {...ICON_PROPS} strokeLinejoin="round">
+      <path d="M2.5 12.5 3.8 3.5l5 2.6 4.7-3.1-1.2 9.2-4.6-2.4z" />
+    </svg>
+  ),
   move: (
     <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />

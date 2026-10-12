@@ -1,6 +1,12 @@
-import type { Selection, SelectionOutline } from '../../core';
+import type { Point, Selection, SelectionOutline } from '../../core';
 import { traceSelectionOutline } from '../../core';
-import type { BrushOverlay, CropOverlay, ShapeOverlay, ToolOverlay } from '../tools/tool';
+import type {
+  BrushOverlay,
+  CropOverlay,
+  LassoOverlay,
+  ShapeOverlay,
+  ToolOverlay,
+} from '../tools/tool';
 import { createCheckerPattern } from './checkerboard';
 
 /**
@@ -30,6 +36,8 @@ const CROSSHAIR_ARM = 7;
 const HALO_WIDTH = 3;
 /** The crop box's square handles, in CSS pixels across. */
 const CROP_HANDLE = 7;
+/** The ring that marks where a click closes a lasso, in CSS pixels across. */
+const CLOSE_RING = 9;
 
 /** A Path2D in document coordinates tracing every loop of `outline`. */
 export function outlinePath(outline: SelectionOutline): Path2D {
@@ -54,9 +62,21 @@ function previewPath({ shape, rect }: ShapeOverlay): Path2D {
   return path;
 }
 
+/** A lasso's points joined in order, then the rubber band; left open. */
+function lassoPath({ points, next }: LassoOverlay): Path2D {
+  const path = new Path2D();
+  let started = false;
+  for (const { x, y } of next ? [...points, next] : points) {
+    if (started) path.lineTo(x, y);
+    else path.moveTo(x, y);
+    started = true;
+  }
+  return path;
+}
+
 /**
- * Draws the selection's marching ants, any shape the active tool is previewing, the crop
- * box, and a painting tool's brush outline, on a transparent canvas stacked above the
+ * Draws the selection's marching ants, any shape or lasso the active tool is drawing, the
+ * crop box, and a painting tool's brush outline, on a transparent canvas stacked above the
  * composite.
  *
  * The selection outline is traced into a Path2D in document coordinates once per
@@ -138,8 +158,15 @@ export class SelectionOverlay {
     const brush = preview?.shape === 'brush' ? preview : null;
     const crop = preview?.shape === 'crop' ? preview : null;
     const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
-    if (selection && !shape?.hidesSelection) this.strokeAnts(this.outline(selection), dash, offset);
+    const lasso = preview?.shape === 'lasso' ? preview : null;
+    const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? false;
+    if (selection && !hidesSelection) this.strokeAnts(this.outline(selection), dash, offset);
     if (shape) this.strokeAnts(previewPath(shape), dash, offset);
+    if (lasso) {
+      this.strokeAnts(lassoPath(lasso), dash, offset);
+      const first = lasso.points[0];
+      if (lasso.closing && first) this.drawCloseRing(first, placement, dpr, lineWidth);
+    }
     if (crop) this.drawCrop(crop, placement, dpr, lineWidth, nudge);
     if (brush) this.drawBrush(brush, placement, dpr, lineWidth, nudge);
   }
@@ -173,6 +200,31 @@ export class SelectionOverlay {
     ctx.setLineDash([dash, dash]);
     ctx.lineDashOffset = offset;
     ctx.strokeStyle = '#000000';
+    ctx.stroke(path);
+  }
+
+  /**
+   * A ring around a lasso's first point, where a click would close it, the same size at
+   * every zoom. Drawn in device pixels.
+   */
+  private drawCloseRing(
+    point: Point,
+    placement: DocumentPlacement,
+    dpr: number,
+    lineWidth: number,
+  ): void {
+    const ctx = this.context;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setLineDash([]);
+    const path = new Path2D();
+    const x = placement.x + point.x * placement.scaleX;
+    const y = placement.y + point.y * placement.scaleY;
+    path.arc(x, y, (CLOSE_RING * dpr) / 2, 0, 2 * Math.PI);
+    ctx.lineWidth = lineWidth * HALO_WIDTH;
+    ctx.strokeStyle = this.cursorHalo;
+    ctx.stroke(path);
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = this.cursorLine;
     ctx.stroke(path);
   }
 
