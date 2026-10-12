@@ -13,6 +13,7 @@ import { MagicWandTool } from './magic-wand-tool';
 import { MarqueeTool } from './marquee-tool';
 import { MoveOptionsPanel } from './MoveOptionsPanel';
 import { MoveTool } from './move-tool';
+import { PaintBucketTool } from './paint-bucket-tool';
 import { PaintTool } from './paint-tool';
 import { RegionOptions } from './region-options';
 import { RegionOptionsPanel } from './RegionOptionsPanel';
@@ -64,6 +65,10 @@ export function createToolManager(editor: Editor, colors: Colors): ToolManager {
   function EraserToolOptions() {
     return <BrushOptionsPanel options={eraserOptions} />;
   }
+  const bucketOptions = new RegionOptions();
+  function PaintBucketToolOptions() {
+    return <RegionOptionsPanel options={bucketOptions} opacity />;
+  }
   const cropOptions = new CropOptions();
   const cropTool = new CropTool(cropOptions, CropToolOptions);
   function CropToolOptions() {
@@ -79,6 +84,7 @@ export function createToolManager(editor: Editor, colors: Colors): ToolManager {
       new MoveTool(MoveOptionsPanel),
       new PaintTool('paint', brushOptions, colors, eyedropperOptions, BrushToolOptions),
       new PaintTool('erase', eraserOptions, colors, eyedropperOptions, EraserToolOptions),
+      new PaintBucketTool(colors, bucketOptions, PaintBucketToolOptions),
       new EyedropperTool(colors, eyedropperOptions, EyedropperToolOptions),
       cropTool,
     ],

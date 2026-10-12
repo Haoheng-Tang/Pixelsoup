@@ -55,6 +55,11 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <path d="M2.2 10.2 10.2 2.2l3.6 3.6-8 8zM5.4 7l3.6 3.6M5.8 13.8H14" />
     </svg>
   ),
+  'paint-bucket': (
+    <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 7.5 9.5 3l5 5L10 12.5zM5 7.5h8.5M5 7.5c-1.2 0-2 .6-2.2 1.6M2.8 10.4c-.8 1.2-1.2 2.1-1.2 2.7a1.2 1.2 0 0 0 2.4 0c0-.6-.4-1.5-1.2-2.7z" />
+    </svg>
+  ),
   eyedropper: (
     <svg {...ICON_PROPS} strokeDasharray="none" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8.5 6.5 3 12l-1 2 2-1 5.5-5.5M7 5l4 4M10 6l2.3-2.3a1.6 1.6 0 0 1 2.3 2.3L12.3 8.3" />

@@ -11,6 +11,7 @@ export const TOOL_KEYS = {
   move: 'V',
   brush: 'B',
   eraser: 'E',
+  bucket: 'G',
   eyedropper: 'I',
   lasso: 'L',
   wand: 'W',
