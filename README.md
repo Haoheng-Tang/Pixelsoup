@@ -103,7 +103,7 @@ themselves; the Select menu always works.
 | Click the first corner, double-click, or Enter | close the outline                                    |
 | Backspace or Delete                            | take back the last corner                            |
 | Release a Lasso drag with Alt held             | carry on with straight sides, until Alt is released  |
-| Esc                                            | cancel the outline                                   |
+| Esc                                            | cancel the outline; with none, deselect              |
 | Click (Magic Wand)                             | select the colours like the one clicked              |
 
 The Magic Wand's options bar sets the tolerance (how far each of red, green, blue and alpha may

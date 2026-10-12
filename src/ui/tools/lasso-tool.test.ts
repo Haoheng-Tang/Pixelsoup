@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import type { Point, Rect } from '../../core';
-import { createDocument, Editor, Selection, SetSelectionCommand } from '../../core';
+import {
+  createDocument,
+  createLayerId,
+  createRasterLayer,
+  Editor,
+  liftSelectionCommand,
+  Selection,
+  SetSelectionCommand,
+} from '../../core';
 import type { Modifiers } from './fake-viewport';
-import { FakeViewport } from './fake-viewport';
-import { CLOSE_REACH, LassoTool, PolygonLassoTool, lassoBounds, snapToAngle } from './lasso-tool';
+import { FakeViewport, NO_MODIFIERS } from './fake-viewport';
+import {
+  CLOSE_REACH,
+  LASSO_CURSOR,
+  LassoTool,
+  POLYGON_LASSO_CURSOR,
+  PolygonLassoTool,
+  lassoBounds,
+  snapToAngle,
+} from './lasso-tool';
 import { MarqueeTool } from './marquee-tool';
 import { SelectionOptions } from './selection-options';
-import type { LassoOverlay } from './tool';
+import type { LassoOverlay, ToolKeyEvent } from './tool';
 import { ToolManager } from './tool-manager';
 
 const W = 20;
@@ -70,6 +86,31 @@ describe('lassoBounds', () => {
     };
     expect(lassoBounds(overlay)).toEqual({ x: 2, y: 1, width: 6, height: 8 });
     expect(lassoBounds({ ...overlay, points: [], next: null })).toBeNull();
+  });
+});
+
+describe('the lasso cursors', () => {
+  const svgOf = (cursor: string): string =>
+    decodeURIComponent(/^url\("data:image\/svg\+xml,([^"]+)"/.exec(cursor)?.[1] ?? '');
+
+  it('are SVG arrows with a rope, whose hot spot is the tip of the arrow', () => {
+    for (const cursor of [LASSO_CURSOR, POLYGON_LASSO_CURSOR]) {
+      expect(cursor).toMatch(/^url\("data:image\/svg\+xml,[^"]+"\) 2 2, default$/);
+      const svg = svgOf(cursor);
+      expect(svg).toMatch(/^<svg xmlns='http:\/\/www\.w3\.org\/2000\/svg' width='32' height='32'/);
+      // A solid (default black) arrow whose tip is the hot spot, (2, 2).
+      expect(svg).toMatch(/<path d='M2 2[^']*Z'\/>/);
+    }
+    // The Lasso's rope is rounded and the Polygonal Lasso's has straight sides.
+    expect(svgOf(LASSO_CURSOR)).toContain("<g fill='none' stroke-linejoin='round'>");
+    expect(svgOf(POLYGON_LASSO_CURSOR)).toContain("<g fill='none' stroke-linejoin='miter'>");
+  });
+
+  it('are the Lasso and the Polygonal Lasso cursors', () => {
+    const { tools } = setup('lasso');
+    expect(tools.activeTool.cursor).toBe(LASSO_CURSOR);
+    tools.activate('polygon-lasso');
+    expect(tools.activeTool.cursor).toBe(POLYGON_LASSO_CURSOR);
   });
 });
 
@@ -352,6 +393,32 @@ describe('LassoTool', () => {
     expect(lasso()).toBeNull();
   });
 
+  it("shows the Polygonal Lasso's cursor while it adds straight segments", () => {
+    const { tools, view } = setup('lasso');
+    const heard: string[] = [];
+    tools.subscribeOverlay(() => heard.push(tools.activeTool.cursor));
+    view.down(2, 2);
+    view.move(14, 2);
+    expect(tools.activeTool.cursor).toBe(LASSO_CURSOR);
+    view.up(14, 2, { altKey: true });
+    expect(tools.activeTool.cursor).toBe(POLYGON_LASSO_CURSOR);
+    expect(heard.at(-1)).toBe(POLYGON_LASSO_CURSOR);
+    // While the button is down, the pointer draws freehand again.
+    view.down(14, 10, { altKey: true });
+    expect(heard.at(-1)).toBe(LASSO_CURSOR);
+    view.up(14, 10, { altKey: true });
+    expect(heard.at(-1)).toBe(POLYGON_LASSO_CURSOR);
+    view.keyUp('Alt');
+    expect(heard.at(-1)).toBe(LASSO_CURSOR);
+
+    view.down(2, 2);
+    view.move(14, 2);
+    view.up(14, 2, { altKey: true });
+    expect(heard.at(-1)).toBe(POLYGON_LASSO_CURSOR);
+    view.keyDown('Escape', { altKey: true });
+    expect(heard.at(-1)).toBe(LASSO_CURSOR);
+  });
+
   it('closes straight segments with Enter, a double-click or a click on the first point', () => {
     for (const close of ['enter', 'double-click', 'first point'] as const) {
       const { view, doc } = setup('lasso');
@@ -411,6 +478,99 @@ describe('LassoTool', () => {
     expect(lasso()).toBeNull();
     view.keyUp('Alt');
     expect(doc().selection).toBeNull();
+  });
+});
+
+describe('Escape with no outline in progress', () => {
+  const area = { x: 4, y: 2, width: 8, height: 6 };
+  const heldEscape: ToolKeyEvent = {
+    key: 'Escape',
+    code: 'Escape',
+    repeat: true,
+    ...NO_MODIFIERS,
+  };
+
+  it('deselects with either lasso, as one undo step', () => {
+    for (const tool of ['lasso', 'polygon-lasso'] as const) {
+      const { view, editor, doc, select } = setup(tool);
+      // With nothing selected, Escape is left alone.
+      expect(view.keyDown('Escape')).toBe(false);
+      select(area);
+      expect(view.keyDown('Escape')).toBe(true);
+      expect(doc().selection).toBeNull();
+      expect(editor.history.undoLabel).toBe('Deselect');
+      editor.history.undo();
+      expect(doc().selection?.equals(rect(area))).toBe(true);
+      expect(editor.history.undoLabel).toBe('Change Selection');
+    }
+  });
+
+  it('deselects what the lasso just selected', () => {
+    const { view, doc } = setup('lasso');
+    view.down(2, 2);
+    view.move(14, 2);
+    view.move(14, 10);
+    view.up(14, 10);
+    expect(doc().selection).not.toBeNull();
+    expect(view.keyDown('Escape')).toBe(true);
+    expect(doc().selection).toBeNull();
+  });
+
+  it('abandons an outline in progress first, keeping the selection', () => {
+    const polygonal = setup('polygon-lasso');
+    polygonal.select(area);
+    polygonal.click(2, 2);
+    polygonal.click(14, 2);
+    expect(polygonal.view.keyDown('Escape')).toBe(true);
+    expect(polygonal.lasso()).toBeNull();
+    expect(polygonal.doc().selection?.equals(rect(area))).toBe(true);
+    expect(polygonal.view.keyDown('Escape')).toBe(true);
+    expect(polygonal.doc().selection).toBeNull();
+
+    const { view, tools, doc, lasso, select } = setup('lasso');
+    select(area);
+    view.down(2, 2);
+    view.move(14, 2);
+    view.up(14, 2, { altKey: true });
+    expect(view.keyDown('Escape', { altKey: true })).toBe(true);
+    expect(lasso()).toBeNull();
+    view.keyUp('Alt');
+    view.down(2, 2);
+    view.move(14, 2);
+    expect(view.keyDown('Escape')).toBe(true);
+    // Escape held down repeats, which mustn't deselect as well.
+    expect(tools.keyDown(heldEscape)).toBe(false);
+    view.up(14, 2);
+    expect(doc().selection?.equals(rect(area))).toBe(true);
+  });
+
+  it('leaves Escape with Ctrl, Cmd or Alt alone', () => {
+    const { view, doc, select } = setup('polygon-lasso');
+    select(area);
+    expect(view.keyDown('Escape', { ctrlKey: true })).toBe(false);
+    expect(view.keyDown('Escape', { metaKey: true })).toBe(false);
+    expect(view.keyDown('Escape', { altKey: true })).toBe(false);
+    expect(doc().selection?.equals(rect(area))).toBe(true);
+  });
+
+  it('commits a floating selection first', () => {
+    const doc = createDocument(W, H);
+    doc.layers.push(createRasterLayer({ id: createLayerId(doc), name: 'A', width: W, height: H }));
+    const editor = new Editor(doc);
+    const tools = new ToolManager([new LassoTool(new SelectionOptions())], editor);
+    const view = new FakeViewport(tools);
+    editor.history.execute(new SetSelectionCommand(rect(area)));
+    const lift = liftSelectionCommand(doc, 'layer-1');
+    if (!lift) throw new Error('Nothing to lift');
+    editor.history.execute(lift);
+
+    expect(view.keyDown('Escape')).toBe(true);
+    expect(editor.floating).toBeNull();
+    expect(doc.selection).toBeNull();
+    expect(doc.layers).toHaveLength(1);
+    expect(editor.history.undoLabel).toBe('Deselect');
+    editor.history.undo();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
   });
 });
 

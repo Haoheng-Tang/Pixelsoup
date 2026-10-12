@@ -96,8 +96,9 @@ tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click
   document position (and a painting tool can show its outline straight away).
 - Keys go to the tool during a gesture, while the pointer is over the canvas, or while the
   canvas has focus, but never while a dialog is open (the viewport's `KeyGate`), so Enter and
-  Escape reach the dialog. Escape during a gesture cancels it, as do pointer cancel, window
-  blur, a tool switch and a document swap.
+  Escape reach the dialog, nor once something on the page has used them (`defaultPrevented`,
+  such as Escape closing a menu). Escape during a gesture cancels it, as do pointer cancel,
+  window blur, a tool switch and a document swap.
 - The viewport listens for keys on the document and the app's shortcut hooks on the window,
   so the tool always sees a key first. The hooks skip keys it used (`defaultPrevented`): while
   a polygon is being drawn, Backspace takes back a point instead of clearing the selection.
@@ -171,7 +172,10 @@ fractional document coordinates, shown as ants (see [Drawing](#drawing)), and cl
 every loop. The mode and modifiers work as for the marquees: Shift or Alt held at the first
 press with a selection picks the mode, and in New mode the current selection's outline hides
 while drawing. Escape abandons the outline, and so do switching tools, replacing the document
-and changing the canvas size.
+and changing the canvas size. With no outline in progress, Escape deselects instead, as
+Select → Deselect does (one undo step, after committing a floating selection); not with Ctrl,
+Cmd or Alt, and not on a held key's repeats, so holding it to abandon an outline keeps the
+selection.
 
 - **Polygonal Lasso**: each click adds a vertex, and a rubber band follows the pointer from
   the last one. Shift constrains it, and the vertex a click adds, to multiples of 45° (unless
@@ -186,6 +190,10 @@ and changing the canvas size.
   freehand again, Backspace or Delete takes back the last point, and releasing Alt, Enter, a
   double-click or a click on the first point closes the outline. An Alt that picked the
   subtract mode at the press does this only after it has been released and pressed again.
+- **Cursors**, in the style of Photoshop's: a solid black arrow whose tip is the hot spot,
+  with a rope at its lower right, its loop rounded for the Lasso and straight-sided for the
+  Polygonal Lasso, black on a white edge. While the Lasso adds straight segments (the button
+  up), it shows the Polygonal Lasso's cursor.
 - An outline that never got more than 3 CSS px from its first point is a click: it deselects
   in New mode and does nothing in the others, like a marquee click.
 - Keys reach the lassos before the Edit shortcuts (see the key routing above): while straight
@@ -472,6 +480,8 @@ options' opacity, in Normal mode and within the selection: `fillCommand` with th
   during a drag.
 - **Hybrid lasso**: only the freehand Lasso switches to straight segments with Alt; the
   Polygonal Lasso doesn't switch to freehand.
+- **Lasso cursors** don't show Photoshop's mode badges (+, −, ×) or its close circle; the
+  overlay's ring marks where a click would close the outline.
 
 ## Crop tool
 

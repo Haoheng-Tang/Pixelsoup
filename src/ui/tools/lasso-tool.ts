@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import type { Editor, ImageDocument, Point, Rect, SelectionMode } from '../../core';
 import { Selection } from '../../core';
+import { runSelectCommand } from '../select-commands';
 import type { SelectionOptions } from './selection-options';
 import { applySelection, pressMode } from './selection-tool';
 import type {
@@ -18,6 +19,45 @@ export const CLOSE_REACH = 6;
 
 /** Freehand points closer together than this, in CSS pixels, are dropped. */
 const FREEHAND_SPACING = 1;
+
+/** A solid arrow pointer whose tip, at (2, 2), is the lassos' hot spot. */
+const CURSOR_ARROW = 'M2 2V17L5.6 13.6 8.2 19.3 10.6 18.2 8.1 13H13Z';
+
+/** The rope's knot, at its loop's lower left corner (17.8, 22.9), and the tail beyond it. */
+const CURSOR_ROPE_END =
+  'M17.8 22.9C16.8 23.1 16.4 24.4 17.3 24.7 18.2 24.9 18.7 23.8 17.8 22.9' +
+  'M17.3 24.7C16.6 25.3 16 26.2 14.9 27';
+
+/**
+ * A cursor in the style of Photoshop's lassos: a black arrow pointing at the hot spot, with a
+ * rope at its lower right whose loop is `loop`. Black on a white edge, so it shows on any
+ * colour.
+ */
+function lassoCursor(loop: string, join: 'round' | 'miter'): string {
+  const rope = loop + CURSOR_ROPE_END;
+  const svg =
+    "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' stroke-linecap='round'>" +
+    `<path d='${CURSOR_ARROW}' fill='#fff' stroke='#fff' stroke-width='2' stroke-linejoin='round'/>` +
+    `<path d='${CURSOR_ARROW}'/>` +
+    `<g fill='none' stroke-linejoin='${join}'>` +
+    `<path d='${rope}' stroke='#fff' stroke-width='3.2'/>` +
+    `<path d='${rope}' stroke='#000' stroke-width='1.2'/>` +
+    '</g></svg>';
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 2 2, default`;
+}
+
+/** The Lasso's cursor: the rope's loop is rounded. */
+export const LASSO_CURSOR = lassoCursor(
+  'M17.8 22.9C16.7 21.3 16.2 19.4 16.2 17.9 16.2 16.4 17.4 15.5 19.1 15.5H25.1' +
+    'C26.7 15.5 27.3 16.7 26.1 17.9 23.9 20 20.6 22 17.8 22.9',
+  'round',
+);
+
+/** The Polygonal Lasso's cursor: the rope's loop has straight sides. */
+export const POLYGON_LASSO_CURSOR = lassoCursor(
+  'M17.8 22.9 15.7 16.8 19.3 15.5 26.5 16.1 25.2 20.3z',
+  'miter',
+);
 
 /** The directions Shift constrains a segment to, every 45° clockwise from 0° (y is down). */
 const DIRECTIONS: readonly (readonly [number, number])[] = [
@@ -102,14 +142,14 @@ function addPoint(path: LassoPath, point: Point, reach: number): void {
  * The Lasso and the Polygonal Lasso, which share a key (L): they draw a closed outline and
  * combine it with the selection on closing, as the marquees do (`applySelection`), with
  * the mode picked by the options bar or by Shift and Alt at the first press. Escape
- * abandons the outline. While drawing in New mode, the current selection's outline is
- * hidden.
+ * abandons the outline, or with none in progress, deselects. While drawing in New mode,
+ * the current selection's outline is hidden.
  */
 abstract class LassoToolBase implements Tool {
   abstract readonly id: string;
   abstract readonly name: string;
   readonly shortcut = TOOL_KEYS.lasso;
-  readonly cursor = 'crosshair';
+  abstract readonly cursor: string;
   protected context: ToolContext | null = null;
   protected path: LassoPath | null = null;
   private preview: LassoOverlay | null = null;
@@ -194,6 +234,19 @@ abstract class LassoToolBase implements Tool {
     applySelection(editor, shape, path.mode, this.name);
   }
 
+  /**
+   * Escape with no outline in progress deselects, as Select → Deselect does (committing a
+   * floating selection first). Returns whether it did. A held Escape's repeats don't, so
+   * holding it to abandon an outline keeps the selection.
+   */
+  protected deselectOnEscape(e: ToolKeyEvent): boolean {
+    const editor = this.context?.editor;
+    if (e.key !== 'Escape' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (!editor?.document.selection) return false;
+    runSelectCommand(editor, 'deselect');
+    return true;
+  }
+
   /** Takes back the last point; with none left, abandons the outline. */
   protected removeLastPoint(path: LassoPath): void {
     path.points.pop();
@@ -225,6 +278,7 @@ abstract class LassoToolBase implements Tool {
 export class PolygonLassoTool extends LassoToolBase {
   readonly id = 'polygon-lasso';
   readonly name = 'Polygonal Lasso';
+  readonly cursor = POLYGON_LASSO_CURSOR;
 
   pointerDown(e: ToolPointerEvent): void {
     const editor = this.context?.editor;
@@ -259,7 +313,8 @@ export class PolygonLassoTool extends LassoToolBase {
   keyDown(e: ToolKeyEvent): boolean {
     if (this.modifierKey(e)) return true;
     const path = this.path;
-    if (!path || e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (!path) return this.deselectOnEscape(e);
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
     switch (e.key) {
       case 'Escape':
         this.cancel();
@@ -310,7 +365,7 @@ export class PolygonLassoTool extends LassoToolBase {
  * button with Alt held switches to straight segments instead, as in Photoshop: each click
  * adds a vertex (dragging from it draws freehand again), Backspace or Delete takes back
  * the last point, and releasing Alt, Enter, a double-click or a click on the first point
- * closes the outline.
+ * closes the outline. Meanwhile it shows the Polygonal Lasso's cursor.
  */
 export class LassoTool extends LassoToolBase {
   readonly id = 'lasso';
@@ -319,6 +374,10 @@ export class LassoTool extends LassoToolBase {
   private drawing = false;
   /** Alt was held as the button came up: clicks add straight segments. */
   private polygonal = false;
+
+  get cursor(): string {
+    return this.polygonal && !this.drawing ? POLYGON_LASSO_CURSOR : LASSO_CURSOR;
+  }
 
   pointerDown(e: ToolPointerEvent): void {
     const editor = this.context?.editor;
@@ -374,7 +433,8 @@ export class LassoTool extends LassoToolBase {
   keyDown(e: ToolKeyEvent): boolean {
     if (e.key === 'Shift' || e.key === 'Alt') return true;
     const path = this.path;
-    if (!path || e.ctrlKey || e.metaKey) return false;
+    if (!path) return this.deselectOnEscape(e);
+    if (e.ctrlKey || e.metaKey) return false;
     if (e.key === 'Escape') {
       this.cancel();
       return true;

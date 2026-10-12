@@ -597,8 +597,9 @@ export class ViewportController {
   private readonly handleKeyDown = (e: KeyboardEvent): void => {
     this.modifiers = modifiersOf(e);
     // The pointer may still be over the canvas when a dialog opens; Enter, Escape and
-    // Space must still reach the dialog.
-    if (isTextEntry(e.target) || this.gate.blocked) return;
+    // Space must still reach the dialog. Nor is a key that something on the page has
+    // already used (Escape closing a menu) the tool's.
+    if (e.defaultPrevented || isTextEntry(e.target) || this.gate.blocked) return;
     if (e.code === 'Space') {
       // Only claim Space while the user is working on the canvas, so it still
       // activates focused buttons and checkboxes elsewhere.

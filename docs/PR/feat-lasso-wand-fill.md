@@ -10,7 +10,9 @@ plugs into the existing tool system, selection masks, selection modes and clippi
   Backspace, and closes on its first vertex, with a double-click or with Enter; Esc abandons it.
   The freehand Lasso closes on release and, like Photoshop's, switches to straight segments when
   released with Alt held, until Alt comes up. Outlines show as marching ants while drawn, and
-  become anti-aliased polygons that fill every loop of a path that crosses itself.
+  become anti-aliased polygons that fill every loop of a path that crosses itself. With no
+  outline in progress, Esc deselects. Both have cursors in the style of Photoshop's: a black
+  arrow with a rope beside it.
 - **Magic Wand (W)**: a click selects the pixels whose colour is within a tolerance (default 32)
   of the one clicked, connected to it or anywhere, with an optional 1-pixel soft edge, from the
   active layer or all visible layers. It honours New, Add, Subtract and Intersect and the Shift
@@ -91,6 +93,18 @@ Commits are meant to be reviewed one at a time:
    - An outline that never got 3 CSS px from its first point is a click, which deselects in New
      mode. Switching tools, replacing the document or changing the canvas size abandons an
      outline. Both tools have toolbar icons and share L.
+   - **Escape** abandons an outline in progress; with none, it deselects as Select → Deselect
+     does (`runSelectCommand`: one "Deselect" step, after committing a floating selection).
+     Ctrl, Cmd or Alt with it, and a held Escape's repeats, are left alone, so holding it to
+     abandon an outline keeps the selection. The viewport no longer hands the tool a key that
+     something on the page has already used (`defaultPrevented`), so Escape closing a menu over
+     the canvas doesn't deselect too.
+   - **Cursors** (`LASSO_CURSOR`, `POLYGON_LASSO_CURSOR`), in the style of Photoshop's rather
+     than a crosshair: a solid black arrow whose tip is the hot spot, with a rope at its lower
+     right, its loop rounded for the Lasso and straight-sided for the Polygonal Lasso, black on
+     a white edge so it shows on any colour. They're drawn from scratch as SVG, not copied from
+     Photoshop. While the Lasso adds straight segments it shows the Polygonal Lasso's cursor,
+     as Photoshop does.
 6. **Move `NumberSlider` into its own module** (refactor): the brush options' slider and number
    field, now shared with the wand and the bucket. The unit is optional and the label can carry a
    tooltip.
@@ -183,7 +197,7 @@ Commits are meant to be reviewed one at a time:
 ```sh
 npm ci
 npm run lint     # ESLint + Prettier check
-npm test         # 761 tests across 65 files (119 new; 9 new files)
+npm test         # 769 tests across 65 files (127 new; 9 new files)
 npm run build    # tsc -b for core/web/node projects, then vite build
 npm run dev      # http://localhost:1619
 ```
@@ -211,6 +225,12 @@ Unit tests cover:
   - Lasso: closing on release as one step, point spacing, clicks, the Alt straight segments and
     their closing by Alt, Enter, a double-click or the first point, an Alt release that went
     unseen, Alt subtracting without switching, Esc mid-drag and between segments; L and Shift+L.
+  - The lasso cursors: SVG images of an arrow whose tip is the hot spot, with a rounded or
+    straight-sided rope, one per tool, and the Lasso switching to the Polygonal Lasso's while
+    it adds straight segments, telling the viewport each time.
+  - Escape with no outline in progress: deselecting with either lasso as one "Deselect" step,
+    an outline in progress abandoned first, nothing without a selection, a held Escape's
+    repeats and Ctrl, Cmd or Alt left alone, and a floating selection committed first.
   - Magic Wand: one step per click, tolerance in every channel, non-contiguous, the soft edge,
     every mode and modifier, clicks off the canvas, sample all layers, committing a floating
     selection first.
@@ -228,6 +248,10 @@ In the browser, with a photo open:
 - [ ] A 20-vertex Polygonal Lasso at 25 % and at 400 % zoom: the rubber band, Shift's 45° steps,
       Backspace, closing on the first vertex, with a double-click and with Enter; Esc abandons.
 - [ ] A freehand Lasso, a Shift-add, and the Alt straight segments.
+- [ ] The lasso cursors: each tool's own, and the Polygonal Lasso's while the Lasso adds
+      straight segments.
+- [ ] Esc with either lasso: while drawing it abandons the outline, and then it deselects, as
+      one undo step; Esc closing a menu over the canvas leaves the selection alone.
 - [ ] The Magic Wand on a sky at several tolerances, with Shift-adds and an Alt-subtract.
 - [ ] The Paint Bucket into an anti-aliased region.
 - [ ] Alt+Backspace on a lasso selection with soft edges; Ctrl/Cmd+Backspace; Delete.
@@ -254,6 +278,16 @@ errors:
   union and a click deselected. Released with Alt held, it switched to straight segments with a
   rubber band; Alt+Backspace took back a point without filling anything, a drag from a vertex
   drew freehand again, and releasing Alt closed the outline.
+- **Cursors**: with the Lasso and then the Polygonal Lasso active, the canvas's computed cursor
+  was each tool's SVG arrow and rope (rounded, then straight-sided) with its hot spot at the
+  arrow's tip, 2, 2, and Edge decoded both at 32 × 32 under the production CSP, with no
+  violations. Released with Alt held, the Lasso switched to the Polygonal Lasso's cursor, back
+  to its own while the button was down, and back again when releasing Alt closed the outline.
+- **Escape**: after a freehand Lasso outline (527 × 390), Esc deselected as one "Deselect" step
+  and Ctrl+Z brought the selection back; Esc mid-drag, held for two repeats, abandoned the drag
+  and kept the selection. With the Polygonal Lasso, Esc abandoned a polygon in progress
+  (157 × 137 in the status bar) and kept the selection, and the next Esc deselected. Esc closing
+  the Select menu with the pointer over the canvas left the selection alone.
 - **Magic Wand on the sky**: tolerances 10, 32 and 64 selected 0.30, 2.08 and 2.11 megapixels,
   each identical to the reference. Two Shift-adds gave exactly the union and an Alt-subtract
   exactly min(old, 255 − new), and non-contiguous and hard-edged regions matched too. One "Magic
@@ -297,6 +331,8 @@ errors:
 - **Mid-gesture**: like undo, the Edit shortcuts aren't blocked during a drag.
 - **Hybrid lasso**: only the freehand Lasso switches to straight segments with Alt; the
   Polygonal Lasso doesn't switch to freehand.
+- **Lasso cursors** don't show Photoshop's mode badges (+, −, ×) or its close circle; the
+  overlay's ring marks where a click would close the outline.
 - **The Fill dialog's custom colour** uses the browser's colour input, not the app's picker.
 - **Mac keys** were checked by sending Meta+Backspace on Windows, not on a Mac, and the lassos
   weren't tried with a pen or touch.
