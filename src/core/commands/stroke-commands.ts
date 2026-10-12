@@ -11,10 +11,9 @@ import { erasePixel, opacitySteps, paintPixel } from '../paint/paint-math';
 import { StrokeMask } from '../paint/stroke-mask';
 import { TILE_SIZE, TileGrid, tileRect } from '../paint/tiles';
 import type { Rgb } from '../pixel-buffer';
-import { createPixelBuffer } from '../pixel-buffer';
 import type { Selection } from '../selection';
 import type { Placement } from './layer-growth';
-import { growthArea, place, placementOf } from './layer-growth';
+import { growthArea, grownPlacement, place, placementOf } from './layer-growth';
 
 /** How a stroke paints. */
 export interface StrokeStyle {
@@ -300,19 +299,4 @@ export function beginStroke(
 export function strokeCommand(stroke: PaintStroke, dabs: readonly Dab[]): StrokeCommand | null {
   const area = stroke.stamp(dabs);
   return area && new StrokeCommand(stroke, area);
-}
-
-/** The layer's pixels in a new buffer covering `area`, which must hold what's on the canvas. */
-function grownPlacement(layer: RasterLayer, area: Rect): Placement {
-  const pixels = createPixelBuffer(area.width, area.height);
-  const overlap = intersectRects(rasterBounds(layer), area);
-  if (overlap) {
-    const { width, data } = layer.pixels;
-    for (let y = overlap.y; y < overlap.y + overlap.height; y++) {
-      const from = ((y - layer.y) * width + overlap.x - layer.x) * 4;
-      const to = ((y - area.y) * area.width + overlap.x - area.x) * 4;
-      pixels.data.set(data.subarray(from, from + overlap.width * 4), to);
-    }
-  }
-  return { pixels, x: area.x, y: area.y };
 }
