@@ -5,7 +5,7 @@ Photoshop.
 
 ## Live
 
-[Open Pixelsoup](https://REPLACE-ME.pages.dev)
+[Open Pixelsoup](https://pixelsoup.lumenon.workers.dev/)
 
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), select
