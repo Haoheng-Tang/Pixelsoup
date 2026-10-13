@@ -151,7 +151,7 @@ src/
 
 ## Deployment
 
-Cloudflare Pages deploys `main` and previews each PR. Test previews before merging: @docs/deploy.md
+`main` deploys to Cloudflare and GitHub Pages; test PR previews before merging: @docs/deploy.md
 
 ## Planned build order
 
