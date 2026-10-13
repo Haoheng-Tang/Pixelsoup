@@ -33,7 +33,9 @@ function contentSecurityPolicy(): Plugin {
 }
 
 export default defineConfig({
-  base: '/',
+  // The path the site is served under: `/` for dev, preview and Cloudflare. The GitHub Pages
+  // workflow sets VITE_BASE to the repository's path (docs/deploy.md).
+  base: process.env.VITE_BASE ?? '/',
   plugins: [react(), contentSecurityPolicy()],
   server: {
     port: 1619,
