@@ -5,7 +5,8 @@ Photoshop.
 
 ## Live
 
-[Open Pixelsoup](https://pixelsoup.lumenon.workers.dev/)
+[Open Pixelsoup](https://pixelsoup.lumenon.workers.dev/) on Cloudflare, or its
+[mirror on GitHub Pages](https://haohengt.com/Pixelsoup/).
 
 > Early days: Pixelsoup can create, open, save, import and export documents, manage their
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), select
@@ -224,8 +225,9 @@ npm run build     # outputs static files to dist/
 npm run preview
 ```
 
-The `dist/` folder is a static site and can be hosted anywhere.
-See [docs/deploy.md](docs/deploy.md) for the Cloudflare Pages configuration and rollback process.
+The `dist/` folder is a static site and can be hosted anywhere: at a domain's root, or under a
+path set with `VITE_BASE` at build time (the GitHub Pages mirror uses `VITE_BASE=/Pixelsoup/`).
+See [docs/deploy.md](docs/deploy.md) for the Cloudflare and GitHub Pages deployments and rollback.
 
 ## Development
 
