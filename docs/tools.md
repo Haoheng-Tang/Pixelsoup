@@ -1,12 +1,14 @@
 # Tools, selections and painting
 
 How editing tools plug into the viewport, how selections work, how the painting tools paint,
-how Fill, Clear and the Paint Bucket fill, and the Crop tool. The code lives in
-`src/core/selection.ts` (masks), `src/core/paint` and `src/core/commands/stroke-commands.ts`
-(the stroke engine), `src/core/paint/flood-region.ts` and
-`src/core/commands/fill-commands.ts` (flood regions, Fill and Clear), `src/ui/tools` (tools),
-`src/ui/edit-actions.ts` and `src/ui/use-edit-shortcuts.ts` (the Edit menu's actions and
-shortcuts), `src/ui/color` (colours) and `src/ui/viewport` (input routing and drawing).
+how Fill, Clear and the Paint Bucket fill, the clipboard, the canvas's context menu and the
+Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
+`src/core/commands/stroke-commands.ts` (the stroke engine), `src/core/paint/flood-region.ts`
+and `src/core/commands/fill-commands.ts` (flood regions, Fill and Clear), `src/ui/tools`
+(tools), `src/ui/edit-actions.ts` and `src/ui/use-edit-shortcuts.ts` (the Edit menu's actions
+and shortcuts), `src/ui/clipboard` (Cut, Copy, Paste), `src/ui/canvas-menu.ts` and
+`src/ui/panels` (`ContextMenu`, `MenuList`), `src/ui/color` (colours) and `src/ui/viewport`
+(input routing and drawing).
 
 ## Selections (core)
 
@@ -53,11 +55,12 @@ shortcuts), `src/ui/color` (colours) and `src/ui/viewport` (input routing and dr
 | `OptionsPanel?`                 | React component shown in the tool-options bar                                                                     |
 | `overlay?`                      | what to draw over the document (`ToolOverlay`, document coordinates): a marquee shape, a lasso or a brush outline |
 | `activate(ctx)`, `deactivate()` | `ctx` gives the `Editor`, `overlayChanged()` (call when `overlay` or `cursor` changes) and `showMessage()`        |
-| `pointerDown/Move/Up(e)`        | `e.x`, `e.y`: fractional document coordinates (pixel (px, py) spans [px, px + 1)); plus `zoom` and modifiers      |
+| `pointerDown/Move/Up(e)`        | `e.x`, `e.y`: fractional document coordinates (pixel (px, py) spans [px, px + 1)); plus `zoom`, modifiers, button |
 | `cancel()`                      | abandon the gesture in progress without committing it                                                             |
 | `doubleClick?(e)`               | a primary-button double-click, outside any gesture (the Crop tool crops)                                          |
 | `keyDown/keyUp(e)`              | return true if the key was used, so the viewport suppresses the browser's default action                          |
 | `stepBrush?(property, dir)`     | painting tools: `[` and `]` step the brush size down and up, with Shift its hardness                              |
+| `contextMenu?()`                | the tool's own sections for the canvas's context menu, shown first (none yet)                                     |
 
 - **Overlays**: a `ShapeOverlay` (`rect` or `ellipse`) previews a marquee; `hidesSelection`
   hides the selection's outline meanwhile. A `LassoOverlay` (`lasso`) is a lasso being drawn:
@@ -104,6 +107,35 @@ tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click
   a polygon is being drawn, Backspace takes back a point instead of clearing the selection.
 - A primary-button double-click goes to the tool's `doubleClick`, unless the view is panning or
   a gesture is in progress.
+- **The right button never reaches a tool.** `ToolManager` passes on only primary presses and
+  double-clicks (`ToolPointerEvent.button`), and the viewport turns a right press, or a
+  Control-click on a Mac, into the context menu instead, so it never starts a gesture, adds
+  a vertex or counts as a click.
+
+## Context menu
+
+Right-clicking the document opens the canvas's context menu (`CanvasMenu`, built by
+`canvasMenuSections` in `src/ui/canvas-menu.ts`), at the pointer and kept inside the window.
+
+- **Contents**: with a selection, Deselect and Select Inverse, then Layer via Copy and Layer
+  via Cut; without one, Duplicate Layer… and Delete Layer, which ask first
+  ([layers.md](layers.md#duplicate-and-delete-from-the-canvas)). Items run the same actions as
+  the menu bar (`runSelectCommand`, `runLayerAction`), so they enable, commit a floating
+  selection and name their undo steps alike. All are disabled while a dialog is open or a
+  file operation runs. A tool can add sections of its own (`Tool.contextMenu`, e.g. Fill… or
+  Free Transform later), which go first.
+- **Where**: the browser's own menu never shows over the viewport. The menu opens only over the
+  document, not the void around it, and not during a tool's gesture, a pan, or while a dialog
+  is open.
+- **Keys** (WAI-ARIA menu, `menuKeyAction`): the arrows move between items, wrapping round,
+  Home and End jump, Enter and Space choose, Escape and Tab close. The menu uses them up
+  (`preventDefault`).
+- **Closing**: choosing an item, Escape, a press or the wheel outside it, a scroll, a window
+  resize or blur, a zoom, or a new or resized document. A press on the canvas outside it
+  only closes it: it doesn't reach the tool. Focus goes back to the canvas, and stays there
+  after a dialog an item opened.
+- `ContextMenu` and `MenuList` (the menu bar's drop-downs use it too) are generic: items carry
+  what they do (`ContextMenuItem.run`), drawn with the menu bar's shortcut badges.
 
 ## Drawing
 
@@ -492,8 +524,9 @@ is the active one, so they change the floating layer rather than committing it.
 - `useEditShortcuts` calls `preventDefault` on all of them, so the browser does nothing else
   with them. They're ignored while typing in a text field, while a dialog is open or a file
   operation runs, and for a key the active tool used; held keys don't repeat.
-- The Edit menu has Undo and Redo (named after the step), Fill… and Clear; Cut, Copy and
-  Paste will go between them. Fill… is enabled while the active layer is visible, and Clear
+- The Edit menu has Undo and Redo (named after the step); Cut, Copy, Copy Merged and Paste
+  (see [Clipboard](#clipboard)); then Fill… and Clear. Fill… is enabled while the active layer
+  is visible, and Clear
   while the selection's bounds reach the visible active layer (a quick check: Clear may then
   find nothing with any alpha to clear, and adds no step). Menu shortcuts without Ctrl/Cmd
   are marked `plain` and show as Shift+Backspace and Delete, or ⇧⌫ and ⌫ on a Mac.
@@ -534,6 +567,67 @@ options' opacity, in Normal mode and within the selection: `fillCommand` with th
 - **Lasso cursors** don't show Photoshop's mode badges (+, −, ×) or its close circle; the
   overlay's ring marks where a click would close the outline.
 
+## Clipboard
+
+Edit → Cut, Copy, Copy Merged and Paste (`PixelClipboard`, `src/ui/clipboard`). What's on the
+clipboard is session state, like the colours: never saved, and copying isn't an undo step.
+
+| Keys             | Action                                                                |
+| ---------------- | --------------------------------------------------------------------- |
+| Ctrl/Cmd+X       | cut the active layer's selected pixels: copy them, then clear them    |
+| Ctrl/Cmd+C       | copy the active layer's selected pixels                               |
+| Ctrl/Cmd+Shift+C | copy merged: the selected pixels of the visible layers, composited    |
+| Ctrl/Cmd+V       | paste as a new layer (an image copied in another app, or Pixelsoup's) |
+
+- **Copying** needs a selection; Cut and Copy also need the active layer visible and within
+  the selection's bounds. A floating selection is committed first. The copy covers the
+  selection's bounds and is weighted by coverage as Layer via Copy is (`copySelection`), so
+  soft edges stay soft. Cut is Copy followed by Clear (`clearCommand`, one undo step, "Cut"),
+  so the source keeps old × (1 − coverage). Copy Merged copies what the visible layers show,
+  their opacity included (`compositeLayers`).
+- **Pasting** adds the pixels as a new layer "Layer N" directly above the active layer, which
+  becomes active, and deselects: one undo step, "Paste" (`pasteCommand`). They go back where
+  they were copied from when that was a canvas of the same size and they fit on it; otherwise
+  they're centred in the part of the canvas in view, kept on the canvas (`pastePosition`), or
+  centred on it if they're larger.
+- **The system clipboard**: copies are also written there as a PNG, through the exact encoder
+  (`src/ui/io/png.ts`, straight alpha), where the browser lets `navigator.clipboard.write`
+  take images (`writeImageToSystemClipboard`). If it can't, nothing is said: Pixelsoup's own
+  clipboard still works.
+- **Pasting from other apps**: Ctrl/Cmd+V doesn't suppress the browser's paste, whose `paste`
+  event carries any image on the system clipboard without a permission prompt. An image
+  copied in another app pastes as a new layer, centred in view. Pixelsoup's own clipboard
+  wins while it holds the newest copy, from a copy until the window loses focus. After that,
+  an image matching its copy (`sameImage`, allowing for the browser's re-encoding) pastes
+  Pixelsoup's exact pixels where they came from, and any other image pastes as it is. If no
+  paste event follows the key, Pixelsoup's clipboard pastes. Edit → Paste always uses
+  Pixelsoup's clipboard: reading the system clipboard from a menu would ask for permission.
+- The shortcuts are ignored in text fields, while a dialog is open or a file operation runs,
+  and for keys the active tool used; held keys don't repeat.
+
+| Browser             | Copies reach the system clipboard | Ctrl/Cmd+V pastes images from other apps     |
+| ------------------- | --------------------------------- | -------------------------------------------- |
+| Chrome, Edge, Opera | yes (re-encoded, see below)       | yes                                          |
+| Firefox             | from Firefox 127                  | yes                                          |
+| Safari              | from Safari 13.1                  | no: it fires paste only in editable elements |
+
+Where an image can't be pasted from another app, Ctrl/Cmd+V and Edit → Paste paste
+Pixelsoup's own clipboard. Browsers may keep Ctrl/Cmd+Shift+C for their element inspector;
+the Edit menu always works.
+
+### Open decisions
+
+- **Re-encoding**: Chromium browsers decode and re-encode what's written to the system
+  clipboard through premultiplied alpha, so translucent colours pasted into other apps may
+  be slightly off. Pixelsoup's own pastes stay exact.
+- **Which copy is newest**: if the system clipboard couldn't be written, and the window lost
+  focus and came back without a copy elsewhere, Ctrl/Cmd+V pastes the older image still on
+  the system clipboard rather than Pixelsoup's copy. Edit → Paste still pastes Pixelsoup's.
+- **Main thread**: the PNG for the system clipboard is encoded on the main thread, as saving
+  is (about 150 ms at 1920 × 1080).
+- **Hidden layers**: Cut, Copy and Layer via Copy or Cut refuse a hidden active layer, as in
+  Photoshop; Copy Merged leaves hidden layers out.
+
 ## Crop tool
 
 `CropTool` (C) crops the canvas to a box with `cropCommand` ([transform.md](transform.md)). The
@@ -573,7 +667,8 @@ The status bar shows the box's size, and the grid shows while a drag adjusts the
    commit a floating selection first if they would change its source. Painting tools get the
    clipping from the stroke engine, and filling ones from `fillCommand`; both change only the
    active layer, which while a selection floats is the floating layer, never its source.
-3. Add the tool in `createToolManager` and give it an icon in `ToolPicker`.
+3. Add the tool in `createToolManager` and give it an icon in `ToolPicker`. Items it wants in
+   the canvas's context menu go in `contextMenu`.
 4. Unit-test pointer sequences against `FakeViewport` (`fake-viewport.ts`) and, for tools that
    work per animation frame, `FakeClock` (`fake-clock.ts`), as `marquee-tool.test.ts`,
    `lasso-tool.test.ts`, `move-tool.test.ts`, `paint-tool.test.ts` and `crop-tool.test.ts` do.
