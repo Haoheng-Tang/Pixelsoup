@@ -1,5 +1,4 @@
-import type { Point, Selection, SelectionOutline } from '../../core';
-import { traceSelectionOutline } from '../../core';
+import type { Point, Selection } from '../../core';
 import type {
   BrushOverlay,
   CropOverlay,
@@ -7,25 +6,40 @@ import type {
   ShapeOverlay,
   ToolOverlay,
 } from '../tools/tool';
+import type { AntPhaseKey, AntsOutline, DocumentPlacement } from './ants';
+import {
+  ANT_DASH,
+  ANT_PHASES,
+  AntPhaseCache,
+  AntsOutlineCache,
+  PRERENDER_MAX_PIXELS,
+  PRERENDER_MIN_VERTICES,
+  deviceRegion,
+  lineWidthFor,
+  staticLoopCount,
+} from './ants';
 import { createCheckerPattern } from './checkerboard';
 
-/**
- * Where the document sits on the canvas, in device pixels: device = origin + doc × scale,
- * and the canvas covers `width` × `height` from the origin.
- */
-export interface DocumentPlacement {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-  readonly scaleX: number;
-  readonly scaleY: number;
+/** Everything the overlay shows in one frame. */
+export interface OverlayFrame {
+  readonly selection: Selection | null;
+  readonly preview: ToolOverlay | null;
+  /** Null when the document isn't visible. */
+  readonly placement: DocumentPlacement | null;
+  readonly dpr: number;
+  /** CSS pixels per canvas pixel. */
+  readonly zoom: number;
+  /** Animation step, 0 to `ANT_PHASES` − 1: the ants move one CSS pixel per step. */
+  readonly phase: number;
+  /** A wheel zoom is in progress: an outline traced for an earlier zoom will do. */
+  readonly zooming: boolean;
+  /** A pan or wheel zoom is in progress: the ants are stroked, not prerendered. */
+  readonly viewChanging: boolean;
 }
 
-/** Length of each dash (and gap) of the marching ants, in CSS pixels. */
-const DASH = 4;
-/** The ants advance one CSS pixel per step. */
-export const ANT_STEP_MS = 60;
+/** The ants' colours: light under the dashes, and the dashes and static outlines dark. */
+const ANT_LIGHT = '#ffffff';
+const ANT_DARK = '#000000';
 /** Brushes narrower than this on screen, in CSS pixels, show a crosshair instead. */
 const MIN_BRUSH_OUTLINE = 4;
 /** The crosshair's arms run from this far from its centre, in CSS pixels… */
@@ -39,15 +53,70 @@ const CROP_HANDLE = 7;
 /** The ring that marks where a click closes a lasso, in CSS pixels across. */
 const CLOSE_RING = 9;
 
-/** A Path2D in document coordinates tracing every loop of `outline`. */
-export function outlinePath(outline: SelectionOutline): Path2D {
+/** An outline's loops as paths: those too short to animate, and those that march. */
+interface AntPaths {
+  readonly outline: AntsOutline;
+  readonly staticCount: number;
+  readonly still: Path2D | null;
+  readonly moving: Path2D | null;
+}
+
+/** A path in canvas coordinates through `loops[from]` to `loops[to - 1]`; null if none. */
+function loopsPath(loops: readonly (readonly number[])[], from: number, to: number): Path2D | null {
+  if (from >= to) return null;
   const path = new Path2D();
-  for (const loop of outline.loops) {
+  for (let l = from; l < to; l++) {
+    const loop = loops[l];
     path.moveTo(loop[0], loop[1]);
     for (let i = 2; i < loop.length; i += 2) path.lineTo(loop[i], loop[i + 1]);
     path.closePath();
   }
   return path;
+}
+
+/**
+ * Strokes the selection's ants into `ctx`, whose top-left is the overlay's device pixel
+ * (`originX`, `originY`): white under black dashes for the loops that march, solid black
+ * for those too short to.
+ */
+function strokeAntPaths(
+  ctx: CanvasRenderingContext2D,
+  paths: AntPaths,
+  placement: DocumentPlacement,
+  dpr: number,
+  phase: number,
+  originX: number,
+  originY: number,
+): void {
+  const { lineWidth, nudge } = lineWidthFor(dpr);
+  const scale = (placement.scaleX + placement.scaleY) / 2;
+  const { scaleX, scaleY } = placement;
+  ctx.setTransform(
+    scaleX,
+    0,
+    0,
+    scaleY,
+    placement.x - originX + nudge,
+    placement.y - originY + nudge,
+  );
+  // In canvas units, so screen sizes are divided by the scale.
+  ctx.lineWidth = lineWidth / scale;
+  ctx.setLineDash([]);
+  if (paths.moving) {
+    ctx.strokeStyle = ANT_LIGHT;
+    ctx.stroke(paths.moving);
+  }
+  if (paths.still) {
+    ctx.strokeStyle = ANT_DARK;
+    ctx.stroke(paths.still);
+  }
+  if (paths.moving) {
+    const dash = (ANT_DASH * dpr) / scale;
+    ctx.setLineDash([dash, dash]);
+    ctx.lineDashOffset = (-(phase % ANT_PHASES) * dpr) / scale;
+    ctx.strokeStyle = ANT_DARK;
+    ctx.stroke(paths.moving);
+  }
 }
 
 function previewPath({ shape, rect }: ShapeOverlay): Path2D {
@@ -79,15 +148,22 @@ function lassoPath({ points, next }: LassoOverlay): Path2D {
  * crop box, and a painting tool's brush outline, on a transparent canvas stacked above the
  * composite.
  *
- * The selection outline is traced into a Path2D in document coordinates once per
- * selection; each frame only re-strokes it through the current pan/zoom transform with
- * a new dash offset. Lines are one device pixel wide (about 1 CSS pixel) at every zoom.
+ * The selection's outline is traced once per selection and zoom bucket (`AntsOutlineCache`:
+ * at screen resolution when zoomed out). Each frame strokes it through the current pan and
+ * zoom with the step's dash offset; outlines with many corners are drawn once per phase and
+ * blitted from then on, until the view or the selection changes. Loops too short on screen
+ * to animate are drawn solid, and lines are one device pixel per CSS pixel at every zoom.
  */
 export class SelectionOverlay {
   readonly canvas: HTMLCanvasElement;
   private readonly context: CanvasRenderingContext2D;
-  private pathSelection: Selection | null = null;
-  private path: Path2D | null = null;
+  private readonly outlines = new AntsOutlineCache();
+  private paths: AntPaths | null = null;
+  /** The outline the last draw showed. */
+  private drawnOutline: AntsOutline | null = null;
+  private readonly phases = new AntPhaseCache<HTMLCanvasElement>((key, phase, reuse) =>
+    this.renderPhase(key, phase, reuse),
+  );
   /** Brush outline colours, from the `--cursor-line` and `--cursor-halo` tokens. */
   private readonly cursorLine: string;
   private readonly cursorHalo: string;
@@ -121,26 +197,30 @@ export class SelectionOverlay {
     this.canvas.height = height;
   }
 
-  /**
-   * Redraws the overlay. `phase` counts animation steps; each step moves the ants along
-   * by one CSS pixel. `placement` is null when the document isn't visible.
-   */
-  draw(
-    selection: Selection | null,
-    preview: ToolOverlay | null,
-    placement: DocumentPlacement | null,
-    dpr: number,
-    phase: number,
-  ): void {
+  /** Removes the overlay's canvas. */
+  dispose(): void {
+    this.canvas.remove();
+  }
+
+  /** Redraws the overlay. */
+  draw(frame: OverlayFrame): void {
+    const { selection, preview, placement, dpr, phase } = frame;
+    const brush = preview?.shape === 'brush' ? preview : null;
+    const crop = preview?.shape === 'crop' ? preview : null;
+    const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
+    const lasso = preview?.shape === 'lasso' ? preview : null;
+    const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? false;
+    const ants = !hidesSelection && placement ? selection : null;
+    if (!selection) this.releaseOutlines();
+    if (!ants) this.phases.release();
+
     const ctx = this.context;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    if (!selection) this.releasePath();
     if (!placement) return;
+    if (ants) this.drawAnts(ants, frame, placement);
 
-    // A line of odd device width is crisp when centred on a device pixel's middle.
-    const lineWidth = Math.max(1, Math.round(dpr));
-    const nudge = lineWidth % 2 === 1 ? 0.5 : 0;
+    const { lineWidth, nudge } = lineWidthFor(dpr);
     const scale = (placement.scaleX + placement.scaleY) / 2;
     ctx.setTransform(
       placement.scaleX,
@@ -152,15 +232,9 @@ export class SelectionOverlay {
     );
     // Everything below is in document units, so divide screen sizes by the scale.
     ctx.lineWidth = lineWidth / scale;
-    const dash = (DASH * dpr) / scale;
-    const offset = (-(phase % (2 * DASH)) * dpr) / scale;
+    const dash = (ANT_DASH * dpr) / scale;
+    const offset = (-(phase % ANT_PHASES) * dpr) / scale;
 
-    const brush = preview?.shape === 'brush' ? preview : null;
-    const crop = preview?.shape === 'crop' ? preview : null;
-    const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
-    const lasso = preview?.shape === 'lasso' ? preview : null;
-    const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? false;
-    if (selection && !hidesSelection) this.strokeAnts(this.outline(selection), dash, offset);
     if (shape) this.strokeAnts(previewPath(shape), dash, offset);
     if (lasso) {
       this.strokeAnts(lassoPath(lasso), dash, offset);
@@ -171,17 +245,75 @@ export class SelectionOverlay {
     if (brush) this.drawBrush(brush, placement, dpr, lineWidth, nudge);
   }
 
-  private outline(selection: Selection): Path2D {
-    if (selection !== this.pathSelection || !this.path) {
-      this.path = outlinePath(traceSelectionOutline(selection));
-      this.pathSelection = selection;
+  /**
+   * The selection's ants: from this phase's prerendered image when the outline is complex
+   * enough to be worth it and the view is still, else stroked straight onto the overlay.
+   */
+  private drawAnts(selection: Selection, frame: OverlayFrame, placement: DocumentPlacement): void {
+    const outline = this.outlines.get(selection, frame.zoom, frame.zooming);
+    if (!outline.bounds) return;
+    const { lineWidth } = lineWidthFor(frame.dpr);
+    const { width, height } = this.canvas;
+    const region = deviceRegion(outline.bounds, placement, lineWidth + 1, width, height);
+    if (!region) return;
+    const paths = this.antPaths(outline, staticLoopCount(outline, frame.zoom));
+    const ctx = this.context;
+    const prerender =
+      outline.vertices >= PRERENDER_MIN_VERTICES &&
+      region.width * region.height <= PRERENDER_MAX_PIXELS;
+    // An outline may last a single frame (a floating selection on the move), so it's only
+    // prerendered from its second draw on.
+    const fresh = outline !== this.drawnOutline;
+    this.drawnOutline = outline;
+    if (!prerender || frame.viewChanging || fresh) {
+      // Keep the images to draw the phases into again once the view and outline settle.
+      if (prerender) this.phases.invalidate();
+      else this.phases.release();
+      strokeAntPaths(ctx, paths, placement, frame.dpr, frame.phase, 0, 0);
+      return;
     }
-    return this.path;
+    const key = { outline, staticCount: paths.staticCount, placement, dpr: frame.dpr, region };
+    const image = this.phases.get(key, frame.phase % ANT_PHASES);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const { x, y, width: w, height: h } = region;
+    ctx.drawImage(image, 0, 0, w, h, x, y, w, h);
   }
 
-  private releasePath(): void {
-    this.pathSelection = null;
-    this.path = null;
+  private antPaths(outline: AntsOutline, staticCount: number): AntPaths {
+    const cached = this.paths;
+    if (cached?.outline === outline && cached.staticCount === staticCount) return cached;
+    const { loops } = outline;
+    const still = loopsPath(loops, 0, staticCount);
+    const moving = loopsPath(loops, staticCount, loops.length);
+    this.paths = { outline, staticCount, still, moving };
+    return this.paths;
+  }
+
+  /** One phase of the ants on a canvas covering `key.region`, reusing `reuse` if given. */
+  private renderPhase(
+    key: AntPhaseKey,
+    phase: number,
+    reuse: HTMLCanvasElement | null,
+  ): HTMLCanvasElement {
+    const canvas = reuse ?? document.createElement('canvas');
+    const { region } = key;
+    if (canvas.width !== region.width || canvas.height !== region.height) {
+      canvas.width = region.width;
+      canvas.height = region.height;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D is not available');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, region.width, region.height);
+    const paths = this.antPaths(key.outline, key.staticCount);
+    strokeAntPaths(ctx, paths, key.placement, key.dpr, phase, region.x, region.y);
+    return canvas;
+  }
+
+  private releaseOutlines(): void {
+    this.outlines.clear();
+    this.paths = null;
+    this.drawnOutline = null;
   }
 
   private checkerPattern(dpr: number): CanvasPattern | string {
@@ -195,11 +327,11 @@ export class SelectionOverlay {
   private strokeAnts(path: Path2D, dash: number, offset: number): void {
     const ctx = this.context;
     ctx.setLineDash([]);
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = ANT_LIGHT;
     ctx.stroke(path);
     ctx.setLineDash([dash, dash]);
     ctx.lineDashOffset = offset;
-    ctx.strokeStyle = '#000000';
+    ctx.strokeStyle = ANT_DARK;
     ctx.stroke(path);
   }
 

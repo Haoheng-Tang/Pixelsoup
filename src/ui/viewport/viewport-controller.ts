@@ -12,9 +12,10 @@ import type {
   ToolPointerSample,
 } from '../tools/tool';
 import type { ToolManager } from '../tools/tool-manager';
+import type { DocumentPlacement } from './ants';
+import { ANT_PHASES, ANT_STEP_MS, ZOOM_SETTLE_MS } from './ants';
 import { createCheckerPattern } from './checkerboard';
-import type { DocumentPlacement } from './selection-overlay';
-import { ANT_STEP_MS, SelectionOverlay } from './selection-overlay';
+import { SelectionOverlay } from './selection-overlay';
 import type { ViewTransform } from './view-transform';
 import { centered, fitZoom, nextZoomStep, screenToDocument, zoomAt } from './view-transform';
 
@@ -105,8 +106,9 @@ function overlayArea(overlay: ToolOverlay | null): Rect | null {
  * routes all other pointer input to the active tool in document coordinates.
  *
  * Deliberately outside React: pointer and wheel input never trigger React renders.
- * Redraws are coalesced into one requestAnimationFrame; while there is a selection the
- * frame loop keeps running and redraws only the overlay as the ants move.
+ * Redraws are coalesced into one requestAnimationFrame. While ants show, a timer moves them
+ * on a step about 12 times a second and redraws only the overlay; they stand still while a
+ * pan or wheel zoom is in progress.
  */
 export class ViewportController {
   private readonly canvas: HTMLCanvasElement;
@@ -125,7 +127,12 @@ export class ViewportController {
   private frame = 0;
   private mainDirty = false;
   private overlayDirty = false;
+  /** The ants' animation step, 0 to `ANT_PHASES` − 1. */
   private antPhase = 0;
+  private antTimer = 0;
+  /** A wheel zoom is in progress, until `ZOOM_SETTLE_MS` after its last notch. */
+  private zooming = false;
+  private zoomTimer = 0;
   private placement: DocumentPlacement | null = null;
   private checker: CanvasPattern | string | null = null;
   private checkerDpr = 0;
@@ -274,11 +281,15 @@ export class ViewportController {
     this.cancelToolGesture();
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    window.clearTimeout(this.antTimer);
+    this.antTimer = 0;
+    window.clearTimeout(this.zoomTimer);
+    this.zoomTimer = 0;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.zoomListeners.clear();
     this.statusListeners.clear();
     this.canvas.remove();
-    this.overlay.canvas.remove();
+    this.overlay.dispose();
   }
 
   private zoomAroundCenter(zoom: number): void {
@@ -311,17 +322,13 @@ export class ViewportController {
     if (!this.frame) this.frame = requestAnimationFrame(this.handleFrame);
   }
 
-  private readonly handleFrame = (time: number): void => {
+  private readonly handleFrame = (): void => {
     this.frame = 0;
-    const phase = Math.floor(time / ANT_STEP_MS);
-    if (this.mainDirty) this.render(phase);
-    else if (this.overlayDirty || (this.hasAnts() && phase !== this.antPhase)) {
-      this.renderOverlay(phase);
-    }
-    // Keep the ants marching; frames without a new step draw nothing.
-    if (this.hasAnts()) this.requestFrame();
+    if (this.mainDirty) this.render();
+    else if (this.overlayDirty) this.renderOverlay();
   };
 
+  /** Whether anything shows marching ants: the selection, or a shape or lasso being drawn. */
   private hasAnts(): boolean {
     const shape = this.tools.overlay?.shape;
     return (
@@ -331,6 +338,33 @@ export class ViewportController {
       shape === 'lasso'
     );
   }
+
+  /** The ants stand still while the view is being panned or wheel-zoomed. */
+  private viewChanging(): boolean {
+    return this.drag !== null || this.zooming;
+  }
+
+  /** Moves the ants on a step in `ANT_STEP_MS`, while there are any and the view is still. */
+  private scheduleAntStep(): void {
+    if (this.antTimer || !this.hasAnts() || this.viewChanging()) return;
+    this.antTimer = window.setTimeout(this.stepAnts, ANT_STEP_MS);
+  }
+
+  private readonly stepAnts = (): void => {
+    this.antTimer = 0;
+    if (!this.hasAnts() || this.viewChanging()) return;
+    this.antPhase = (this.antPhase + 1) % ANT_PHASES;
+    this.invalidateOverlay();
+    // From now rather than from the redraw, so the steps keep time.
+    this.scheduleAntStep();
+  };
+
+  private readonly settleZoom = (): void => {
+    this.zoomTimer = 0;
+    this.zooming = false;
+    // Traces the outline for the zoom the wheel ended at, and starts the ants again.
+    this.invalidateOverlay();
+  };
 
   /** A brush outline follows the pointer over the canvas, but not while panning. */
   private showsBrush(): boolean {
@@ -355,28 +389,30 @@ export class ViewportController {
   }
 
   /** Redraws the composite and the overlay now. */
-  private render(phase = Math.floor(performance.now() / ANT_STEP_MS)): void {
+  private render(): void {
     if ((window.devicePixelRatio || 1) !== this.dpr) {
       this.handleResize();
       return;
     }
     this.mainDirty = false;
     this.renderComposite();
-    this.renderOverlay(phase);
-    if (this.hasAnts()) this.requestFrame();
+    this.renderOverlay();
   }
 
-  private renderOverlay(phase: number): void {
+  private renderOverlay(): void {
     this.overlayDirty = false;
-    this.antPhase = phase;
     const overlay = this.tools.overlay;
-    this.overlay.draw(
-      this.editor.document.selection,
-      overlay?.shape === 'brush' && !this.showsBrush() ? null : overlay,
-      this.placement,
-      this.dpr,
-      phase,
-    );
+    this.overlay.draw({
+      selection: this.editor.document.selection,
+      preview: overlay?.shape === 'brush' && !this.showsBrush() ? null : overlay,
+      placement: this.placement,
+      dpr: this.dpr,
+      zoom: this.view.zoom,
+      phase: this.antPhase,
+      zooming: this.zooming,
+      viewChanging: this.viewChanging(),
+    });
+    this.scheduleAntStep();
   }
 
   private renderComposite(): void {
@@ -433,6 +469,10 @@ export class ViewportController {
     if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
     else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= this.cssHeight;
     const [sx, sy] = this.localPoint(e);
+    // The ants stand still, on the outline traced before, until the zoom settles.
+    this.zooming = true;
+    window.clearTimeout(this.zoomTimer);
+    this.zoomTimer = window.setTimeout(this.settleZoom, ZOOM_SETTLE_MS);
     this.setView(zoomAt(this.view, this.view.zoom * Math.exp(-delta * WHEEL_ZOOM_SPEED), sx, sy));
   };
 
