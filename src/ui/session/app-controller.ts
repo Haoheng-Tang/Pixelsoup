@@ -313,7 +313,8 @@ export class AppController {
       .finally(() => this.setBusy(false));
   }
 
-  private showError(error: unknown): void {
+  /** Shows `error` in a dialog: a `FileOperationError`'s own title and message, if it is one. */
+  showError(error: unknown): void {
     console.error(error);
     if (error instanceof FileOperationError) {
       this.show({ kind: 'error', title: error.title, message: error.message });

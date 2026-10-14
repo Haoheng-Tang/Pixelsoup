@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import type { Editor } from '../core';
+import { useCallback, useState } from 'react';
+import type { Editor, Rect } from '../core';
+import type { PixelClipboard } from './clipboard/pixel-clipboard';
+import { useClipboardShortcuts } from './clipboard/use-clipboard-shortcuts';
 import type { Colors } from './color/colors';
 import { ModalHost } from './dialogs/ModalHost';
 import { LayerPanel } from './panels/LayerPanel';
@@ -26,16 +28,19 @@ import type { ViewOptions } from './viewport/view-options';
 interface AppProps {
   editor: Editor;
   controller: AppController;
+  clipboard: PixelClipboard;
   tools: ToolManager;
   colors: Colors;
   view: ViewOptions;
 }
 
-export function App({ editor, controller, tools, colors, view }: AppProps) {
+export function App({ editor, controller, clipboard, tools, colors, view }: AppProps) {
   const [viewport, setViewport] = useState<ViewportController | null>(null);
+  const viewArea = useCallback((): Rect | null => viewport?.visibleArea() ?? null, [viewport]);
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
   useEditShortcuts(editor, colors, controller);
+  useClipboardShortcuts(clipboard, controller, viewArea);
   useSelectionShortcuts(editor, controller);
   useLayerShortcuts(editor, controller);
   useViewShortcuts(view, controller);
@@ -54,6 +59,8 @@ export function App({ editor, controller, tools, colors, view }: AppProps) {
         colors={colors}
         view={view}
         viewport={viewport}
+        clipboard={clipboard}
+        viewArea={viewArea}
       />
       <ToolOptionsBar tools={tools} />
       <main className="workspace">

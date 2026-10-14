@@ -1,5 +1,5 @@
 import type { Editor, Rect } from '../../core';
-import { assertNever } from '../../core';
+import { assertNever, roundRectOut } from '../../core';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
@@ -241,6 +241,17 @@ export class ViewportController {
 
   get zoom(): number {
     return this.view.zoom;
+  }
+
+  /**
+   * The document area the viewport shows, in document pixels, rounded out to whole pixels;
+   * null before it has a size. It may reach past the canvas.
+   */
+  visibleArea(): Rect | null {
+    if (this.cssWidth <= 0 || this.cssHeight <= 0) return null;
+    const [x0, y0] = screenToDocument(this.view, 0, 0);
+    const [x1, y1] = screenToDocument(this.view, this.cssWidth, this.cssHeight);
+    return roundRectOut({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
   }
 
   /** Subscribes to zoom changes; the listener is called immediately with the current zoom. */

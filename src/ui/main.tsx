@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DEFAULT_NEW_DOCUMENT, Editor, createBlankDocument } from '../core';
 import { App } from './App';
+import { PixelClipboard } from './clipboard/pixel-clipboard';
 import { Colors } from './color/colors';
 import { encodeImage } from './io/export-image';
 import { createFileStore } from './io/file-store';
@@ -25,12 +26,25 @@ const session = new DocumentSession({
   encodeImage,
 });
 const controller = new AppController(session);
+const clipboard = new PixelClipboard({
+  editor,
+  decodeImage: decodeImageFile,
+  writeSystem: () => Promise.resolve(false),
+  onError: (error) => controller.showError(error),
+});
 const colors = new Colors();
 const tools = createToolManager(editor, colors);
 const view = new ViewOptions();
 
 createRoot(container).render(
   <StrictMode>
-    <App editor={editor} controller={controller} tools={tools} colors={colors} view={view} />
+    <App
+      editor={editor}
+      controller={controller}
+      clipboard={clipboard}
+      tools={tools}
+      colors={colors}
+      view={view}
+    />
   </StrictMode>,
 );

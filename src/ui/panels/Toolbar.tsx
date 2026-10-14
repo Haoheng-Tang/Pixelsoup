@@ -1,4 +1,5 @@
-import type { Editor } from '../../core';
+import type { Editor, Rect } from '../../core';
+import type { PixelClipboard } from '../clipboard/pixel-clipboard';
 import { ColorSwatches } from '../color/ColorSwatches';
 import type { Colors } from '../color/colors';
 import type { AppController } from '../session/app-controller';
@@ -23,9 +24,13 @@ interface ToolbarProps {
   colors: Colors;
   view: ViewOptions;
   viewport: ViewportController | null;
+  clipboard: PixelClipboard;
+  /** The canvas area in view, in document coordinates, to centre pastes in. */
+  viewArea: () => Rect | null;
 }
 
-export function Toolbar({ editor, controller, tools, colors, view, viewport }: ToolbarProps) {
+export function Toolbar(props: ToolbarProps) {
+  const { editor, controller, tools, colors, view, viewport, clipboard, viewArea } = props;
   useEditorRevision(editor);
   useRevision(controller);
   useRevision(controller.session);
@@ -37,7 +42,13 @@ export function Toolbar({ editor, controller, tools, colors, view, viewport }: T
     <header className="toolbar">
       <span className="app-title">Pixelsoup</span>
       <FileMenu controller={controller} />
-      <EditMenu editor={editor} controller={controller} blocked={blocked} />
+      <EditMenu
+        editor={editor}
+        controller={controller}
+        clipboard={clipboard}
+        viewArea={viewArea}
+        blocked={blocked}
+      />
       <SelectMenu editor={editor} blocked={blocked} />
       <ImageMenu editor={editor} controller={controller} blocked={blocked} />
       <LayerMenu editor={editor} blocked={blocked} />
