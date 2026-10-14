@@ -18,7 +18,7 @@ import { PixelClipboard, imageFileOf, pastePosition, sameImage } from './pixel-c
 
 const RED: Rgba = [255, 0, 0, 255];
 const BLUE: Rgba = [0, 0, 255, 255];
-const NONE = [0, 0, 0, 0];
+const NONE: Rgba = [0, 0, 0, 0];
 
 function bufferOf(width: number, height: number, pixels: readonly Rgba[]): PixelBuffer {
   const buffer = createPixelBuffer(width, height);
