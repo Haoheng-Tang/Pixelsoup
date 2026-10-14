@@ -7,9 +7,12 @@ import { createRasterLayer } from '../layer';
 import { getPixel, setPixel } from '../pixel-buffer';
 import {
   AddLayerCommand,
+  DuplicateLayerCommand,
   duplicateLayerCommand,
+  duplicateName,
   indexAbove,
   newLayerCommand,
+  nextLayerName,
   RemoveLayerCommand,
   removeLayerCommand,
   RenameLayerCommand,
@@ -205,6 +208,23 @@ describe('DuplicateLayerCommand', () => {
 
   it('is null for a layer that is not in the document', () => {
     expect(duplicateLayerCommand(docWith('A'), 'layer-9')).toBeNull();
+  });
+
+  it('names the copy as asked, trimmed, and refuses a blank name', () => {
+    const doc = docWith('A', 'B');
+    duplicateLayerCommand(doc, 'layer-1', '  Shadow  ')!.apply(doc);
+    expect(names(doc)).toEqual(['A', 'Shadow', 'B']);
+    expect(duplicateLayerCommand(doc, 'layer-1', '')).toBeNull();
+    expect(duplicateLayerCommand(doc, 'layer-1', ' \t ')).toBeNull();
+    expect(() => new DuplicateLayerCommand('layer-1', 'layer-9', ' ')).toThrow(RangeError);
+    expect(duplicateName('Sky')).toBe('Sky copy');
+  });
+});
+
+describe('nextLayerName', () => {
+  it('is one past the highest "Layer N" in use', () => {
+    expect(nextLayerName(docWith('Background'))).toBe('Layer 1');
+    expect(nextLayerName(docWith('Layer 2', 'Layer 7 copy', 'Layer 5'))).toBe('Layer 6');
   });
 });
 

@@ -23,11 +23,18 @@ export function LayerMenu({ editor, blocked }: LayerMenuProps) {
     ...(shortcut === undefined ? {} : { shortcut }),
     disabled: blocked || !canRunLayerAction(editor, command),
   });
+  // Ctrl/Cmd+J is Layer via Copy while there's a selection, and Duplicate Layer otherwise:
+  // the badge shows on whichever it runs.
+  const selected = editor.document.selection !== null;
   const sections: readonly (readonly MenuEntry<LayerAction>[])[] = [
     [
       item('new', 'New Layer', 'Shift+N'),
-      item('duplicate', 'Duplicate Layer', 'J'),
+      item('duplicate', 'Duplicate Layer', selected ? undefined : 'J'),
       item('delete', 'Delete Layer'),
+    ],
+    [
+      item('layer-via-copy', 'Layer via Copy', selected ? 'J' : undefined),
+      item('layer-via-cut', 'Layer via Cut', 'Shift+J'),
     ],
     [item('move-up', 'Move Layer Up', ']'), item('move-down', 'Move Layer Down', '[')],
     [item('merge-down', 'Merge Down', 'E'), item('flatten', 'Flatten Image')],

@@ -70,24 +70,31 @@ export class RemoveLayerCommand implements Command {
 }
 
 /**
- * Copies a layer, pixels and all, into a new layer directly above it named
- * "<name> copy". The copy is made when the command is first applied.
+ * Copies a layer, pixels and all, into a new layer directly above it, named `name` or by
+ * default "<name> copy" (see `duplicateName`). The copy is made when the command is first
+ * applied.
  */
 export class DuplicateLayerCommand implements Command {
   readonly label = 'Duplicate Layer';
   private copy: Layer | null = null;
 
-  /** @param copyId the copy's ID, from `createLayerId(doc)`. */
+  /**
+   * @param copyId the copy's ID, from `createLayerId(doc)`.
+   * @param name the copy's name; must not be blank.
+   */
   constructor(
     readonly sourceId: LayerId,
     readonly copyId: LayerId,
-  ) {}
+    readonly name?: string,
+  ) {
+    if (name?.trim() === '') throw new RangeError('Layer names cannot be empty');
+  }
 
   apply(doc: ImageDocument): DocumentChange {
     const index = getLayerIndex(doc, this.sourceId);
     if (findLayer(doc, this.copyId)) throw new Error(`Duplicate layer ID: ${this.copyId}`);
     const source = doc.layers[index];
-    this.copy ??= duplicateLayer(source, this.copyId, `${source.name} copy`);
+    this.copy ??= duplicateLayer(source, this.copyId, this.name ?? duplicateName(source.name));
     doc.layers.splice(index + 1, 0, this.copy);
     return layerChange(doc, this.copy);
   }
@@ -242,13 +249,19 @@ export function indexAbove(doc: ImageDocument, layerId: LayerId | null): number 
   return index < 0 ? doc.layers.length : index + 1;
 }
 
-function nextLayerName(doc: ImageDocument): string {
+/** "Layer N", one past the highest such number among the document's layer names. */
+export function nextLayerName(doc: ImageDocument): string {
   let highest = 0;
   for (const layer of doc.layers) {
     const match = /^Layer (\d+)$/.exec(layer.name);
     if (match) highest = Math.max(highest, Number(match[1]));
   }
   return `Layer ${highest + 1}`;
+}
+
+/** The name a copy of a layer named `name` gets by default: "<name> copy". */
+export function duplicateName(name: string): string {
+  return `${name} copy`;
 }
 
 /** Null unless the layer exists and isn't the document's only layer. */
@@ -259,12 +272,18 @@ export function removeLayerCommand(
   return findLayer(doc, layerId) && doc.layers.length > 1 ? new RemoveLayerCommand(layerId) : null;
 }
 
-/** Null if the layer doesn't exist. Takes a fresh layer ID for the copy. */
+/**
+ * Copies the layer as "<name> copy", or as `name` (trimmed) if given. Null if the layer
+ * doesn't exist or `name` is blank. Takes a fresh layer ID for the copy.
+ */
 export function duplicateLayerCommand(
   doc: ImageDocument,
   layerId: LayerId,
+  name?: string,
 ): DuplicateLayerCommand | null {
-  return findLayer(doc, layerId) ? new DuplicateLayerCommand(layerId, createLayerId(doc)) : null;
+  const trimmed = name?.trim();
+  if (!findLayer(doc, layerId) || trimmed === '') return null;
+  return new DuplicateLayerCommand(layerId, createLayerId(doc), trimmed);
 }
 
 /** Null if the layer doesn't exist, is already at `toIndex`, or `toIndex` is out of range. */

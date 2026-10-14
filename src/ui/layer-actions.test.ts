@@ -18,6 +18,8 @@ const ACTIONS: readonly LayerAction[] = [
   'new',
   'duplicate',
   'delete',
+  'layer-via-copy',
+  'layer-via-cut',
   'merge-down',
   'flatten',
   'move-up',
@@ -36,12 +38,17 @@ function setup(...names: string[]): { editor: Editor; doc: ImageDocument } {
   return { editor: new Editor(doc), doc };
 }
 
-/** Lifts the top-left 2×2 pixels of the active layer into a floating selection. */
-function float(editor: Editor): void {
+/** Selects the top-left 2×2 pixels of the canvas. */
+function select(editor: Editor): void {
   const doc = editor.document;
   const area = { x: 0, y: 0, width: 2, height: 2 };
   editor.history.execute(new SetSelectionCommand(Selection.fromRect(doc.width, doc.height, area)));
-  const lift = liftSelectionCommand(doc, editor.activeLayerId ?? '');
+}
+
+/** Lifts the top-left 2×2 pixels of the active layer into a floating selection. */
+function float(editor: Editor): void {
+  select(editor);
+  const lift = liftSelectionCommand(editor.document, editor.activeLayerId ?? '');
   if (!lift) throw new Error('Nothing to lift');
   editor.history.execute(lift);
 }
@@ -70,6 +77,53 @@ describe('runLayerAction', () => {
     runLayerAction(editor, 'duplicate');
     expect(names(doc)).toEqual(['A', 'A copy', 'B']);
     expect(activeName(editor)).toBe('A copy');
+  });
+
+  it('names a duplicate as asked, in the same undo step, and refuses a blank name', () => {
+    const { editor, doc } = setup('A', 'B');
+    runLayerAction(editor, 'duplicate', { name: '   ' });
+    expect(editor.history.canUndo).toBe(false);
+    runLayerAction(editor, 'duplicate', { name: ' Shadow ' });
+    expect(names(doc)).toEqual(['A', 'B', 'Shadow']);
+    expect(activeName(editor)).toBe('Shadow');
+    expect(editor.history.undoLabel).toBe('Duplicate Layer');
+    editor.history.undo();
+    expect(names(doc)).toEqual(['A', 'B']);
+  });
+
+  it('copies or cuts the selected pixels into a new active layer above, and deselects', () => {
+    const { editor, doc } = setup('A', 'B');
+    doc.layers[0].pixels.data.fill(255);
+    editor.setActiveLayer('layer-1');
+    select(editor);
+    runLayerAction(editor, 'layer-via-copy');
+    expect(names(doc)).toEqual(['A', 'Layer 1', 'B']);
+    expect(activeName(editor)).toBe('Layer 1');
+    expect(doc.layers[1].pixels).toMatchObject({ width: 2, height: 2 });
+    expect(doc.selection).toBeNull();
+    expect(editor.history.undoLabel).toBe('Layer via Copy');
+
+    editor.history.undo();
+    expect(activeName(editor)).toBe('A');
+    runLayerAction(editor, 'layer-via-cut');
+    expect(names(doc)).toEqual(['A', 'Layer 1', 'B']);
+    expect(activeName(editor)).toBe('Layer 1');
+    expect(editor.history.undoLabel).toBe('Layer via Cut');
+    // The cut left a hole in A's top-left corner.
+    expect([...doc.layers[0].pixels.data.subarray(0, 4)]).toEqual([0, 0, 0, 0]);
+    expect([...doc.layers[1].pixels.data.subarray(0, 4)]).toEqual([255, 255, 255, 255]);
+  });
+
+  it('does not copy or cut from a hidden layer, or past the selection', () => {
+    const { editor, doc } = setup('A', 'B');
+    select(editor);
+    doc.layers[1].visible = false;
+    expect(canRunLayerAction(editor, 'layer-via-copy')).toBe(false);
+    runLayerAction(editor, 'layer-via-cut');
+    expect(names(doc)).toEqual(['A', 'B']);
+    doc.layers[1].visible = true;
+    doc.layers[1].x = 5;
+    expect(canRunLayerAction(editor, 'layer-via-cut')).toBe(false);
   });
 
   it('deletes the active layer, and the one below becomes active', () => {
@@ -159,6 +213,19 @@ describe('runLayerAction with a floating selection', () => {
     expect(activeName(editor)).toBe('B');
   });
 
+  it('commits it before Layer via Copy or Cut, which take from its source', () => {
+    const { editor, doc } = setup('A', 'B');
+    float(editor);
+    runLayerAction(editor, 'layer-via-cut');
+    expect(names(doc)).toEqual(['A', 'B', 'Layer 1']);
+    expect(editor.floating).toBeNull();
+    expect(activeName(editor)).toBe('Layer 1');
+    expect(editor.history.undoLabel).toBe('Layer via Cut');
+    editor.history.undo();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+    expect(activeName(editor)).toBe('B');
+  });
+
   it('refuses to duplicate, delete or reorder it', () => {
     const { editor, doc } = setup('A', 'B');
     float(editor);
@@ -197,7 +264,7 @@ describe('canRunLayerAction', () => {
     const { editor } = setup('A', 'B', 'C');
     editor.setActiveLayer('layer-2');
     const blocked = ACTIONS.filter((action) => !canRunLayerAction(editor, action));
-    expect(blocked).toEqual(['commit-floating']);
+    expect(blocked).toEqual(['layer-via-copy', 'layer-via-cut', 'commit-floating']);
     editor.setActiveLayer('layer-1');
     expect(canRunLayerAction(editor, 'merge-down')).toBe(false);
     expect(canRunLayerAction(editor, 'move-down')).toBe(false);
@@ -209,21 +276,25 @@ describe('canRunLayerAction', () => {
 
   it('does not take layer IDs', () => {
     const { editor, doc } = setup('A', 'B');
+    select(editor);
     const next = doc.nextLayerNumber;
     for (const action of ACTIONS) canRunLayerAction(editor, action);
     expect(doc.nextLayerNumber).toBe(next);
   });
 
   it('agrees with what runLayerAction does', () => {
-    for (const active of ['layer-1', 'layer-2']) {
-      for (const action of ACTIONS) {
-        const { editor, doc } = setup('A', 'B');
-        doc.layers[0].visible = false;
-        editor.setActiveLayer(active);
-        const revision = editor.revision;
-        const expected = canRunLayerAction(editor, action);
-        runLayerAction(editor, action);
-        expect([action, editor.revision !== revision]).toEqual([action, expected]);
+    for (const selected of [false, true]) {
+      for (const active of ['layer-1', 'layer-2']) {
+        for (const action of ACTIONS) {
+          const { editor, doc } = setup('A', 'B');
+          doc.layers[0].visible = false;
+          if (selected) select(editor);
+          editor.setActiveLayer(active);
+          const revision = editor.revision;
+          const expected = canRunLayerAction(editor, action);
+          runLayerAction(editor, action);
+          expect([action, editor.revision !== revision]).toEqual([action, expected]);
+        }
       }
     }
   });
@@ -239,6 +310,14 @@ describe('canRunLayerAction', () => {
       expect([action, editor.revision !== revision]).toEqual([action, expected]);
       if (expected) runnable.push(action);
     }
-    expect(runnable).toEqual(['new', 'merge-down', 'flatten', 'select-below', 'commit-floating']);
+    expect(runnable).toEqual([
+      'new',
+      'layer-via-copy',
+      'layer-via-cut',
+      'merge-down',
+      'flatten',
+      'select-below',
+      'commit-floating',
+    ]);
   });
 });

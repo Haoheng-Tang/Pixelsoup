@@ -4,10 +4,13 @@ import {
   duplicateLayerCommand,
   findLayerIndex,
   flattenCommand,
+  layerViaCopyCommand,
+  layerViaCutCommand,
   mergeDownCommand,
   newLayerCommand,
   removeLayerCommand,
   reorderLayerCommand,
+  selectionReachesLayer,
 } from '../core';
 
 /** Layer menu, layer panel and shortcut actions. All act on the active layer. */
@@ -15,6 +18,8 @@ export type LayerAction =
   | 'new'
   | 'duplicate'
   | 'delete'
+  | 'layer-via-copy'
+  | 'layer-via-cut'
   | 'merge-down'
   | 'flatten'
   | 'move-up'
@@ -22,6 +27,11 @@ export type LayerAction =
   | 'select-above'
   | 'select-below'
   | 'commit-floating';
+
+export interface LayerActionOptions {
+  /** The copy's name for `duplicate` (trimmed; a blank name does nothing), else "… copy". */
+  readonly name?: string;
+}
 
 /**
  * Actions a floating selection's layer can't take: they would take it away from its
@@ -42,6 +52,11 @@ export function canRunLayerAction(editor: Editor, action: LayerAction): boolean 
   const doc = editor.document;
   const id = editor.activeLayerId;
   if (action === 'commit-floating') return editor.floating !== null;
+  // While a selection floats, its layer is active and the selection is its outline: they
+  // meet unless the selection was moved off the canvas.
+  if (action === 'layer-via-copy' || action === 'layer-via-cut') {
+    return id !== null && selectionReachesLayer(doc, id);
+  }
   if (editor.floating) {
     if (NOT_WHILE_FLOATING.has(action)) return false;
     // Merging a floating selection down commits it.
@@ -71,11 +86,20 @@ export function canRunLayerAction(editor: Editor, action: LayerAction): boolean 
 
 /**
  * Runs `action` if it can run. New layers and copies become the active layer. A floating
- * selection is committed by merging it down, and first by adding a layer or flattening.
+ * selection is committed by merging it down, and first by adding a layer, flattening, or
+ * Layer via Copy or Cut (which then take the selected pixels from its source).
  */
-export function runLayerAction(editor: Editor, action: LayerAction): void {
+export function runLayerAction(
+  editor: Editor,
+  action: LayerAction,
+  options: LayerActionOptions = {},
+): void {
   if (action === 'commit-floating') {
     editor.commitFloating();
+    return;
+  }
+  if (action === 'layer-via-copy' || action === 'layer-via-cut') {
+    layerVia(editor, action);
     return;
   }
   if (editor.floating) {
@@ -101,7 +125,7 @@ export function runLayerAction(editor: Editor, action: LayerAction): void {
   if (id === null || index < 0) return;
   switch (action) {
     case 'duplicate': {
-      const command = duplicateLayerCommand(doc, id);
+      const command = duplicateLayerCommand(doc, id, options.name);
       if (!command) return;
       editor.history.execute(command);
       editor.setActiveLayer(command.copyId);
@@ -141,6 +165,22 @@ export function commitFloatingFrom(editor: Editor, layerId: LayerId): void {
 
 function execute(editor: Editor, command: Command | null): void {
   if (command) editor.history.execute(command);
+}
+
+/**
+ * Layer via Copy or Cut on the active layer, after committing a floating selection: its
+ * source becomes active again, holding the floated pixels, and the selection stays.
+ */
+function layerVia(editor: Editor, action: 'layer-via-copy' | 'layer-via-cut'): void {
+  if (!canRunLayerAction(editor, action)) return;
+  editor.commitFloating();
+  const id = editor.activeLayerId;
+  if (id === null) return;
+  const factory = action === 'layer-via-copy' ? layerViaCopyCommand : layerViaCutCommand;
+  const command = factory(editor.document, id);
+  if (!command) return;
+  editor.history.execute(command);
+  editor.setActiveLayer(command.layerId);
 }
 
 function selectAt(editor: Editor, index: number): void {
