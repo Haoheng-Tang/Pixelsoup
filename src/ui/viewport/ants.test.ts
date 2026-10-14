@@ -5,6 +5,8 @@ import {
   ANT_PHASES,
   AntPhaseCache,
   AntsOutlineCache,
+  antDashes,
+  antSegments,
   deviceRegion,
   lineWidthFor,
   outlineCell,
@@ -80,6 +82,79 @@ describe('lineWidthFor', () => {
       { lineWidth: 2, nudge: 0 },
       { lineWidth: 3, nudge: 0.5 },
     ]);
+  });
+});
+
+describe('antSegments', () => {
+  it('lists every edge with where it starts round its loop', () => {
+    const outline = traceAnts(squares(), 1);
+    const segments = antSegments(outline);
+    expect(segments.count).toBe(16);
+    expect([...segments.starts]).toEqual([0, 1, 2, 3, 0, 2, 4, 6, 0, 4, 8, 12, 0, 16, 32, 48]);
+    expect([...segments.loopLengths]).toEqual([
+      ...[4, 4, 4, 4],
+      ...[8, 8, 8, 8],
+      ...[16, 16, 16, 16],
+      ...[64, 64, 64, 64],
+    ]);
+    // The first edge runs from the first loop's first corner to its second.
+    expect([...segments.ends.subarray(0, 4)]).toEqual(outline.loops[0].slice(0, 4));
+    expect(segments.outline).toBe(outline);
+  });
+
+  it('closes each loop and leaves out edges of zero length', () => {
+    const outline: AntsOutline = {
+      ...traceAnts(squares(), 1),
+      loops: [[0, 0, 2, 0, 2, 0, 2, 3, 0, 3]],
+      lengths: Float64Array.of(10),
+      vertices: 5,
+    };
+    const segments = antSegments(outline);
+    expect(segments.count).toBe(4);
+    expect([...segments.ends]).toEqual([0, 0, 2, 0, 2, 0, 2, 3, 2, 3, 0, 3, 0, 3, 0, 0]);
+    expect([...segments.starts]).toEqual([0, 2, 5, 7]);
+    expect([...segments.loopLengths]).toEqual([10, 10, 10, 10]);
+  });
+});
+
+describe('antDashes', () => {
+  it('gives where the dashes stand at each edge, and flags the loops too short to animate', () => {
+    // At dpr 1.25 the period is 10 device pixels. At 1.5 device pixels per canvas pixel, the
+    // 4 × 4 square's edges start 0, 6, 12 and 18 device pixels round: 0, 6, 2 and 8 into a
+    // period; the 16 × 16 square's 0, 24, 48 and 72: 0, 4, 8 and 2. At zoom 1.2 the loops
+    // 4 and 8 canvas pixels long are 4.8 and 9.6 CSS pixels: too short to animate.
+    const segments = antSegments(traceAnts(squares(), 1));
+    const dashes = antDashes(segments, 1.5, 1.2, 1.25);
+    const at = (i: number) => [dashes[i * 2], dashes[i * 2 + 1]];
+    expect([0, 1, 2, 3].map(at)).toEqual([
+      [0, 1],
+      [1.5, 1],
+      [3, 1],
+      [4.5, 1],
+    ]);
+    expect([4, 5, 6, 7].map(at).map(([, still]) => still)).toEqual([1, 1, 1, 1]);
+    expect([8, 9, 10, 11].map(at)).toEqual([
+      [0, 0],
+      [6, 0],
+      [2, 0],
+      [8, 0],
+    ]);
+    expect([12, 13, 14, 15].map(at)).toEqual([
+      [0, 0],
+      [4, 0],
+      [8, 0],
+      [2, 0],
+    ]);
+  });
+
+  it('fills the array it is given', () => {
+    const segments = antSegments(traceAnts(squares(), 1));
+    const out = new Float32Array(40);
+    expect(antDashes(segments, 1.25, 1, 1, out)).toBe(out);
+    // The 16 × 16 square's second edge starts 16 canvas pixels round: 20 device pixels, 4
+    // into the 8-pixel period.
+    expect(out[13 * 2]).toBe(4);
+    expect(out[13 * 2 + 1]).toBe(0);
   });
 });
 

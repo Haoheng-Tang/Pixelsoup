@@ -148,6 +148,74 @@ export class AntsOutlineCache {
   }
 }
 
+/** An outline's edges, laid out for the GPU: one instance per edge. */
+export interface AntSegments {
+  readonly outline: AntsOutline;
+  readonly count: number;
+  /** x0, y0, x1, y1 for each edge, in canvas coordinates. */
+  readonly ends: Float32Array;
+  /** How far round its loop each edge starts, in canvas pixels. */
+  readonly starts: Float64Array;
+  /** The length of each edge's loop, in canvas pixels. */
+  readonly loopLengths: Float64Array;
+}
+
+/** `outline`'s edges in loop order, leaving out any of zero length. */
+export function antSegments(outline: AntsOutline): AntSegments {
+  const { loops, lengths } = outline;
+  const capacity = outline.vertices;
+  const ends = new Float32Array(capacity * 4);
+  const starts = new Float64Array(capacity);
+  const loopLengths = new Float64Array(capacity);
+  let count = 0;
+  for (let l = 0; l < loops.length; l++) {
+    const loop = loops[l];
+    let along = 0;
+    for (let i = 0; i < loop.length; i += 2) {
+      const j = i + 2 < loop.length ? i + 2 : 0;
+      const length = Math.abs(loop[j] - loop[i]) + Math.abs(loop[j + 1] - loop[i + 1]);
+      if (length === 0) continue;
+      ends[count * 4] = loop[i];
+      ends[count * 4 + 1] = loop[i + 1];
+      ends[count * 4 + 2] = loop[j];
+      ends[count * 4 + 3] = loop[j + 1];
+      starts[count] = along;
+      loopLengths[count] = lengths[l];
+      along += length;
+      count++;
+    }
+  }
+  return {
+    outline,
+    count,
+    ends: ends.subarray(0, count * 4),
+    starts: starts.subarray(0, count),
+    loopLengths: loopLengths.subarray(0, count),
+  };
+}
+
+/**
+ * For each edge, where the dash pattern stands at its start (device pixels from the start
+ * of a dash, 0 to one period) and 1 if its loop is too short on screen to animate, else 0;
+ * at `scale` device pixels per canvas pixel and `zoom` CSS pixels per canvas pixel. Worked
+ * out in double precision, so the GPU only adds the short distance along each edge.
+ */
+export function antDashes(
+  segments: AntSegments,
+  scale: number,
+  zoom: number,
+  dpr: number,
+  out: Float32Array = new Float32Array(segments.count * 2),
+): Float32Array {
+  const period = ANT_PHASES * dpr;
+  const { starts, loopLengths } = segments;
+  for (let i = 0; i < segments.count; i++) {
+    out[i * 2] = (starts[i] * scale) % period;
+    out[i * 2 + 1] = loopLengths[i] * zoom < STATIC_LOOP_LENGTH ? 1 : 0;
+  }
+  return out;
+}
+
 /** An area of the overlay canvas in whole device pixels. */
 export interface DeviceRegion {
   readonly x: number;

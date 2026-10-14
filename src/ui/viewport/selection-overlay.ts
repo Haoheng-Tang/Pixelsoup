@@ -6,7 +6,7 @@ import type {
   ShapeOverlay,
   ToolOverlay,
 } from '../tools/tool';
-import type { AntPhaseKey, AntsOutline, DocumentPlacement } from './ants';
+import type { AntPhaseKey, AntSegments, AntsOutline, DocumentPlacement } from './ants';
 import {
   ANT_DASH,
   ANT_PHASES,
@@ -14,10 +14,12 @@ import {
   AntsOutlineCache,
   PRERENDER_MAX_PIXELS,
   PRERENDER_MIN_VERTICES,
+  antSegments,
   deviceRegion,
   lineWidthFor,
   staticLoopCount,
 } from './ants';
+import { GlAnts } from './ants-gl';
 import { createCheckerPattern } from './checkerboard';
 
 /** Everything the overlay shows in one frame. */
@@ -35,7 +37,7 @@ export interface OverlayFrame {
   readonly phase: number;
   /** A wheel zoom is in progress: an outline traced for an earlier zoom will do. */
   readonly zooming: boolean;
-  /** A pan or wheel zoom is in progress: the ants are stroked, not prerendered. */
+  /** A pan or wheel zoom is in progress: the 2D path draws the ants directly. */
   readonly viewChanging: boolean;
 }
 
@@ -151,10 +153,12 @@ function lassoPath({ points, next }: LassoOverlay): Path2D {
  * composite.
  *
  * The selection's outline is traced once per selection and zoom bucket (`AntsOutlineCache`:
- * at screen resolution when zoomed out). Each frame strokes it through the current pan and
- * zoom with the step's dash offset; outlines with many corners are drawn once per phase and
- * blitted from then on, until the view or the selection changes. Loops too short on screen
- * to animate are drawn solid, and lines are one device pixel per CSS pixel at every zoom.
+ * at screen resolution when zoomed out). With WebGL 2 the ants go on a canvas of their own
+ * just below this one (`GlAnts`), where any frame is one draw call. Without it, each frame
+ * strokes the outline here through the current pan and zoom with the step's dash offset,
+ * and outlines with many corners are drawn once per phase and blitted from then on, until
+ * the view or the selection changes. Either way loops too short on screen to animate are
+ * drawn solid, and lines are one device pixel per CSS pixel at every zoom.
  */
 export class SelectionOverlay {
   readonly canvas: HTMLCanvasElement;
@@ -166,6 +170,11 @@ export class SelectionOverlay {
   private readonly phases = new AntPhaseCache<HTMLCanvasElement>((key, phase, reuse) =>
     this.renderPhase(key, phase, reuse),
   );
+  /** The WebGL ants, made when first needed; null where WebGL 2 isn't available. */
+  private glAnts: GlAnts | null | undefined;
+  private segments: AntSegments | null = null;
+  /** Nothing is drawn on this canvas. */
+  private blank = true;
   /** Brush outline colours, from the `--cursor-line` and `--cursor-halo` tokens. */
   private readonly cursorLine: string;
   private readonly cursorHalo: string;
@@ -175,7 +184,7 @@ export class SelectionOverlay {
   private readonly cropGridHalo: string;
   private checker: CanvasPattern | string | null = null;
   private checkerDpr = 0;
-  constructor(container: HTMLElement) {
+  constructor(private readonly container: HTMLElement) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-overlay';
     this.canvas.setAttribute('aria-hidden', 'true');
@@ -197,10 +206,14 @@ export class SelectionOverlay {
   resize(width: number, height: number): void {
     this.canvas.width = width;
     this.canvas.height = height;
+    this.blank = true;
+    this.glAnts?.resize(width, height);
   }
 
-  /** Removes the overlay's canvas. */
+  /** Removes the overlay's canvases. */
   dispose(): void {
+    this.glAnts?.dispose();
+    this.glAnts = null;
     this.canvas.remove();
   }
 
@@ -214,13 +227,24 @@ export class SelectionOverlay {
     const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? false;
     const ants = frame.showSelection && !hidesSelection && placement ? selection : null;
     if (!selection) this.releaseOutlines();
-    if (!ants) this.phases.release();
+    const onGpu = ants !== null && placement !== null && this.drawAntsGl(ants, frame, placement);
+    if (!onGpu) this.glAnts?.clear();
+    if (!ants || onGpu) this.phases.release();
 
     const ctx = this.context;
+    const antsHere = ants !== null && !onGpu;
+    if (!placement || !(antsHere || shape || lasso || crop || brush)) {
+      if (!this.blank) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.blank = true;
+      }
+      return;
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    if (!placement) return;
-    if (ants) this.drawAnts(ants, frame, placement);
+    this.blank = false;
+    if (antsHere) this.drawAnts(ants, frame, placement);
 
     const { lineWidth, nudge } = lineWidthFor(dpr);
     const scale = (placement.scaleX + placement.scaleY) / 2;
@@ -245,6 +269,36 @@ export class SelectionOverlay {
     }
     if (crop) this.drawCrop(crop, placement, dpr, lineWidth, nudge);
     if (brush) this.drawBrush(brush, placement, dpr, lineWidth, nudge);
+  }
+
+  /**
+   * The selection's ants on the WebGL canvas, if there is one; false to draw them here
+   * instead (no WebGL 2, or its context is lost).
+   */
+  private drawAntsGl(
+    selection: Selection,
+    frame: OverlayFrame,
+    placement: DocumentPlacement,
+  ): boolean {
+    const gl = this.glRenderer();
+    if (!gl) return false;
+    const outline = this.outlines.get(selection, frame.zoom, frame.zooming);
+    if (this.segments?.outline !== outline) this.segments = antSegments(outline);
+    const { dpr, zoom, phase } = frame;
+    return gl.draw({ segments: this.segments, placement, dpr, zoom, phase });
+  }
+
+  private glRenderer(): GlAnts | null {
+    if (this.glAnts === undefined) {
+      const canvas = document.createElement('canvas');
+      canvas.className = 'viewport-overlay';
+      canvas.setAttribute('aria-hidden', 'true');
+      canvas.width = this.canvas.width;
+      canvas.height = this.canvas.height;
+      this.glAnts = GlAnts.create(canvas);
+      if (this.glAnts) this.container.insertBefore(canvas, this.canvas);
+    }
+    return this.glAnts;
   }
 
   /**
@@ -315,6 +369,7 @@ export class SelectionOverlay {
   private releaseOutlines(): void {
     this.outlines.clear();
     this.paths = null;
+    this.segments = null;
     this.drawnOutline = null;
   }
 
