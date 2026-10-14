@@ -530,6 +530,11 @@ button.danger:hover:not(:disabled) {
   opacity: 0.7;
 }
 
+.menu-check {
+  display: inline-block;
+  width: 1.25em;
+}
+
 .menu-separator {
   height: 1px;
   margin: 4px 6px;

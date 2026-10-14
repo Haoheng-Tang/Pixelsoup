@@ -107,19 +107,61 @@ tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click
 
 ## Drawing
 
-`SelectionOverlay` draws on a transparent canvas stacked above the composite.
+`SelectionOverlay` draws on a transparent canvas stacked above the composite. The selection's
+ants go on a WebGL 2 canvas between the two (`GlAnts`, `ants-gl.ts`), or on the overlay itself
+where WebGL 2 isn't available. The ants' logic, free of the DOM, is in `ants.ts`.
 
-- The selection outline is traced once per selection by `traceSelectionOutline` (core): edges
-  between pixels on either side of 50 % coverage, joined into closed loops with the inside on
-  the right; pixels touching only diagonally get separate loops. The loops become a
-  document-space `Path2D`, cached with the selection. Panning and zooming change only the
-  transform, and animation changes only the dash offset (one CSS pixel every 60 ms). The frame
-  loop only keeps running while something shows ants.
+- **The outline** (`traceSelectionOutline`, core) follows the edges between pixels on either
+  side of 50 % coverage, joined into closed loops with the inside on the right; pixels touching
+  only diagonally get separate loops. A selection with no pixel at 50 % coverage or more has
+  no outline.
+- **Zoomed out**, a selection's own pixels would give thousands of loops smaller than a screen
+  pixel (a Magic Wand pick on a photo, say). So below 100 % the mask is first reduced to cells
+  of about one CSS pixel (`outlineCell`: round(1 / zoom) pixels a side, anchored at the
+  canvas's top-left). A cell counts as selected when its pixels' coverage averages over 50 %
+  (`downsampleSelection`, a box filter; cells at the canvas's edge average only the pixels on
+  it), and `traceDownsampledOutline` traces the cells and scales the loops back, clamped to
+  the canvas. Regions smaller than a cell may vanish from the outline, never from the
+  selection. From about 67 % up the cell is one pixel: the outline is exactly the tracer's.
+- **Caching** (`AntsOutlineCache`): outlines are kept per selection and cell size, for the
+  last four sizes, so panning never retraces and returning to a recent zoom doesn't either. A
+  new selection drops them. While the wheel zooms, the last outline is drawn at the new scale,
+  and the new size is traced 100 ms after the last notch (`ZOOM_SETTLE_MS`); other zooms trace
+  straight away.
 - Lines are `round(devicePixelRatio)` device pixels wide at every zoom and use the same snapped
   device placement as the composite, so they track pan and zoom exactly. Where pixel edges fall
   between device pixels (fractional device scales, such as 100 % zoom on a 125 % display) the
   line is anti-aliased across two device pixels.
-- The tool's preview shape is drawn the same way; it's rebuilt each draw, which is cheap. A
+- **Marching**: black dashes 4 CSS px long over a white line, stepping one CSS pixel every
+  83 ms (`ANT_STEP_MS`, about 12 steps a second; eight steps make a cycle). A timer of its own
+  steps them, only while ants show, and holds them still while the view pans or the wheel
+  zooms.
+- **Tiny loops hold still**: a loop shorter on screen than two dash cycles (16 CSS px,
+  `STATIC_LOOP_LENGTH`) is drawn as a solid black line, since dashes on it would only blink.
+  Loops are sorted shortest first, so these are a prefix (`staticLoopCount`). None is left out.
+- **On the GPU** (`GlAnts`): the ants' canvas sits below the overlay, so tool previews, the
+  crop shade and the brush outline stay on top. Each edge of the outline is one instanced quad
+  (`antSegments`), uploaded once per outline, and where the dash pattern stands at each edge's
+  start is worked out on the CPU in double precision once per zoom (`antDashes`). Each frame
+  is then a single draw call whatever the pan and step, and an unchanged frame isn't drawn
+  again. The fragment shader works out each device pixel's coverage of the line and the dark
+  share of the dash pattern across it, and blends black dashes over a white line as the 2D
+  path does, so the two look alike. Without WebGL 2, or while its context is lost, the overlay
+  draws the ants (below); a restored context takes them back.
+- **Prerendered phases** (`AntPhaseCache`), on the overlay: an outline with 2000 corners or
+  more (`PRERENDER_MIN_VERTICES`) is drawn once per step into offscreen canvases covering its
+  bounds on screen, and each step copies one of the eight onto the overlay. That's done only
+  where the bounds cover at most 2 million device pixels (64 MB for all eight). Each image is
+  drawn when first needed, and drawn again after the outline, pan, zoom or pixel ratio
+  changes. While the view pans or zooms, for an outline's first draw (a moving floating
+  selection has a new outline every frame), and over larger areas, the overlay strokes the
+  outline directly instead.
+- **View → Extras** (Ctrl/Cmd+H) hides or shows the selection's ants (`ViewOptions`, session
+  state like the colours, never saved). The selection stays, and tools work as before; their
+  previews (a marquee or lasso being drawn, the crop box, a brush outline) still show. Mac
+  browsers usually take Cmd+H to hide themselves, so use the menu there. The View menu has room
+  for a Quick Mask toggle later.
+- The tool's preview shape is drawn as ants too; it's rebuilt each draw, which is cheap. A
   lasso is drawn as ants along its points and rubber band, left open, and where a click would
   close it, a 9 CSS px ring marks the first point.
 - A painting tool's brush outline is a circle in document space, so it scales with the zoom:
@@ -127,15 +169,24 @@ tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click
   than 4 CSS px across, it becomes a crosshair on the device pixel grid. It shows only while the
   pointer is over the canvas (or during a stroke) and not while panning; the tool's own CSS
   cursor is `none` meanwhile.
-- A selection with no pixel at 50 % coverage or more has no outline.
 - The crop box shades everything outside it (`--crop-shade`), shows any area it adds beyond the
   canvas as a transparent checkerboard continuing the composite's, and while a drag adjusts it
   draws a rule-of-thirds grid (`--crop-grid` over `--crop-grid-halo`). Its outline and 7 CSS px
   square handles sit on the device pixel grid; edge handles are left out where they wouldn't
   fit between the corners.
 - A floating selection on the move is a new selection each frame it moves, so its outline is
-  traced again each time (about 7 ms for a 2000 × 1500 selection). Reusing the cached path with
-  an offset would be cheaper, except where the canvas edge clips the selection.
+  traced again each time (about 7 ms for a 2000 × 1500 selection at 100 %). Reusing the cached
+  path with an offset would be cheaper, except where the canvas edge clips the selection.
+
+On a photo, a Magic Wand pick of 2500 regions at 25 % (headless Edge, 125 % display) took
+165 ms to trace and draw at full resolution, and its animation kept the GPU process busy
+for about 400 ms of every second. Traced in cells it takes 13 ms, and with still tiny loops
+and prerendered phases the animation costs 10 to 30 ms a second; panning went from 68 of
+300 frames over 20 ms to none. From about 67 % up its outline has 41,500 corners, and on a
+2185 × 1168 device-pixel overlay its bounds are too big to prerender, so the 2D path strokes
+it at every step: at 100 % the GPU process spent 260 ms a second animating it, 550 panning
+and 625 while the brush hovered. With WebGL that's 50, 125 and 125 ms (50 to 115 ms
+animating and 80 to 165 panning, from 25 % to 400 %).
 
 The status bar shows the document pixel under the pointer and the size of the tool's preview (a
 marquee while dragging, a lasso's bounds, or the crop box), else of the selection bounds. The

@@ -42,7 +42,11 @@ Photoshop.
   clicked or across the whole image, with optional anti-aliasing, sampling the active layer or
   all visible layers
 - Select menu: Select All, Deselect and Inverse
-- Marching ants that stay a hairline wide and track the canvas exactly at every zoom level
+- Marching ants that stay a hairline wide and track the canvas exactly at every zoom level.
+  They stay smooth on selections with thousands of specks: zoomed out, the outline is traced
+  at screen resolution, loops too small to march hold still instead of blinking, and with
+  WebGL 2 the ants are drawn on the GPU
+- View menu: Extras hides or shows the marching ants, keeping the selection
 - Move tool: drag or nudge the active layer anywhere, even off the canvas. With a selection it
   lifts the selected pixels (soft edges included) into a floating selection that moves with
   its outline, or copies them with Alt; committing drops them back into their layer, exactly
@@ -79,6 +83,7 @@ Photoshop.
 | M                                   | marquee tool (Shift+M switches rectangle and ellipse) |
 | Ctrl/Cmd+A, Ctrl/Cmd+D              | select all, deselect                                  |
 | Ctrl/Cmd+Shift+I                    | inverse                                               |
+| Ctrl/Cmd+H                          | hide or show the marching ants (View → Extras)        |
 | Shift, Alt, Shift+Alt at drag start | add to, subtract from, intersect with the selection   |
 | Shift during a drag                 | constrain to a square or circle                       |
 | Alt during a drag                   | draw from the centre                                  |
@@ -89,7 +94,8 @@ Shift or Alt used to pick the mode at the start of a drag constrain or centre th
 after being released and pressed again. With no selection, they constrain straight away.
 Selections aren't saved in `.pixelsoup` files, and changing one doesn't count as an unsaved
 change. Some browsers keep Ctrl/Cmd+D (bookmark) or Ctrl/Cmd+Shift+I (developer tools) for
-themselves; the Select menu always works.
+themselves, and Mac browsers usually take Cmd+H to hide themselves; the Select and View menus
+always work.
 
 ### Lasso and Magic Wand shortcuts
 

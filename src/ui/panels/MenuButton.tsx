@@ -10,6 +10,8 @@ export interface MenuEntry<T extends string> {
   /** The shortcut takes no Ctrl/Cmd: 'Delete' is the Delete key alone. */
   readonly plain?: boolean;
   readonly disabled?: boolean;
+  /** Makes the item a checkbox (`menuitemcheckbox`), ticked when true. */
+  readonly checked?: boolean;
 }
 
 interface MenuButtonProps<T extends string> {
@@ -124,7 +126,8 @@ export function MenuButton<T extends string>({ label, sections, onChoose }: Menu
                 <button
                   key={item.command}
                   type="button"
-                  role="menuitem"
+                  role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                  aria-checked={item.checked}
                   tabIndex={-1}
                   className="menu-item"
                   aria-disabled={item.disabled ? true : undefined}
@@ -133,7 +136,14 @@ export function MenuButton<T extends string>({ label, sections, onChoose }: Menu
                     item.shortcut ? ariaShortcut(item.shortcut, item.plain === true) : undefined
                   }
                 >
-                  <span>{item.label}</span>
+                  <span>
+                    {item.checked !== undefined && (
+                      <span className="menu-check" aria-hidden="true">
+                        {item.checked ? '✓' : ''}
+                      </span>
+                    )}
+                    {item.label}
+                  </span>
                   {item.shortcut && (
                     <kbd className="menu-shortcut">
                       {formatShortcut(item.shortcut, { plain: item.plain === true })}
@@ -151,7 +161,9 @@ export function MenuButton<T extends string>({ label, sections, onChoose }: Menu
 
 /** The menu's items in order. */
 function menuItems(menu: HTMLElement | null): HTMLElement[] {
-  return [...(menu?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
+  return [
+    ...(menu?.querySelectorAll<HTMLElement>('[role=menuitem], [role=menuitemcheckbox]') ?? []),
+  ];
 }
 
 /**
