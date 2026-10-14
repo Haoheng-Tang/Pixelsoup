@@ -14,6 +14,7 @@ import type { Selection } from '../selection';
 import type { Placement } from './layer-growth';
 import { place, placementOf } from './layer-growth';
 import { mergeArea } from './merge-commands';
+import { splitSelectedPixels } from './selected-pixels';
 
 /**
  * Lifts the selected pixels of a layer (the source) into a new floating layer directly
@@ -51,7 +52,7 @@ export class LiftSelectionCommand implements Command {
       this.lifted = lift(source, doc.selection, this.floatId, this.copy);
     } else if (this.lifted.floating.before) {
       // Redo: the source is as it was before the first lift, so cutting again matches.
-      splitPixels(source, this.lifted.floating.selection, null, true);
+      splitSelectedPixels(source, this.lifted.floating.selection, null, true);
     }
     doc.layers.splice(index + 1, 0, this.lifted.layer);
     return { ...liftChange(this.lifted.floating), floating: this.lifted.floating };
@@ -87,7 +88,7 @@ function lift(
     visible: source.visible,
     blendMode: source.blendMode,
   });
-  splitPixels(source, selection, layer, !copy);
+  splitSelectedPixels(source, selection, layer, !copy);
   const floating: FloatingSelection = {
     layerId: floatId,
     sourceId: source.id,
@@ -97,49 +98,6 @@ function lift(
     before,
   };
   return { layer, floating };
-}
-
-/**
- * Splits the source's pixels under the selection by coverage: the selected part goes
- * into `float` (when given) and, with `cut`, out of the source. Pixels left with no
- * alpha become transparent black.
- */
-function splitPixels(
-  source: RasterLayer,
-  selection: Selection,
-  float: RasterLayer | null,
-  cut: boolean,
-): void {
-  const bounds = selection.bounds();
-  const area = bounds && intersectRects(bounds, rasterBounds(source));
-  if (!area) return;
-  const mask = selection.mask;
-  const src = source.pixels;
-  const data = src.data;
-  const out = float?.pixels.data;
-  const outWidth = float?.pixels.width ?? 0;
-  for (let y = area.y; y < area.y + area.height; y++) {
-    let m = y * selection.width + area.x;
-    let s = ((y - source.y) * src.width + area.x - source.x) * 4;
-    let f = float ? ((y - float.y) * outWidth + area.x - float.x) * 4 : 0;
-    for (let n = 0; n < area.width; n++, m++, s += 4, f += 4) {
-      const c = mask[m];
-      const a = data[s + 3];
-      if (c === 0 || a === 0) continue;
-      // There are no .5 ties (2·a·c is even, 255 odd), so a − lifted also equals
-      // round(a × (255 − c) / 255): the two parts are both correctly rounded.
-      const lifted = c === 255 ? a : Math.round((a * c) / 255);
-      if (out && lifted > 0) {
-        out[f] = data[s];
-        out[f + 1] = data[s + 1];
-        out[f + 2] = data[s + 2];
-        out[f + 3] = lifted;
-      }
-      if (!cut) continue;
-      if (lifted === a) data[s] = data[s + 1] = data[s + 2] = data[s + 3] = 0;
-      else data[s + 3] = a - lifted;
-    }
-  }
 }
 
 function liftChange(floating: FloatingSelection): DocumentChange {

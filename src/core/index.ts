@@ -16,6 +16,7 @@ export * from './commands/layer-commands';
 export * from './commands/merge-commands';
 export * from './commands/move-commands';
 export * from './commands/float-commands';
+export * from './commands/selected-pixels';
 export * from './commands/selection-commands';
 export * from './commands/stroke-commands';
 export * from './commands/fill-commands';
