@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { DEFAULT_NEW_DOCUMENT, Editor, createBlankDocument } from '../core';
 import { App } from './App';
 import { PixelClipboard } from './clipboard/pixel-clipboard';
+import { writeImageToSystemClipboard } from './clipboard/system-clipboard';
 import { Colors } from './color/colors';
 import { encodeImage } from './io/export-image';
 import { createFileStore } from './io/file-store';
@@ -29,7 +30,7 @@ const controller = new AppController(session);
 const clipboard = new PixelClipboard({
   editor,
   decodeImage: decodeImageFile,
-  writeSystem: () => Promise.resolve(false),
+  writeSystem: writeImageToSystemClipboard,
   onError: (error) => controller.showError(error),
 });
 const colors = new Colors();
