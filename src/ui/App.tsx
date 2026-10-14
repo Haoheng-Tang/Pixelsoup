@@ -17,24 +17,28 @@ import { useLayerShortcuts } from './use-layer-shortcuts';
 import { useRevision } from './use-revision';
 import { useSelectionShortcuts } from './use-selection-shortcuts';
 import { useToolShortcuts } from './use-tool-shortcuts';
+import { useViewShortcuts } from './use-view-shortcuts';
 import { StatusBar } from './viewport/StatusBar';
 import { Viewport } from './viewport/Viewport';
 import type { ViewportController } from './viewport/viewport-controller';
+import type { ViewOptions } from './viewport/view-options';
 
 interface AppProps {
   editor: Editor;
   controller: AppController;
   tools: ToolManager;
   colors: Colors;
+  view: ViewOptions;
 }
 
-export function App({ editor, controller, tools, colors }: AppProps) {
+export function App({ editor, controller, tools, colors, view }: AppProps) {
   const [viewport, setViewport] = useState<ViewportController | null>(null);
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
   useEditShortcuts(editor, colors, controller);
   useSelectionShortcuts(editor, controller);
   useLayerShortcuts(editor, controller);
+  useViewShortcuts(view, controller);
   useToolShortcuts(tools, controller);
   useColorShortcuts(colors, controller);
   useBrushShortcuts(tools, controller);
@@ -48,11 +52,18 @@ export function App({ editor, controller, tools, colors }: AppProps) {
         controller={controller}
         tools={tools}
         colors={colors}
+        view={view}
         viewport={viewport}
       />
       <ToolOptionsBar tools={tools} />
       <main className="workspace">
-        <Viewport editor={editor} tools={tools} gate={controller} onReady={setViewport} />
+        <Viewport
+          editor={editor}
+          tools={tools}
+          view={view}
+          gate={controller}
+          onReady={setViewport}
+        />
         <aside className="sidebar">
           <LayerPanel editor={editor} blocked={controller.blocked} />
         </aside>

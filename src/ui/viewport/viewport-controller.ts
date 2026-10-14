@@ -16,6 +16,7 @@ import type { DocumentPlacement } from './ants';
 import { ANT_PHASES, ANT_STEP_MS, ZOOM_SETTLE_MS } from './ants';
 import { createCheckerPattern } from './checkerboard';
 import { SelectionOverlay } from './selection-overlay';
+import type { ViewOptions } from './view-options';
 import type { ViewTransform } from './view-transform';
 import { centered, fitZoom, nextZoomStep, screenToDocument, zoomAt } from './view-transform';
 
@@ -152,6 +153,7 @@ export class ViewportController {
     private readonly container: HTMLElement,
     private readonly editor: Editor,
     private readonly tools: ToolManager,
+    private readonly viewOptions: ViewOptions,
     private readonly gate: KeyGate,
   ) {
     this.canvas = document.createElement('canvas');
@@ -204,6 +206,7 @@ export class ViewportController {
         this.invalidateOverlay();
         this.emitStatus();
       }),
+      viewOptions.subscribe(() => this.invalidateOverlay()),
     );
 
     const resizeObserver = new ResizeObserver(() => this.handleResize());
@@ -332,7 +335,7 @@ export class ViewportController {
   private hasAnts(): boolean {
     const shape = this.tools.overlay?.shape;
     return (
-      this.editor.document.selection !== null ||
+      (this.viewOptions.showExtras && this.editor.document.selection !== null) ||
       shape === 'rect' ||
       shape === 'ellipse' ||
       shape === 'lasso'
@@ -404,6 +407,7 @@ export class ViewportController {
     const overlay = this.tools.overlay;
     this.overlay.draw({
       selection: this.editor.document.selection,
+      showSelection: this.viewOptions.showExtras,
       preview: overlay?.shape === 'brush' && !this.showsBrush() ? null : overlay,
       placement: this.placement,
       dpr: this.dpr,

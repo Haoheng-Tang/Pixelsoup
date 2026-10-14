@@ -6,6 +6,7 @@ import type { ToolManager } from '../tools/tool-manager';
 import { useRevision } from '../use-revision';
 import { useEditorRevision } from '../use-editor-revision';
 import type { ViewportController } from '../viewport/viewport-controller';
+import type { ViewOptions } from '../viewport/view-options';
 import { ZoomIndicator } from '../viewport/ZoomIndicator';
 import { EditMenu } from './EditMenu';
 import { FileMenu } from './FileMenu';
@@ -13,16 +14,18 @@ import { ImageMenu } from './ImageMenu';
 import { LayerMenu } from './LayerMenu';
 import { SelectMenu } from './SelectMenu';
 import { ToolPicker } from './ToolPicker';
+import { ViewMenu } from './ViewMenu';
 
 interface ToolbarProps {
   editor: Editor;
   controller: AppController;
   tools: ToolManager;
   colors: Colors;
+  view: ViewOptions;
   viewport: ViewportController | null;
 }
 
-export function Toolbar({ editor, controller, tools, colors, viewport }: ToolbarProps) {
+export function Toolbar({ editor, controller, tools, colors, view, viewport }: ToolbarProps) {
   useEditorRevision(editor);
   useRevision(controller);
   useRevision(controller.session);
@@ -38,6 +41,7 @@ export function Toolbar({ editor, controller, tools, colors, viewport }: Toolbar
       <SelectMenu editor={editor} blocked={blocked} />
       <ImageMenu editor={editor} controller={controller} blocked={blocked} />
       <LayerMenu editor={editor} blocked={blocked} />
+      <ViewMenu view={view} blocked={blocked} />
       <ToolPicker tools={tools} />
       <ColorSwatches colors={colors} />
       <div className="toolbar-group" role="group" aria-label="History">

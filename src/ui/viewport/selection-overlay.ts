@@ -23,6 +23,8 @@ import { createCheckerPattern } from './checkerboard';
 /** Everything the overlay shows in one frame. */
 export interface OverlayFrame {
   readonly selection: Selection | null;
+  /** False hides the selection's ants (View → Extras); the tool's preview still shows. */
+  readonly showSelection: boolean;
   readonly preview: ToolOverlay | null;
   /** Null when the document isn't visible. */
   readonly placement: DocumentPlacement | null;
@@ -210,7 +212,7 @@ export class SelectionOverlay {
     const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
     const lasso = preview?.shape === 'lasso' ? preview : null;
     const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? false;
-    const ants = !hidesSelection && placement ? selection : null;
+    const ants = frame.showSelection && !hidesSelection && placement ? selection : null;
     if (!selection) this.releaseOutlines();
     if (!ants) this.phases.release();
 
