@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 
 interface DialogProps {
   title: string;
@@ -14,7 +14,7 @@ interface DialogProps {
 /**
  * A modal native `<dialog>`, shown while mounted. The parent decides when it's open by
  * mounting and unmounting it. On open, focus goes to the element marked
- * `data-autofocus` (or the browser's default).
+ * `data-autofocus` (or the browser's default); on close, it goes back where it was.
  */
 export function Dialog({ title, onCancel, role = 'dialog', className, children }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -24,7 +24,9 @@ export function Dialog({ title, onCancel, role = 'dialog', className, children }
     onCancelRef.current = onCancel;
   });
 
-  useEffect(() => {
+  // A layout effect, so that it closes while still in the document and the browser gives
+  // the focus back to what had it before (the canvas, say) rather than to the page.
+  useLayoutEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
     if (!dialog.open) dialog.showModal();

@@ -1,9 +1,11 @@
 import type { Editor, Rect } from '../../core';
 import { assertNever, roundRectOut } from '../../core';
+import { isContextClick, isOnCanvas } from '../canvas-menu';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
 import { lassoBounds } from '../tools/lasso-tool';
+import { IS_APPLE } from '../use-file-shortcuts';
 import type {
   ToolKeyEvent,
   ToolModifiers,
@@ -45,6 +47,9 @@ export interface ViewportStatus {
 }
 
 type StatusListener = (status: ViewportStatus) => void;
+
+/** Asked to open the canvas's context menu at a point in client coordinates. */
+type ContextMenuListener = (at: { readonly x: number; readonly y: number }) => void;
 
 /** While `blocked` (a dialog is open), keys belong to the dialog, not to panning or the tool. */
 export interface KeyGate {
@@ -118,6 +123,7 @@ export class ViewportController {
   private renderer: CompositeRenderer;
   private readonly zoomListeners = new Set<ZoomListener>();
   private readonly statusListeners = new Set<StatusListener>();
+  private readonly contextMenuListeners = new Set<ContextMenuListener>();
   private readonly cleanups: (() => void)[] = [];
 
   private view: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
@@ -221,6 +227,7 @@ export class ViewportController {
     this.listen(this.canvas, 'pointerenter', this.handlePointerEnter);
     this.listen(this.canvas, 'pointerleave', this.handlePointerLeave);
     this.listen(this.canvas, 'dblclick', this.handleDoubleClick);
+    this.listen(container, 'contextmenu', this.handleContextMenu);
     // Stop the browser's middle-click autoscroll.
     this.listen(this.canvas, 'mousedown', (e) => {
       if (e.button === 1) e.preventDefault();
@@ -273,6 +280,28 @@ export class ViewportController {
     };
   }
 
+  /**
+   * Subscribes to requests for the canvas's context menu: a right-click (or a Mac's
+   * Control-click) over the document, outside any gesture, while not blocked. The
+   * browser's own menu never shows over the viewport.
+   */
+  onContextMenu(listener: ContextMenuListener): () => void {
+    this.contextMenuListeners.add(listener);
+    return () => {
+      this.contextMenuListeners.delete(listener);
+    };
+  }
+
+  /** Gives the canvas the keyboard focus, e.g. when a menu over it closes. */
+  focus(): void {
+    this.canvas.focus({ preventScroll: true });
+  }
+
+  /** Whether `target` is the viewport or inside it. */
+  contains(target: EventTarget | null): boolean {
+    return target instanceof Node && this.container.contains(target);
+  }
+
   fitToView(): void {
     const { width, height } = this.editor.document;
     const zoom = fitZoom(width, height, this.cssWidth, this.cssHeight);
@@ -302,6 +331,7 @@ export class ViewportController {
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.zoomListeners.clear();
     this.statusListeners.clear();
+    this.contextMenuListeners.clear();
     this.canvas.remove();
     this.overlay.dispose();
   }
@@ -493,8 +523,10 @@ export class ViewportController {
 
   private readonly handlePointerDown = (e: PointerEvent): void => {
     if (this.drag || this.toolPointerId !== null) return;
-    const isPan = e.button === 1 || (e.button === 0 && this.spaceHeld);
-    if (!isPan && e.button !== 0) return;
+    // A context click never reaches the tool: it opens the canvas's menu (contextmenu).
+    const button = isContextClick(e, IS_APPLE) ? 2 : e.button;
+    const isPan = button === 1 || (button === 0 && this.spaceHeld);
+    if (!isPan && button !== 0) return;
     e.preventDefault();
     this.canvas.focus({ preventScroll: true });
     this.canvas.setPointerCapture(e.pointerId);
@@ -570,6 +602,18 @@ export class ViewportController {
     if (e.button !== 0 || this.drag || this.spaceHeld || this.toolPointerId !== null) return;
     this.modifiers = modifiersOf(e);
     this.tools.doubleClick(this.toolEvent(e));
+  };
+
+  /**
+   * Never lets the browser's menu show; asks for the canvas's own over the document,
+   * unless a gesture or pan is in progress or a dialog is open.
+   */
+  private readonly handleContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+    if (this.gate.blocked || this.drag || this.spaceHeld || this.toolPointerId !== null) return;
+    const [x, y] = this.documentPoint(e);
+    if (!isOnCanvas(this.editor.document, x, y)) return;
+    for (const listener of [...this.contextMenuListeners]) listener({ x: e.clientX, y: e.clientY });
   };
 
   private readonly handlePointerLeave = (): void => {

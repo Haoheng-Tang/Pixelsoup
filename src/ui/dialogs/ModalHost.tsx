@@ -3,7 +3,9 @@ import type { Colors } from '../color/colors';
 import { fillColor } from '../edit-actions';
 import type { AppController } from '../session/app-controller';
 import { CanvasSizeDialog } from './CanvasSizeDialog';
+import { ConfirmDeleteLayerDialog } from './ConfirmDeleteLayerDialog';
 import { ConfirmDiscardDialog } from './ConfirmDiscardDialog';
+import { DuplicateLayerDialog } from './DuplicateLayerDialog';
 import { ErrorDialog } from './ErrorDialog';
 import { ExportDialog } from './ExportDialog';
 import { FillDialog } from './FillDialog';
@@ -76,6 +78,21 @@ export function ModalHost({ controller, colors }: ModalHostProps) {
           selection={doc.selection !== null}
           onFill={(settings) => controller.fill(settings, fillColor(settings, colors))}
           onCancel={() => controller.dismiss()}
+        />
+      );
+    case 'duplicate-layer':
+      return (
+        <DuplicateLayerDialog
+          layerName={modal.layerName}
+          onDuplicate={(name) => controller.duplicateLayer(name)}
+          onCancel={() => controller.dismiss()}
+        />
+      );
+    case 'delete-layer':
+      return (
+        <ConfirmDeleteLayerDialog
+          layerName={modal.layerName}
+          onAnswer={(remove) => (remove ? controller.deleteLayer() : controller.dismiss())}
         />
       );
     case 'confirm-discard':

@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { Editor, Point, Rect } from '../../core';
+import type { ContextMenuSections } from '../panels/menu-logic';
 
 /**
  * Tool shortcut keys. Tools that share a key form a group (e.g. the marquees): the key
@@ -49,6 +50,12 @@ export interface ToolPointerEvent extends ToolModifiers {
   readonly y: number;
   /** CSS pixels per document pixel, for thresholds measured on screen. */
   readonly zoom: number;
+  /**
+   * For a press, the button: 0 primary (the default), 1 middle, 2 secondary. The
+   * `ToolManager` passes tools primary presses only, so the other buttons never start a
+   * gesture or count as a click.
+   */
+  readonly button?: number;
   /** Pen pressure, 0–1. Absent for mice and touch. */
   readonly pressure?: number;
   /**
@@ -134,7 +141,8 @@ export interface ToolContext {
  * The viewport routes input to the active tool through the `ToolManager`; panning and
  * zooming take priority, so tools only see input the viewport doesn't use itself.
  * Pointer handlers only run for the primary button; moves are also forwarded while no
- * button is down (hover).
+ * button is down (hover). A right-click (or a Control-click on a Mac) opens the canvas's
+ * context menu instead.
  */
 export interface Tool {
   /** Stable identifier, e.g. 'rect-marquee'. */
@@ -171,4 +179,10 @@ export interface Tool {
 
   /** Painting tools: `[` / `]` (with Shift, hardness) step the brush down or up. */
   stepBrush?(property: BrushProperty, direction: -1 | 1): void;
+
+  /**
+   * Items the tool adds to the canvas's context menu, above the standard ones; asked each
+   * time the menu is drawn. No tool has any yet (Fill… or Free Transform could).
+   */
+  contextMenu?(): ContextMenuSections;
 }

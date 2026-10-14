@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Editor, Rect } from '../core';
 import type { PixelClipboard } from './clipboard/pixel-clipboard';
 import { useClipboardShortcuts } from './clipboard/use-clipboard-shortcuts';
 import type { Colors } from './color/colors';
 import { ModalHost } from './dialogs/ModalHost';
+import { CanvasMenu } from './panels/CanvasMenu';
 import { LayerPanel } from './panels/LayerPanel';
 import { ToolOptionsBar } from './panels/ToolOptionsBar';
 import { Toolbar } from './panels/Toolbar';
@@ -37,6 +38,12 @@ interface AppProps {
 export function App({ editor, controller, clipboard, tools, colors, view }: AppProps) {
   const [viewport, setViewport] = useState<ViewportController | null>(null);
   const viewArea = useCallback((): Rect | null => viewport?.visibleArea() ?? null, [viewport]);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => viewport?.onContextMenu(setMenuAt), [viewport]);
+  const closeMenu = useCallback(() => {
+    setMenuAt(null);
+    viewport?.focus();
+  }, [viewport]);
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
   useEditShortcuts(editor, colors, controller);
@@ -76,6 +83,16 @@ export function App({ editor, controller, clipboard, tools, colors, view }: AppP
         </aside>
       </main>
       <StatusBar viewport={viewport} tools={tools} />
+      {menuAt && viewport && (
+        <CanvasMenu
+          at={menuAt}
+          editor={editor}
+          controller={controller}
+          tools={tools}
+          viewport={viewport}
+          onClose={closeMenu}
+        />
+      )}
       <ModalHost controller={controller} colors={colors} />
     </div>
   );
