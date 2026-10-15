@@ -1,10 +1,11 @@
-import type { Point, Selection } from '../../core';
+import type { PixelBuffer, Point, Selection } from '../../core';
 import type {
   BrushOverlay,
   CropOverlay,
   LassoOverlay,
   ShapeOverlay,
   ToolOverlay,
+  TransformOverlay,
 } from '../tools/tool';
 import type { AntPhaseKey, AntSegments, AntsOutline, DocumentPlacement } from './ants';
 import {
@@ -28,6 +29,11 @@ export interface OverlayFrame {
   /** False hides the selection's ants (View → Extras); the tool's preview still shows. */
   readonly showSelection: boolean;
   readonly preview: ToolOverlay | null;
+  /**
+   * The layers above the one a transform previews, which the composite leaves out with
+   * it: drawn over the preview, at 1 image pixel = 1 document pixel.
+   */
+  readonly above: CanvasImageSource | null;
   /** Null when the document isn't visible. */
   readonly placement: DocumentPlacement | null;
   readonly dpr: number;
@@ -52,10 +58,13 @@ const CROSSHAIR_GAP = 2;
 const CROSSHAIR_ARM = 7;
 /** The dark halo that keeps cursors visible on light pixels, in line widths. */
 const HALO_WIDTH = 3;
-/** The crop box's square handles, in CSS pixels across. */
-const CROP_HANDLE = 7;
-/** The ring that marks where a click closes a lasso, in CSS pixels across. */
-const CLOSE_RING = 9;
+/** The crop box's and the transform box's square handles, in CSS pixels across. */
+const BOX_HANDLE = 7;
+/**
+ * The ring that marks where a click closes a lasso, and the pivot of a transform, in CSS
+ * pixels across.
+ */
+const RING = 9;
 
 /** An outline's loops as paths: those too short to animate, and those that march. */
 interface AntPaths {
@@ -149,8 +158,8 @@ function lassoPath({ points, next }: LassoOverlay): Path2D {
 
 /**
  * Draws the selection's marching ants, any shape or lasso the active tool is drawing, the
- * crop box, and a painting tool's brush outline, on a transparent canvas stacked above the
- * composite.
+ * crop box, a painting tool's brush outline, and a layer under Free Transform with its box,
+ * on a transparent canvas stacked above the composite.
  *
  * The selection's outline is traced once per selection and zoom bucket (`AntsOutlineCache`:
  * at screen resolution when zoomed out). With WebGL 2 the ants go on a canvas of their own
@@ -184,6 +193,8 @@ export class SelectionOverlay {
   private readonly cropGridHalo: string;
   private checker: CanvasPattern | string | null = null;
   private checkerDpr = 0;
+  /** The pixels of a layer under Free Transform, on a canvas to draw them from. */
+  private transformSource: { pixels: PixelBuffer; canvas: HTMLCanvasElement } | null = null;
   constructor(private readonly container: HTMLElement) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-overlay';
@@ -224,7 +235,10 @@ export class SelectionOverlay {
     const crop = preview?.shape === 'crop' ? preview : null;
     const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
     const lasso = preview?.shape === 'lasso' ? preview : null;
-    const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? false;
+    const transform = preview?.shape === 'transform' ? preview : null;
+    if (!transform) this.transformSource = null;
+    // A transform's box shows instead of the selection.
+    const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? transform !== null;
     const ants = frame.showSelection && !hidesSelection && placement ? selection : null;
     if (!selection) this.releaseOutlines();
     const onGpu = ants !== null && placement !== null && this.drawAntsGl(ants, frame, placement);
@@ -233,7 +247,7 @@ export class SelectionOverlay {
 
     const ctx = this.context;
     const antsHere = ants !== null && !onGpu;
-    if (!placement || !(antsHere || shape || lasso || crop || brush)) {
+    if (!placement || !(antsHere || shape || lasso || crop || brush || transform)) {
       if (!this.blank) {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -244,6 +258,7 @@ export class SelectionOverlay {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.blank = false;
+    if (transform) this.drawTransformed(transform, frame.above, placement, frame.zoom);
     if (antsHere) this.drawAnts(ants, frame, placement);
 
     const { lineWidth, nudge } = lineWidthFor(dpr);
@@ -265,9 +280,10 @@ export class SelectionOverlay {
     if (lasso) {
       this.strokeAnts(lassoPath(lasso), dash, offset);
       const first = lasso.points[0];
-      if (lasso.closing && first) this.drawCloseRing(first, placement, dpr, lineWidth);
+      if (lasso.closing && first) this.drawRing(first, placement, dpr, lineWidth);
     }
     if (crop) this.drawCrop(crop, placement, dpr, lineWidth, nudge);
+    if (transform) this.drawTransformBox(transform, placement, dpr, lineWidth, nudge);
     if (brush) this.drawBrush(brush, placement, dpr, lineWidth, nudge);
   }
 
@@ -393,10 +409,10 @@ export class SelectionOverlay {
   }
 
   /**
-   * A ring around a lasso's first point, where a click would close it, the same size at
-   * every zoom. Drawn in device pixels.
+   * A ring around a point, the same size at every zoom: a lasso's first point, where a
+   * click would close it, or a transform's pivot. Drawn in device pixels.
    */
-  private drawCloseRing(
+  private drawRing(
     point: Point,
     placement: DocumentPlacement,
     dpr: number,
@@ -408,7 +424,7 @@ export class SelectionOverlay {
     const path = new Path2D();
     const x = placement.x + point.x * placement.scaleX;
     const y = placement.y + point.y * placement.scaleY;
-    path.arc(x, y, (CLOSE_RING * dpr) / 2, 0, 2 * Math.PI);
+    path.arc(x, y, (RING * dpr) / 2, 0, 2 * Math.PI);
     ctx.lineWidth = lineWidth * HALO_WIDTH;
     ctx.strokeStyle = this.cursorHalo;
     ctx.stroke(path);
@@ -544,7 +560,7 @@ export class SelectionOverlay {
     ctx.stroke(outline);
 
     // Edge handles only where they leave room between the corners.
-    const size = Math.round(CROP_HANDLE * dpr);
+    const size = Math.round(BOX_HANDLE * dpr);
     const midX = Math.round((left + right) / 2);
     const midY = Math.round((top + bottom) / 2);
     const xs = width >= 3 * size ? [left, midX, right] : [left, right];
@@ -562,5 +578,111 @@ export class SelectionOverlay {
         ctx.strokeRect(hx + lineWidth / 2, hy + lineWidth / 2, size - lineWidth, size - lineWidth);
       }
     }
+  }
+
+  /**
+   * A layer under Free Transform as applying would leave it: its own pixels drawn through
+   * the transform with its opacity, then the layers above it, which the composite leaves
+   * out with it. Only what lands on the canvas shows, as in the composite.
+   */
+  private drawTransformed(
+    transform: TransformOverlay,
+    above: CanvasImageSource | null,
+    placement: DocumentPlacement,
+    zoom: number,
+  ): void {
+    const ctx = this.context;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.beginPath();
+    ctx.rect(placement.x, placement.y, placement.width, placement.height);
+    ctx.clip();
+    ctx.setTransform(placement.scaleX, 0, 0, placement.scaleY, placement.x, placement.y);
+    const [a, b, c, d, e, f] = transform.affine;
+    ctx.transform(a, b, c, d, e, f);
+    ctx.globalAlpha = transform.opacity;
+    // Nearest neighbour shows hard pixels, except zoomed out, where the composite is
+    // smoothed too.
+    ctx.imageSmoothingEnabled = transform.interpolation !== 'nearest' || zoom < 1;
+    ctx.imageSmoothingQuality = 'medium';
+    ctx.drawImage(this.transformCanvas(transform.pixels), transform.x, transform.y);
+    if (above) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.imageSmoothingEnabled = zoom < 1;
+      ctx.drawImage(above, placement.x, placement.y, placement.width, placement.height);
+    }
+    ctx.restore();
+  }
+
+  /** `pixels` on a canvas, kept while the same pixels are being transformed. */
+  private transformCanvas(pixels: PixelBuffer): HTMLCanvasElement {
+    if (this.transformSource?.pixels === pixels) return this.transformSource.canvas;
+    const canvas = document.createElement('canvas');
+    canvas.width = pixels.width;
+    canvas.height = pixels.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D is not available');
+    ctx.putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0);
+    this.transformSource = { pixels, canvas };
+    return canvas;
+  }
+
+  /**
+   * Free Transform's box: the outline of where the layer goes, with square handles at its
+   * corners and the middles of its edges, and a ring at the pivot. Drawn in device pixels,
+   * the box's edges on the device pixel grid while it's upright.
+   */
+  private drawTransformBox(
+    transform: TransformOverlay,
+    placement: DocumentPlacement,
+    dpr: number,
+    lineWidth: number,
+    nudge: number,
+  ): void {
+    const ctx = this.context;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setLineDash([]);
+    const device = transform.corners.map(({ x, y }) => ({
+      x: placement.x + x * placement.scaleX,
+      y: placement.y + y * placement.scaleY,
+    }));
+    const edges = device.map((p, i) => [p, device[(i + 1) % device.length]] as const);
+    const upright = edges.every(
+      ([p, q]) => Math.abs(p.x - q.x) < 1e-6 || Math.abs(p.y - q.y) < 1e-6,
+    );
+    const corners = upright
+      ? device.map(({ x, y }) => ({ x: Math.round(x), y: Math.round(y) }))
+      : device;
+    const shift = upright ? nudge : 0;
+    const outline = new Path2D();
+    for (const { x, y } of corners) outline.lineTo(x + shift, y + shift);
+    outline.closePath();
+    ctx.lineWidth = lineWidth * HALO_WIDTH;
+    ctx.strokeStyle = this.cursorHalo;
+    ctx.stroke(outline);
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = this.cursorLine;
+    ctx.stroke(outline);
+
+    // Edge handles only where they leave room between the corners.
+    const size = Math.round(BOX_HANDLE * dpr);
+    const handles: Point[] = [];
+    corners.forEach((p, i) => {
+      const q = corners[(i + 1) % corners.length];
+      handles.push(p);
+      if (Math.hypot(q.x - p.x, q.y - p.y) >= 3 * size) {
+        handles.push({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+      }
+    });
+    ctx.fillStyle = this.cursorLine;
+    ctx.strokeStyle = this.cursorHalo;
+    for (const { x, y } of handles) {
+      const hx = Math.round(x - size / 2);
+      const hy = Math.round(y - size / 2);
+      ctx.fillRect(hx, hy, size, size);
+      ctx.strokeRect(hx + lineWidth / 2, hy + lineWidth / 2, size - lineWidth, size - lineWidth);
+    }
+    this.drawRing(transform.pivot, placement, dpr, lineWidth);
   }
 }
