@@ -4,6 +4,7 @@ import { ColorSwatches } from '../color/ColorSwatches';
 import type { Colors } from '../color/colors';
 import type { AppController } from '../session/app-controller';
 import type { ToolManager } from '../tools/tool-manager';
+import type { FreeTransform } from '../transform/free-transform';
 import { useRevision } from '../use-revision';
 import { useEditorRevision } from '../use-editor-revision';
 import type { ViewportController } from '../viewport/viewport-controller';
@@ -21,6 +22,7 @@ interface ToolbarProps {
   editor: Editor;
   controller: AppController;
   tools: ToolManager;
+  freeTransform: FreeTransform;
   colors: Colors;
   view: ViewOptions;
   viewport: ViewportController | null;
@@ -30,7 +32,8 @@ interface ToolbarProps {
 }
 
 export function Toolbar(props: ToolbarProps) {
-  const { editor, controller, tools, colors, view, viewport, clipboard, viewArea } = props;
+  const { editor, controller, tools, freeTransform, colors, view, viewport, clipboard, viewArea } =
+    props;
   useEditorRevision(editor);
   useRevision(controller);
   useRevision(controller.session);
@@ -46,6 +49,7 @@ export function Toolbar(props: ToolbarProps) {
         editor={editor}
         controller={controller}
         clipboard={clipboard}
+        freeTransform={freeTransform}
         viewArea={viewArea}
         blocked={blocked}
       />

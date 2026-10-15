@@ -3,6 +3,7 @@ import type { Editor } from '../../core';
 import { canvasMenuSections } from '../canvas-menu';
 import type { AppController } from '../session/app-controller';
 import type { ToolManager } from '../tools/tool-manager';
+import type { FreeTransform } from '../transform/free-transform';
 import { useEditorRevision } from '../use-editor-revision';
 import { useRevision } from '../use-revision';
 import type { ViewportController } from '../viewport/viewport-controller';
@@ -14,6 +15,7 @@ interface CanvasMenuProps {
   editor: Editor;
   controller: AppController;
   tools: ToolManager;
+  freeTransform: FreeTransform;
   viewport: ViewportController;
   onClose: () => void;
 }
@@ -23,7 +25,15 @@ interface CanvasMenuProps {
  * app change. It closes when the view zooms, the document is replaced or resized, or a
  * dialog opens. A press on the canvas outside it only closes it.
  */
-export function CanvasMenu({ at, editor, controller, tools, viewport, onClose }: CanvasMenuProps) {
+export function CanvasMenu({
+  at,
+  editor,
+  controller,
+  tools,
+  freeTransform,
+  viewport,
+  onClose,
+}: CanvasMenuProps) {
   useEditorRevision(editor);
   useRevision(controller);
 
@@ -53,7 +63,9 @@ export function CanvasMenu({ at, editor, controller, tools, viewport, onClose }:
       x={at.x}
       y={at.y}
       label="Canvas"
-      sections={canvasMenuSections(editor, controller, tools.contextMenu())}
+      sections={canvasMenuSections(editor, controller, freeTransform, tools.contextMenu(), {
+        exclusive: tools.session !== null,
+      })}
       onClose={onClose}
       swallowsPress={(target) => viewport.contains(target)}
     />

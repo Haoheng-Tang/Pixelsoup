@@ -11,7 +11,6 @@ import { ExportDialog } from './ExportDialog';
 import { FillDialog } from './FillDialog';
 import { ImageSizeDialog } from './ImageSizeDialog';
 import { NewDocumentDialog } from './NewDocumentDialog';
-import { RotateLayerDialog } from './RotateLayerDialog';
 
 interface ModalHostProps {
   controller: AppController;
@@ -58,15 +57,6 @@ export function ModalHost({ controller, colors }: ModalHostProps) {
           height={doc.height}
           initial={controller.canvasSizeSettings}
           onResize={(options) => controller.resizeCanvas(options)}
-          onCancel={() => controller.dismiss()}
-        />
-      );
-    case 'rotate-layer':
-      return (
-        <RotateLayerDialog
-          target={modal.target}
-          onPreview={(degrees) => controller.previewRotation(degrees)}
-          onRotate={(degrees) => controller.rotateLayer(degrees)}
           onCancel={() => controller.dismiss()}
         />
       );

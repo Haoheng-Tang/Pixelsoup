@@ -142,10 +142,11 @@ its source, the selection and position as lifted, and a `PixelSnapshot` of the p
   another; Save, Save As and Export, after the file picker (cancelling it keeps the selection
   floating); Alt+drag or Alt+arrow with the Move tool, which then lifts a copy; and cropping
   (the Crop tool or Crop to Selection), Image Size, Canvas Size and the canvas turns and
-  flips, first.
-- **Rotate Layer** on a floating selection turns it, outline and all ("Rotate Selection"), and
-  marks it `edited` like a stroke; with a plain selection it lifts the selected pixels first.
-  See [transform.md](transform.md).
+  flips, first. A Free Transform in progress is applied before any of these.
+- **Free Transform** on a floating selection transforms it, outline and all, and marks it
+  `edited` like a stroke; with a plain selection it lifts the selected pixels first. Edit →
+  Transform's turns and flips turn a floating selection with its outline the same way,
+  losslessly. See [transform.md](transform.md#free-transform).
 - **Not while floating**: Duplicate, Delete and Move Layer Up/Down are disabled, and the
   floating layer's row can't be renamed, dragged, hidden or faded.
 
@@ -232,7 +233,7 @@ Duplicate Layer… and Delete Layer, which ask first (`AppController.openDuplica
   inconsistent.
 - **Memory**: merge, flatten, and a commit, stroke or fill that grows its layer keep the
   replaced layers whole in history; a lift, a clear and any other commit, stroke or fill keep
-  only what they changed (a stroke in 64 px tiles). Image Size and Rotate Layer keep whole
+  only what they changed (a stroke in 64 px tiles). Image Size and layer transforms keep whole
   layers too: [transform.md](transform.md#open-decisions).
 - **Thumbnails** show the layer's own bounds; Photoshop's default shows the whole canvas.
 - **Long lists**: dragging doesn't auto-scroll the layer list.

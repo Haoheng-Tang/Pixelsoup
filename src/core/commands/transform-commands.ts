@@ -5,7 +5,9 @@ import type { Rect } from '../geometry';
 import { intersectRects, unionRects } from '../geometry';
 import type { Command, DocumentChange } from '../history/command';
 import type { LayerId, RasterLayer } from '../layer';
-import { assertNever, layerBounds } from '../layer';
+import { assertNever, rasterBounds } from '../layer';
+import type { Orientation } from '../orientation';
+import { orientPixels } from '../orientation';
 import { createPixelBuffer } from '../pixel-buffer';
 import type { Affine } from '../resample/affine';
 import {
@@ -15,6 +17,7 @@ import {
   invert,
   multiply,
   rotation,
+  scaling,
   transformedBounds,
   translation,
 } from '../resample/affine';
@@ -23,6 +26,7 @@ import { transformPixels } from '../resample/transform';
 import type { Selection } from '../selection';
 import type { Placement } from './layer-growth';
 import { place, placementOf } from './layer-growth';
+import { ORIENTATION_LABELS } from './orientation-commands';
 
 export interface TransformLayerOptions {
   /** The undo label: "Transform Layer" unless given. */
@@ -48,60 +52,60 @@ interface Transformed {
   readonly float: FloatChange | null;
 }
 
+/** Where a layer's pixels go, and how its floating selection's outline follows them. */
+interface Mapping {
+  readonly after: Placement;
+  /** Takes the outline's canvas coordinates (of pixel edges) to where they end up. */
+  readonly outline: Affine;
+  readonly interpolation: Interpolation;
+}
+
 /**
- * Maps one raster layer through `affine`, which takes canvas coordinates (of pixel edges)
- * to canvas coordinates. The pixels are resampled into a new buffer covering their
- * transformed whole-pixel bounds; outside the old buffer counts as transparent, so the new
- * edges are anti-aliased. Should those bounds exceed the maximum image size, only the part
- * on the canvas is kept. Undo puts the old buffer back.
- *
- * Transforming a floating selection's layer transforms its outline the same way, so the
- * ants follow the pixels, and marks it edited. Transforming any other layer must commit a
- * floating selection first, as other edits do. Like moving a layer, it isn't a pixel edit
+ * Replaces one raster layer's pixels and place in one undo step, which puts the old buffer
+ * back. A floating selection's layer takes its outline along, mapped the same way so the
+ * ants follow the pixels, and is marked edited. Any other layer must have its floating
+ * selection committed first, as for other edits. Like moving a layer, it isn't a pixel edit
  * and ignores the selection.
  */
-export class TransformLayerCommand implements Command {
-  readonly label: string;
-  private transformed: Transformed | null = null;
+abstract class MapLayerCommand implements Command {
+  abstract readonly label: string;
+  private mapped: Transformed | null = null;
 
   constructor(
     readonly layerId: LayerId,
-    readonly affine: Affine,
-    readonly interpolation: Interpolation,
-    private readonly options: TransformLayerOptions = {},
-  ) {
-    if (!invert(affine)) throw new RangeError('The transform would flatten the layer');
-    this.label = options.label ?? 'Transform Layer';
-  }
+    private readonly floating: FloatingSelection | null | undefined,
+  ) {}
 
   apply(doc: ImageDocument): DocumentChange {
     const layer = rasterLayer(doc, this.layerId);
-    this.transformed ??= this.transform(doc, layer);
-    const { before, after, float } = this.transformed;
+    this.mapped ??= this.mapLayer(doc, layer);
+    const { before, after, float } = this.mapped;
     place(layer, after);
     if (float) doc.selection = float.selectionAfter;
     return transformChange(doc, layer.id, before, after, float && afterSide(float));
   }
 
   revert(doc: ImageDocument): DocumentChange {
-    const transformed = this.transformed;
-    if (!transformed) throw new Error('TransformLayerCommand was not applied');
-    const { before, after, float } = transformed;
+    const mapped = this.mapped;
+    if (!mapped) throw new Error(`${this.label} was not applied`);
+    const { before, after, float } = mapped;
     const layer = rasterLayer(doc, this.layerId);
     place(layer, before);
     if (float) doc.selection = float.selectionBefore;
     return transformChange(doc, layer.id, after, before, float && beforeSide(float));
   }
 
-  private transform(doc: ImageDocument, layer: RasterLayer): Transformed {
+  protected abstract map(doc: ImageDocument, layer: RasterLayer): Mapping;
+
+  private mapLayer(doc: ImageDocument, layer: RasterLayer): Transformed {
     const before = placementOf(layer);
-    const after = transformedPlacement(doc, layer, this.affine, this.interpolation);
-    const floating = this.options.floating;
+    const { after, outline: affine, interpolation } = this.map(doc, layer);
+    const floating = this.floating;
     if (!floating || floating.layerId !== layer.id) return { before, after, float: null };
-    // The outline as lifted, moved to where the layer is now and transformed with it.
+    // The outline as lifted, moved to where the layer is now and mapped with it.
     const outline = floating.selection.transform(
-      multiply(this.affine, translation(layer.x - floating.x, layer.y - floating.y)),
-      this.interpolation,
+      multiply(affine, translation(layer.x - floating.x, layer.y - floating.y)),
+      interpolation,
     );
     const float: FloatChange = {
       before: floating,
@@ -110,6 +114,92 @@ export class TransformLayerCommand implements Command {
       selectionAfter: outline.isEmpty ? null : outline,
     };
     return { before, after, float };
+  }
+}
+
+/**
+ * Maps one raster layer through `affine`, which takes canvas coordinates (of pixel edges)
+ * to canvas coordinates. The pixels are resampled into a new buffer covering their
+ * transformed whole-pixel bounds; outside the old buffer counts as transparent, so the new
+ * edges are anti-aliased. Should those bounds exceed the maximum image size, only the part
+ * on the canvas is kept. A floating selection's outline is transformed with its layer.
+ */
+export class TransformLayerCommand extends MapLayerCommand {
+  readonly label: string;
+
+  constructor(
+    layerId: LayerId,
+    readonly affine: Affine,
+    readonly interpolation: Interpolation,
+    options: TransformLayerOptions = {},
+  ) {
+    super(layerId, options.floating);
+    if (!invert(affine)) throw new RangeError('The transform would flatten the layer');
+    this.label = options.label ?? 'Transform Layer';
+  }
+
+  protected map(doc: ImageDocument, layer: RasterLayer): Mapping {
+    const { affine, interpolation } = this;
+    const after = transformedPlacement(doc, layer, affine, interpolation);
+    return { after, outline: affine, interpolation };
+  }
+}
+
+/**
+ * Turns or flips one layer about the centre of its bounds, moving its pixels exactly as
+ * turning the canvas does, with no resampling. Quarter turns of a layer whose width and
+ * height differ by an odd number land half a pixel off the grid, and move on by half a
+ * pixel (`alignToPixels`), so the opposite turn brings the layer back where it was. A
+ * floating selection's outline turns or flips with its layer.
+ */
+export class OrientLayerCommand extends MapLayerCommand {
+  readonly label: string;
+
+  constructor(
+    layerId: LayerId,
+    readonly orientation: Orientation,
+    floating: FloatingSelection | null = null,
+  ) {
+    super(layerId, floating);
+    this.label = ORIENTATION_LABELS[orientation];
+  }
+
+  protected map(_doc: ImageDocument, layer: RasterLayer): Mapping {
+    const { orientation } = this;
+    const { pixels } = layer;
+    const bounds = rasterBounds(layer);
+    const pivotX = bounds.x + bounds.width / 2;
+    const pivotY = bounds.y + bounds.height / 2;
+    const affine = alignToPixels(
+      aboutPivot(orientationMatrix(orientation), pivotX, pivotY),
+      bounds,
+    );
+    const { x, y, width, height } = transformedBounds(affine, bounds);
+    const data = orientPixels(orientation, pixels.data, pixels.width, pixels.height, 4);
+    // Pixel centres land on pixel centres, so the nearest pixel moves the outline exactly.
+    return {
+      after: { pixels: { width, height, data }, x, y },
+      outline: affine,
+      interpolation: 'nearest',
+    };
+  }
+}
+
+/** `orientation` as a map about the origin. */
+function orientationMatrix(orientation: Orientation): Affine {
+  switch (orientation) {
+    case 'rotate-cw':
+      return rotation(90);
+    case 'rotate-ccw':
+      return rotation(-90);
+    case 'rotate-180':
+      return rotation(180);
+    case 'flip-horizontal':
+      return scaling(-1, 1);
+    case 'flip-vertical':
+      return scaling(1, -1);
+    default:
+      return assertNever(orientation);
   }
 }
 
@@ -204,24 +294,16 @@ export function transformLayerCommand(
 }
 
 /**
- * Rotate Layer: turns a layer `degrees` clockwise about its centre, with bilinear
- * interpolation, shifted by less than a pixel so that its new bounds start on a pixel
- * corner (which makes quarter turns exact). A floating selection's layer turns with its
- * outline, as "Rotate Selection". Null if there's no such layer, it's hidden, or the angle
- * is a whole number of turns.
+ * Turns or flips a layer as `OrientLayerCommand` does, or returns null if there's no such
+ * layer or it's hidden. Pass the editor's floating selection, whose outline follows its layer.
  */
-export function rotateLayerCommand(
+export function orientLayerCommand(
   doc: ImageDocument,
   layerId: LayerId,
-  degrees: number,
-  floating: FloatingSelection | null,
-): TransformLayerCommand | null {
+  orientation: Orientation,
+  floating: FloatingSelection | null = null,
+): OrientLayerCommand | null {
   const layer = findLayer(doc, layerId);
-  const bounds = layer && layerBounds(layer);
-  if (!bounds || !Number.isFinite(degrees) || degrees % 360 === 0) return null;
-  const centreX = bounds.x + bounds.width / 2;
-  const centreY = bounds.y + bounds.height / 2;
-  const affine = alignToPixels(aboutPivot(rotation(degrees), centreX, centreY), bounds);
-  const label = floating?.layerId === layerId ? 'Rotate Selection' : 'Rotate Layer';
-  return transformLayerCommand(doc, layerId, affine, 'bilinear', { label, floating });
+  if (!layer || !layer.visible) return null;
+  return new OrientLayerCommand(layerId, orientation, floating);
 }

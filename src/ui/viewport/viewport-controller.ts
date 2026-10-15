@@ -1,9 +1,10 @@
 import type { Editor, Rect } from '../../core';
-import { assertNever, roundRectOut } from '../../core';
+import { assertNever, roundRectOut, transformedBounds } from '../../core';
 import { isContextClick, isOnCanvas } from '../canvas-menu';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
 import { CpuCompositeRenderer } from '../render/composite-renderer';
+import { coalesceRects, suppressedLayer } from '../render/split-compositor';
 import { lassoBounds } from '../tools/lasso-tool';
 import { IS_APPLE } from '../use-file-shortcuts';
 import type {
@@ -12,6 +13,7 @@ import type {
   ToolOverlay,
   ToolPointerEvent,
   ToolPointerSample,
+  ToolSession,
 } from '../tools/tool';
 import type { ToolManager } from '../tools/tool-manager';
 import type { DocumentPlacement } from './ants';
@@ -98,6 +100,13 @@ function overlayArea(overlay: ToolOverlay | null): Rect | null {
       return overlay.rect;
     case 'lasso':
       return lassoBounds(overlay);
+    case 'transform':
+      return transformedBounds(overlay.affine, {
+        x: overlay.x,
+        y: overlay.y,
+        width: overlay.pixels.width,
+        height: overlay.pixels.height,
+      });
     case 'brush':
       return null;
     default:
@@ -134,6 +143,10 @@ export class ViewportController {
   private frame = 0;
   private mainDirty = false;
   private overlayDirty = false;
+  /** Areas of the composite changed since it was last brought up to date, at a redraw. */
+  private staleAreas: Rect[] = [];
+  /** The transform session the canvas took the focus for. */
+  private session: ToolSession | null = null;
   /** The ants' animation step, 0 to `ANT_PHASES` − 1. */
   private antPhase = 0;
   private antTimer = 0;
@@ -184,6 +197,7 @@ export class ViewportController {
           const doc = this.editor.document;
           this.renderer = new CpuCompositeRenderer(doc.width, doc.height);
           this.renderer.update(doc);
+          this.staleAreas = [];
           if (this.cssWidth <= 0 || this.cssHeight <= 0) this.hasFitted = false;
           else if (change.documentReplaced) this.fitToView();
           else {
@@ -199,17 +213,26 @@ export class ViewportController {
           this.emitStatus();
         }
         if (!change.dirty) return;
-        this.renderer.update(this.editor.document, [change.dirty]);
+        // Composited at the redraw, together with any change to what's left out of it.
+        this.staleAreas.push(change.dirty);
         this.invalidate();
       }),
       tools.subscribe(() => {
+        // Keys go to a transform session that has just started from a menu, not the menu.
+        const { session } = this.tools;
+        if (session !== this.session) {
+          this.session = session;
+          if (session) this.focus();
+        }
         this.updateCursor();
         // The new tool doesn't know where the pointer is yet, e.g. to show a brush outline.
         this.resendPointer();
       }),
       tools.subscribeOverlay(() => {
         this.updateCursor();
-        this.invalidateOverlay();
+        // A transform preview starting or ending changes what the composite leaves out.
+        if (suppressedLayer(this.tools.overlay) !== this.renderer.suppressed) this.invalidate();
+        else this.invalidateOverlay();
         this.emitStatus();
       }),
       viewOptions.subscribe(() => this.invalidateOverlay()),
@@ -375,6 +398,8 @@ export class ViewportController {
   /** Whether anything shows marching ants: the selection, or a shape or lasso being drawn. */
   private hasAnts(): boolean {
     const shape = this.tools.overlay?.shape;
+    // A transform hides the selection: its box shows instead.
+    if (shape === 'transform') return false;
     return (
       (this.viewOptions.showExtras && this.editor.document.selection !== null) ||
       shape === 'rect' ||
@@ -439,8 +464,21 @@ export class ViewportController {
       return;
     }
     this.mainDirty = false;
+    this.updateComposite();
     this.renderComposite();
     this.renderOverlay();
+  }
+
+  /**
+   * Brings the composite up to date: what changed since the last redraw, and which layer
+   * it leaves out for a transform preview on the overlay, if any.
+   */
+  private updateComposite(): void {
+    const doc = this.editor.document;
+    const areas = this.renderer.suppress(doc, suppressedLayer(this.tools.overlay));
+    areas.push(...this.staleAreas);
+    this.staleAreas = [];
+    if (areas.length > 0) this.renderer.update(doc, coalesceRects(areas));
   }
 
   private renderOverlay(): void {
@@ -450,6 +488,7 @@ export class ViewportController {
       selection: this.editor.document.selection,
       showSelection: this.viewOptions.showExtras,
       preview: overlay?.shape === 'brush' && !this.showsBrush() ? null : overlay,
+      above: this.renderer.above,
       placement: this.placement,
       dpr: this.dpr,
       zoom: this.view.zoom,
@@ -686,10 +725,17 @@ export class ViewportController {
     this.tools.pointerMove(this.toolEvent(this.pointer));
   }
 
-  /** Keys go to the tool while the user is working on the canvas. */
+  /**
+   * Keys go to the tool while the user is working on the canvas, and to a transform
+   * session while nothing else has the focus (after typing in its options bar, say).
+   */
   private toolWantsKeys(): boolean {
+    const focus = document.activeElement;
     return (
-      this.toolPointerId !== null || this.pointerInside || document.activeElement === this.canvas
+      this.toolPointerId !== null ||
+      this.pointerInside ||
+      focus === this.canvas ||
+      (this.tools.session !== null && (focus === null || focus === document.body))
     );
   }
 
@@ -730,7 +776,7 @@ export class ViewportController {
   }
 
   private updateCursor(): void {
-    let cursor = this.tools.activeTool.cursor;
+    let cursor = this.tools.cursor;
     if (this.drag) cursor = 'grabbing';
     else if (this.spaceHeld && this.toolPointerId === null) cursor = 'grab';
     if (cursor === this.cursor) return;

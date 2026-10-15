@@ -16,6 +16,8 @@ export interface MenuEntry<T extends string> {
   readonly checked?: boolean;
   /** With `checked`, the item is one of a set of choices (`menuitemradio`). */
   readonly radio?: boolean;
+  /** Makes the item open a submenu of these items, beside it, rather than being chosen. */
+  readonly submenu?: MenuSections<T>;
 }
 
 /** Groups of items, drawn with separators between them. */
@@ -24,16 +26,20 @@ export type MenuSections<T extends string> = readonly (readonly MenuEntry<T>[])[
 /** A context menu item, which carries what it does. */
 export interface ContextMenuItem extends MenuEntry<string> {
   readonly run: () => void;
+  readonly submenu?: ContextMenuSections;
 }
 
 export type ContextMenuSections = readonly (readonly ContextMenuItem[])[];
 
 /** What a key does in an open menu (WAI-ARIA menu pattern). */
-export type MenuKeyAction = 'next' | 'previous' | 'first' | 'last' | 'choose' | 'close' | 'leave';
+export type MenuKeyAction =
+  'next' | 'previous' | 'first' | 'last' | 'choose' | 'open' | 'back' | 'close' | 'leave';
 
 /**
  * The arrows move between items, wrapping round, and Home and End go to the first and
- * last; Enter and Space choose the focused item, Escape closes the menu and Tab leaves it.
+ * last; Enter and Space choose the focused item, or open its submenu as the right arrow
+ * does, and the left arrow goes back out of a submenu. Escape closes the menu (or just the
+ * submenu) and Tab leaves it.
  */
 export function menuKeyAction(key: string): MenuKeyAction | null {
   switch (key) {
@@ -48,6 +54,10 @@ export function menuKeyAction(key: string): MenuKeyAction | null {
     case 'Enter':
     case ' ':
       return 'choose';
+    case 'ArrowRight':
+      return 'open';
+    case 'ArrowLeft':
+      return 'back';
     case 'Escape':
       return 'close';
     case 'Tab':
@@ -75,6 +85,28 @@ export function clampMenuPosition(
     left: Math.max(margin, Math.min(x, windowWidth - margin - width)),
     top: Math.max(margin, Math.min(y, windowHeight - margin - height)),
   };
+}
+
+/**
+ * Where a submenu `width` × `height` CSS pixels goes beside its item, whose client rect is
+ * `item`: to the right if it fits there, else to the left if it fits there, else on the
+ * side with more room. Its first item lines up with `item` (`inset` is the menu's padding
+ * and border), moved up as little as needed to stay `margin` inside the window, but never
+ * past the top margin. `top` is relative to the item's top.
+ */
+export function placeSubmenu(
+  item: { readonly left: number; readonly right: number; readonly top: number },
+  width: number,
+  height: number,
+  windowWidth: number,
+  windowHeight: number,
+  { inset = 5, margin = 4 }: { readonly inset?: number; readonly margin?: number } = {},
+): { side: 'right' | 'left'; top: number } {
+  const roomRight = windowWidth - margin - item.right;
+  const roomLeft = item.left - margin;
+  const right = width <= roomRight || (width > roomLeft && roomRight >= roomLeft);
+  const top = Math.max(margin, Math.min(item.top - inset, windowHeight - margin - height));
+  return { side: right ? 'right' : 'left', top: top - item.top };
 }
 
 /** Events that may close an open context menu, besides its own keys. */

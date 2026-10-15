@@ -11,6 +11,7 @@ import type { CropHandle, CropHit } from './crop-geometry';
 import {
   drawBox,
   fitBox,
+  HANDLE_REACH,
   hitCursor,
   hitTest,
   moveBox,
@@ -21,9 +22,6 @@ import type { CropOptions, CropSettings } from './crop-options';
 import { cropRatio, orientedRatio } from './crop-options';
 import type { CropOverlay, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent } from './tool';
 import { CLICK_TOLERANCE, TOOL_KEYS } from './tool';
-
-/** How far from the box's edge, in CSS pixels, a press still grabs it. */
-export const HANDLE_REACH = 6;
 
 /**
  * How the box came about: as the tool put it up (`initial`: the selection's bounds, or the

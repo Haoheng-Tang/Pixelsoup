@@ -2,12 +2,8 @@ import type { Command, ImageDocument, NewDocumentOptions, Rgb } from '../../core
 import { DEFAULT_NEW_DOCUMENT, assertNever, canvasSizeCommand, imageSizeCommand } from '../../core';
 import type { FillSettings } from '../edit-actions';
 import { DEFAULT_FILL_SETTINGS, canFill, runFill } from '../edit-actions';
-import type { RotateTarget } from '../image-actions';
-import { rotateLayerTarget } from '../image-actions';
 import type { DroppedData } from '../io/file-store';
 import { canRunLayerAction, runLayerAction } from '../layer-actions';
-import type { FrameClock } from '../tools/frame-clock';
-import { browserClock } from '../tools/frame-clock';
 import type { DocumentSession } from './document-session';
 import { FileOperationError } from './document-session';
 import type { ExportOptions } from './file-types';
@@ -19,13 +15,12 @@ import type {
   ImageSizeSettings,
 } from './image-options';
 import { DEFAULT_CANVAS_SIZE_SETTINGS, DEFAULT_IMAGE_SIZE_SETTINGS } from './image-options';
-import { LayerRotation } from './layer-rotation';
 
 export type FileCommand =
   'new' | 'open' | 'import' | 'save' | 'save-as' | 'export' | 'close' | 'demo';
 
 /** Image menu items that open a dialog. */
-export type ImageDialog = 'image-size' | 'canvas-size' | 'rotate-layer';
+export type ImageDialog = 'image-size' | 'canvas-size';
 
 /** The modal dialog currently shown, if any. */
 export type Modal =
@@ -33,7 +28,6 @@ export type Modal =
   | { readonly kind: 'export' }
   | { readonly kind: 'image-size' }
   | { readonly kind: 'canvas-size' }
-  | { readonly kind: 'rotate-layer'; readonly target: RotateTarget }
   | { readonly kind: 'fill' }
   | { readonly kind: 'duplicate-layer'; readonly layerName: string }
   | { readonly kind: 'delete-layer'; readonly layerName: string }
@@ -58,13 +52,8 @@ export class AppController {
   private lastImageSize: ImageSizeSettings = DEFAULT_IMAGE_SIZE_SETTINGS;
   private lastCanvasSize: CanvasSizeSettings = DEFAULT_CANVAS_SIZE_SETTINGS;
   private lastFill: FillSettings = DEFAULT_FILL_SETTINGS;
-  /** Rotate Layer's preview while its dialog is open. */
-  private rotation: LayerRotation | null = null;
 
-  constructor(
-    readonly session: DocumentSession,
-    private readonly clock: FrameClock = browserClock,
-  ) {}
+  constructor(readonly session: DocumentSession) {}
 
   get modal(): Modal | null {
     return this.currentModal;
@@ -206,28 +195,10 @@ export class AppController {
     resolve(discard);
   }
 
-  /**
-   * Opens one of the Image menu's dialogs, unless blocked. Rotate Layer only opens when
-   * there's something to turn (see `rotateLayerTarget`).
-   */
+  /** Opens one of the Image menu's dialogs, unless blocked. */
   openDialog(dialog: ImageDialog): void {
     if (this.blocked) return;
-    switch (dialog) {
-      case 'image-size':
-      case 'canvas-size':
-        this.show({ kind: dialog });
-        break;
-      case 'rotate-layer': {
-        const { editor } = this.session;
-        const target = rotateLayerTarget(editor);
-        if (!target) return;
-        this.rotation = new LayerRotation(editor, this.clock);
-        this.show({ kind: 'rotate-layer', target });
-        break;
-      }
-      default:
-        assertNever(dialog);
-    }
+    this.show({ kind: dialog });
   }
 
   /** Confirms Image Size: resamples the document, committing a floating selection first. */
@@ -246,25 +217,6 @@ export class AppController {
     this.lastCanvasSize = { relative };
     this.show(null);
     this.edit((doc) => canvasSizeCommand(doc, width, height, horizontal, vertical));
-  }
-
-  /** Previews Rotate Layer at `degrees` clockwise; see `LayerRotation`. */
-  previewRotation(degrees: number): void {
-    if (this.currentModal?.kind === 'rotate-layer') this.rotation?.preview(degrees);
-  }
-
-  /** Confirms Rotate Layer at `degrees` clockwise. */
-  rotateLayer(degrees: number): void {
-    const rotation = this.rotation;
-    if (this.currentModal?.kind !== 'rotate-layer' || !rotation) return;
-    this.rotation = null;
-    this.show(null);
-    try {
-      rotation.preview(degrees);
-      rotation.finish();
-    } catch (error) {
-      this.showError(error);
-    }
   }
 
   /** Opens the Fill dialog, unless blocked or the active layer is hidden. */
@@ -343,8 +295,6 @@ export class AppController {
       this.answerDiscard(false);
       return;
     }
-    this.rotation?.cancel();
-    this.rotation = null;
     this.show(null);
   }
 
@@ -365,8 +315,12 @@ export class AppController {
     }
   }
 
-  /** Resolves to true if there is nothing to lose or the user agrees to discard it. */
+  /**
+   * Resolves to true if there is nothing to lose or the user agrees to discard it. A
+   * transform in progress is applied first, so that it counts as a change to lose.
+   */
   private confirmDiscard(): Promise<boolean> {
+    this.session.editor.applyPending();
     if (!this.session.isDirty) return Promise.resolve(true);
     return new Promise((resolve) => {
       this.resolveConfirm = resolve;

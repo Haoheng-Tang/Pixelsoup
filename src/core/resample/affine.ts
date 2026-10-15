@@ -85,11 +85,19 @@ export function transformedBounds(m: Affine, area: Rect): Rect {
 /**
  * `m` followed by the smallest shift that puts the top-left of `area`'s transformed bounds
  * on a pixel corner. A quarter turn of a layer about its centre then lands every pixel
- * exactly on a pixel, whatever its size.
+ * exactly on a pixel, whatever its size. A shift of half a pixel moves the bounds further
+ * from `area`'s own top-left, so that turning them back brings them back where they were.
  */
 export function alignToPixels(m: Affine, area: Rect): Affine {
   const { minX, minY } = cornerExtent(m, area);
-  return multiply(translation(Math.round(minX) - minX, Math.round(minY) - minY), m);
+  const x = area.x + roundHalfAway(minX - area.x);
+  const y = area.y + roundHalfAway(minY - area.y);
+  return multiply(translation(x - minX, y - minY), m);
+}
+
+/** `value` rounded to the nearest whole number, halves away from zero. */
+function roundHalfAway(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value));
 }
 
 function cornerExtent(m: Affine, area: Rect) {

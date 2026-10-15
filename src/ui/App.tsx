@@ -10,6 +10,7 @@ import { ToolOptionsBar } from './panels/ToolOptionsBar';
 import { Toolbar } from './panels/Toolbar';
 import type { AppController } from './session/app-controller';
 import type { ToolManager } from './tools/tool-manager';
+import type { FreeTransform } from './transform/free-transform';
 import { useBrushShortcuts } from './use-brush-shortcuts';
 import { useColorShortcuts } from './use-color-shortcuts';
 import { useDocumentWindow } from './use-document-window';
@@ -21,6 +22,7 @@ import { useLayerShortcuts } from './use-layer-shortcuts';
 import { useRevision } from './use-revision';
 import { useSelectionShortcuts } from './use-selection-shortcuts';
 import { useToolShortcuts } from './use-tool-shortcuts';
+import { useTransformShortcuts } from './use-transform-shortcuts';
 import { useViewShortcuts } from './use-view-shortcuts';
 import { StatusBar } from './viewport/StatusBar';
 import { Viewport } from './viewport/Viewport';
@@ -32,11 +34,13 @@ interface AppProps {
   controller: AppController;
   clipboard: PixelClipboard;
   tools: ToolManager;
+  freeTransform: FreeTransform;
   colors: Colors;
   view: ViewOptions;
 }
 
-export function App({ editor, controller, clipboard, tools, colors, view }: AppProps) {
+export function App(props: AppProps) {
+  const { editor, controller, clipboard, tools, freeTransform, colors, view } = props;
   const [viewport, setViewport] = useState<ViewportController | null>(null);
   const viewArea = useCallback((): Rect | null => viewport?.visibleArea() ?? null, [viewport]);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -53,6 +57,7 @@ export function App({ editor, controller, clipboard, tools, colors, view }: AppP
   useLayerShortcuts(editor, controller);
   useViewShortcuts(view, controller);
   useToolShortcuts(tools, controller);
+  useTransformShortcuts(freeTransform, controller);
   useColorShortcuts(colors, controller);
   useBrushShortcuts(tools, controller);
   useFileShortcuts(controller);
@@ -65,6 +70,7 @@ export function App({ editor, controller, clipboard, tools, colors, view }: AppP
         editor={editor}
         controller={controller}
         tools={tools}
+        freeTransform={freeTransform}
         colors={colors}
         view={view}
         viewport={viewport}
@@ -91,6 +97,7 @@ export function App({ editor, controller, clipboard, tools, colors, view }: AppP
           editor={editor}
           controller={controller}
           tools={tools}
+          freeTransform={freeTransform}
           viewport={viewport}
           onClose={closeMenu}
         />

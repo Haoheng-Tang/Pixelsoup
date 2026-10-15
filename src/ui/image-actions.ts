@@ -1,5 +1,5 @@
 import type { Editor, ImageDocument, Orientation, ResizeCanvasCommand } from '../core';
-import { OrientCanvasCommand, cropCommand, intersectRects, rasterBounds } from '../core';
+import { OrientCanvasCommand, cropCommand } from '../core';
 
 /** Image menu items that act straight away, without a dialog. */
 export type ImageAction = 'crop-to-selection' | Orientation;
@@ -26,22 +26,4 @@ export function runImageAction(editor: Editor, action: ImageAction): void {
 function cropToSelection(doc: ImageDocument): ResizeCanvasCommand | null {
   const bounds = doc.selection?.bounds();
   return bounds ? cropCommand(doc, bounds, { label: 'Crop to Selection' }) : null;
-}
-
-/** What Rotate Layer turns: the whole active layer, or just the selected pixels. */
-export type RotateTarget = 'layer' | 'selection';
-
-/**
- * What Rotate Layer would turn now: a floating selection, or the active layer's selected
- * pixels (lifted into a floating selection first), or with nothing selected the whole
- * active layer. Null when there's nothing to turn: no active layer, a hidden one, or a
- * selection that misses it, as for the Move tool.
- */
-export function rotateLayerTarget(editor: Editor): RotateTarget | null {
-  if (editor.floating) return 'selection';
-  const layer = editor.activeLayer;
-  if (!layer?.visible) return null;
-  const selected = editor.document.selection?.bounds();
-  if (!selected) return 'layer';
-  return intersectRects(selected, rasterBounds(layer)) ? 'selection' : null;
 }

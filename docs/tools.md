@@ -1,14 +1,15 @@
 # Tools, selections and painting
 
 How editing tools plug into the viewport and the toolbar, how selections work, how the painting
-tools paint, how Fill, Clear and the Paint Bucket fill, the clipboard, the canvas's context menu
-and the Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
-`src/core/commands/stroke-commands.ts` (the stroke engine), `src/core/paint/flood-region.ts`
-and `src/core/commands/fill-commands.ts` (flood regions, Fill and Clear), `src/ui/tools`
-(tools), `src/ui/edit-actions.ts` and `src/ui/use-edit-shortcuts.ts` (the Edit menu's actions
-and shortcuts), `src/ui/clipboard` (Cut, Copy, Paste), `src/ui/canvas-menu.ts` and
-`src/ui/panels` (`ContextMenu`, `MenuList`, and `ToolPicker` with `tool-groups.ts`),
-`src/ui/color` (colours) and `src/ui/viewport` (input routing and drawing).
+tools paint, how Fill, Clear and the Paint Bucket fill, the clipboard, the canvas's context
+menu, the Crop tool and Free Transform's handles. The code lives in `src/core/selection.ts`
+(masks), `src/core/paint` and `src/core/commands/stroke-commands.ts` (the stroke engine),
+`src/core/paint/flood-region.ts` and `src/core/commands/fill-commands.ts` (flood regions, Fill
+and Clear), `src/ui/tools` (tools), `src/ui/edit-actions.ts` and `src/ui/use-edit-shortcuts.ts`
+(the Edit menu's actions and shortcuts), `src/ui/clipboard` (Cut, Copy, Paste),
+`src/ui/canvas-menu.ts` and `src/ui/panels` (`ContextMenu`, `MenuList`, and `ToolPicker` with
+`tool-groups.ts`), `src/ui/color` (colours), `src/ui/transform` (Free Transform) and
+`src/ui/viewport` (input routing and drawing).
 
 ## Selections (core)
 
@@ -60,14 +61,20 @@ and shortcuts), `src/ui/clipboard` (Cut, Copy, Paste), `src/ui/canvas-menu.ts` a
 | `doubleClick?(e)`               | a primary-button double-click, outside any gesture (the Crop tool crops)                                          |
 | `keyDown/keyUp(e)`              | return true if the key was used, so the viewport suppresses the browser's default action                          |
 | `stepBrush?(property, dir)`     | painting tools: `[` and `]` step the brush size down and up, with Shift its hardness                              |
-| `contextMenu?()`                | the tool's own sections for the canvas's context menu, shown first (none yet)                                     |
+| `contextMenu?()`                | its own sections for the canvas's context menu, shown first (no tool has any yet)                                 |
+
+The members other than `id`, `name`, `shortcut` and `stepBrush` make up `ToolInput`, which a
+`ToolSession` implements too, with a `name` of its own: something that takes over the canvas's
+input from the active tool for a while, such as Free Transform.
 
 - **Overlays**: a `ShapeOverlay` (`rect` or `ellipse`) previews a marquee; `hidesSelection`
   hides the selection's outline meanwhile. A `LassoOverlay` (`lasso`) is a lasso being drawn:
   its points, the rubber band's end (`next`) and whether a click would close it (`closing`),
   with `hidesSelection` too. A `BrushOverlay` (`brush`, with a centre and a
   diameter) is a painting tool's outline. A `CropOverlay` (`crop`, with the box and whether to
-  show its grid) is the Crop tool's box.
+  show its grid) is the Crop tool's box. A `TransformOverlay` (`transform`) is Free
+  Transform's preview: the layer's pixels as they were, the affine, its opacity and
+  interpolation, and the box's corners and pivot.
 - **Pointer events** from a pen carry its `pressure` (0–1; mice and touch report none). A move
   also lists every position the browser coalesced into it since the previous event
   (`samples`, oldest first, ending at `x`, `y`), so fast strokes keep their shape.
@@ -83,6 +90,12 @@ tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click
 - `ToolManager` holds the tools and the active one; `createToolManager` (in `create-tools.tsx`)
   builds the app's set in toolbar order. Activating a tool cancels and deactivates the old one,
   and is refused while a pointer gesture is in progress.
+- **Sessions**: `startSession(session)` hands the canvas's input to a `ToolSession` until
+  `endSession`, leaving the active tool as it is. Meanwhile the session's cursor, overlay,
+  keys and context menu replace the tool's, the options bar shows its name and options, and
+  `[` and `]` don't reach the tool. It's refused during a pointer gesture or while another
+  session runs. Activating a tool applies the editor's pending edit first, which ends Free
+  Transform's session.
 - Shortcuts (`useToolShortcuts`): tools that share a key form a group. The key selects the
   group's last-used tool and Shift+key cycles through it. They're ignored with Ctrl, Cmd or Alt,
   while typing and while a dialog is open. `TOOL_KEYS` has M marquee, L lasso, W magic wand,
@@ -131,11 +144,13 @@ Right-clicking the document opens the canvas's context menu (`CanvasMenu`, built
 
 - **Contents**: with a selection, Deselect and Select Inverse, then Layer via Copy and Layer
   via Cut; without one, Duplicate Layer… and Delete Layer, which ask first
-  ([layers.md](layers.md#duplicate-and-delete-from-the-canvas)). Items run the same actions as
-  the menu bar (`runSelectCommand`, `runLayerAction`), so they enable, commit a floating
-  selection and name their undo steps alike. All are disabled while a dialog is open or a
-  file operation runs. A tool can add sections of its own (`Tool.contextMenu`, e.g. Fill… or
-  Free Transform later), which go first.
+  ([layers.md](layers.md#duplicate-and-delete-from-the-canvas)); then Free Transform, either
+  way. Items run the same actions as the menu bar (`runSelectCommand`, `runLayerAction`,
+  `FreeTransform.start`), so they enable, commit a floating selection and name their undo
+  steps alike. All are disabled while a dialog is open or a file operation runs. A tool can
+  add sections of its own (`Tool.contextMenu`, e.g. Fill… later), which go first. While a
+  session runs, its own sections are the whole menu: for Free Transform, its turns and flips,
+  then Apply and Cancel.
 - **Where**: the browser's own menu never shows over the viewport. The menu opens only over the
   document, not the void around it, and not during a tool's gesture, a pan, or while a dialog
   is open.
@@ -233,9 +248,14 @@ and 625 while the brush hovered. With WebGL that's 50, 125 and 125 ms (50 to 115
 animating and 80 to 165 panning, from 25 % to 400 %).
 
 The status bar shows the document pixel under the pointer and the size of the tool's preview (a
-marquee while dragging, a lasso's bounds, or the crop box), else of the selection bounds. The
-viewport reports both and `StatusBar` writes them straight into the DOM, as it does the tools'
-`showMessage` text.
+marquee while dragging, a lasso's bounds, the crop box, or the bounds of a layer under Free
+Transform), else of the selection bounds. The viewport reports both and `StatusBar` writes
+them straight into the DOM, as it does the tools' `showMessage` text.
+
+Free Transform's box is drawn in the brush outline's colours, with 7 CSS px square handles at
+its corners and at the middles of edges at least three handles long, and a 9 CSS px ring at
+the pivot; its edges sit on the device pixel grid while it's upright. Under it, the layer's
+preview takes the layer's place in the composite: [transform.md](transform.md#free-transform).
 
 ## Marquee tools
 
@@ -369,6 +389,46 @@ up with photo-sized documents (about 35 ms a frame to move a whole 1920 × 1200 
 a selection in it), but a whole 6400 × 4000 layer moves at about 3 frames a second. A faster
 compositor (an opaque fast path, or a GPU one behind the existing seam) would fix that without
 changing the tool.
+
+## Free Transform
+
+Edit → Free Transform (Ctrl/Cmd+Alt+T), Edit → Transform → Scale or Rotate, or Free Transform
+in the canvas's context menu starts a session on the active layer, lifting the selected pixels
+first if there's a selection. It isn't a tool: it takes over the canvas's input from the
+active tool until it's applied or cancelled. How it previews, applies and cancels, and its
+frame times: [transform.md](transform.md#free-transform).
+
+- **The box** outlines where the layer goes, with square handles at its corners and the
+  middles of its edges, and a ring at the pivot, the layer's centre. Corners scale both axes
+  and edges one, about the opposite corner or edge; dragging past it flips the layer, which
+  never gets thinner than a pixel. As with the crop box, a press within 6 CSS px of an edge
+  (`HANDLE_REACH`, at most a third of the box inwards) takes it, or near a corner both edges;
+  inside that, a drag moves the layer, by whole pixels. Free Transform turns the layer about
+  its pivot from up to 12 CSS px further out round a corner (`ROTATE_REACH`), where the cursor
+  becomes a curved double arrow. Scale has no such zone; Rotate turns from the handles and from
+  anywhere outside the box. A drag takes hold after 3 CSS px of travel.
+- **Modifiers**: Shift keeps the proportions on a corner drag (with the lock on, it frees
+  them), snaps a turn to 15° steps and keeps a move to one axis. Alt scales about the pivot
+  rather than the opposite handle. Pressing or releasing either mid-drag updates the box
+  straight away.
+- **Keys**: the arrows nudge the layer by 1 px, 10 with Shift. Enter, a double-click inside
+  the box or ✓ applies; Escape or ✗ cancels. Escape mid-drag only puts the box back where it
+  was at the press.
+- **Options bar**: X and Y (where the pivot goes, in pixels), W and H (in % or px; negative
+  values flip), a link that keeps the proportions, Angle (degrees clockwise), Interpolation
+  (Bilinear or Nearest neighbour), ✓ and ✗. The fields follow the handles, and typing in one
+  previews straight away. Values out of range (a size under 1 px or over 100000, a position
+  past ±100000) are refused, as in other number fields. The interpolation, the lock and the
+  unit are kept until the page is reloaded.
+- **The context menu** while it runs: Flip Horizontal and Vertical; Rotate 180°, 90°
+  Clockwise and 90° Anticlockwise, composed into the transform; Apply and Cancel.
+- **What applies it first**: anything else that would change the document. That's every
+  command (a menu item, a change in the Layer panel, a selection change, a tool's edit),
+  making another layer active, choosing a tool, Save, Save As and Export (after the file
+  picker), and New, Open, Close, the demo and a dropped file (before asking whether to discard
+  changes). Undo cancels it instead. It's the floating selection's rule
+  ([layers.md](layers.md#floating-selections)) one level up: a pending transform is applied
+  before a floating selection is committed.
 
 ## Colours and the eyedropper
 
@@ -696,3 +756,8 @@ The status bar shows the box's size, and the grid shows while a drag adjusts the
    work per animation frame, `FakeClock` (`fake-clock.ts`), as `marquee-tool.test.ts`,
    `lasso-tool.test.ts`, `move-tool.test.ts`, `paint-tool.test.ts` and `crop-tool.test.ts` do.
    `tool-groups.test.ts` covers what the toolbar's buttons and flyouts show.
+
+An edit that previews without changing the document until it's applied, as Free Transform
+does, is a `ToolSession` rather than a tool: start it with `ToolManager.startSession` and make
+it the editor's pending edit (`Editor.beginPending`), so that anything else applies it first
+and undo cancels it. `transform-session.test.ts` drives one through the `ToolManager`.

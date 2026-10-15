@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, Editor } from '../../core';
-import type { Tool, ToolContext, ToolKey, ToolKeyEvent, ToolPointerEvent } from './tool';
+import type {
+  BrushProperty,
+  Tool,
+  ToolContext,
+  ToolKey,
+  ToolKeyEvent,
+  ToolOverlay,
+  ToolPointerEvent,
+  ToolSession,
+} from './tool';
 import { ToolManager } from './tool-manager';
 
 /** A tool that records every call it receives. */
@@ -44,6 +53,40 @@ class FakeTool implements Tool {
   keyUp(e: ToolKeyEvent): boolean {
     this.calls.push(`keyup ${e.key}`);
     return this.handlesKeys;
+  }
+  stepBrush(property: BrushProperty, direction: -1 | 1): void {
+    this.calls.push(`step ${property} ${direction}`);
+  }
+}
+
+/** A session that records every call it receives. */
+class FakeSession implements ToolSession {
+  readonly name = 'Session';
+  readonly cursor = 'move';
+  readonly overlay: ToolOverlay = { shape: 'rect', rect: { x: 0, y: 0, width: 1, height: 1 } };
+  readonly calls: string[] = [];
+
+  activate(): void {
+    this.calls.push('activate');
+  }
+  deactivate(): void {
+    this.calls.push('deactivate');
+  }
+  pointerDown(e: ToolPointerEvent): void {
+    this.calls.push(`down ${e.x},${e.y}`);
+  }
+  pointerUp(e: ToolPointerEvent): void {
+    this.calls.push(`up ${e.x},${e.y}`);
+  }
+  cancel(): void {
+    this.calls.push('cancel');
+  }
+  keyDown(e: ToolKeyEvent): boolean {
+    this.calls.push(`keydown ${e.key}`);
+    return true;
+  }
+  contextMenu() {
+    return [[{ command: 'apply', label: 'Apply', run: () => undefined }]];
   }
 }
 
@@ -219,5 +262,116 @@ describe('ToolManager', () => {
     expect(rect.calls).toEqual(['activate', 'cancel', 'deactivate']);
     editor.replaceDocument(createDocument(5, 5));
     expect(rect.calls).toHaveLength(3);
+  });
+
+  describe('sessions', () => {
+    it('hand the input to the session until it ends', () => {
+      const { manager, rect } = setup();
+      const session = new FakeSession();
+      let changes = 0;
+      manager.subscribe(() => changes++);
+      expect(manager.startSession(session)).toBe(true);
+      expect(rect.calls).toEqual(['activate', 'cancel']);
+      expect(session.calls).toEqual(['activate']);
+      expect(changes).toBe(1);
+      expect(manager.session).toBe(session);
+      expect(manager.options).toBe(session);
+      expect(manager.activeTool).toBe(rect);
+      expect(manager.cursor).toBe('move');
+      expect(manager.overlay).toBe(session.overlay);
+
+      manager.pointerDown(pointer(1, 2));
+      manager.pointerUp(pointer(3, 4));
+      expect(manager.keyDown(key('Enter'))).toBe(true);
+      expect(manager.contextMenu()[0]?.[0]?.label).toBe('Apply');
+      expect(session.calls).toEqual(['activate', 'down 1,2', 'up 3,4', 'keydown Enter']);
+      expect(rect.calls).toEqual(['activate', 'cancel']);
+
+      manager.endSession(session);
+      expect(session.calls.at(-1)).toBe('deactivate');
+      expect(changes).toBe(2);
+      expect(manager.session).toBeNull();
+      expect(manager.options).toBe(rect);
+      expect(manager.cursor).toBe('crosshair');
+      manager.pointerDown(pointer(5, 5));
+      expect(rect.calls.at(-1)).toBe('down 5,5');
+    });
+
+    it('are refused during a gesture or while another runs', () => {
+      const { manager } = setup();
+      manager.pointerDown(pointer(0, 0));
+      expect(manager.startSession(new FakeSession())).toBe(false);
+      manager.pointerUp(pointer(0, 0));
+      const first = new FakeSession();
+      expect(manager.startSession(first)).toBe(true);
+      expect(manager.startSession(new FakeSession())).toBe(false);
+      expect(manager.session).toBe(first);
+    });
+
+    it('cancel a gesture in progress when they end', () => {
+      const { manager } = setup();
+      const session = new FakeSession();
+      manager.startSession(session);
+      manager.pointerDown(pointer(0, 0));
+      manager.endSession(session);
+      expect(session.calls).toEqual(['activate', 'down 0,0', 'cancel', 'deactivate']);
+      expect(manager.isPointerDown).toBe(false);
+      // Ending a session that has already ended changes nothing.
+      manager.endSession(session);
+      expect(session.calls).toHaveLength(4);
+    });
+
+    it('keep the brush keys from the active tool', () => {
+      const { manager, rect } = setup();
+      expect(manager.stepBrush('size', 1)).toBe(true);
+      manager.startSession(new FakeSession());
+      expect(manager.stepBrush('hardness', 1)).toBe(false);
+      expect(rect.calls.filter((c) => c.startsWith('step'))).toEqual(['step size 1']);
+    });
+
+    it("end when a tool is chosen, which applies the editor's pending edit first", () => {
+      const { manager, editor, rect, brush } = setup();
+      const session = new FakeSession();
+      const applied: string[] = [];
+      const edit = {
+        label: 'Edit',
+        apply: () => {
+          applied.push('apply');
+          manager.endSession(session);
+        },
+        cancel: () => applied.push('cancel'),
+      };
+      editor.beginPending(edit);
+      manager.startSession(session);
+      // Choosing the active tool again applies it too.
+      expect(manager.activate('rect')).toBe(true);
+      expect(applied).toEqual(['apply']);
+      expect(manager.session).toBeNull();
+      expect(manager.activeTool).toBe(rect);
+
+      editor.beginPending(edit);
+      manager.startSession(session);
+      expect(manager.activate('brush')).toBe(true);
+      expect(applied).toEqual(['apply', 'apply']);
+      expect(manager.activeTool).toBe(brush);
+      expect(session.calls.filter((c) => c === 'deactivate')).toHaveLength(2);
+    });
+
+    it('end, even without a pending edit, when a tool is chosen', () => {
+      const { manager } = setup();
+      const session = new FakeSession();
+      manager.startSession(session);
+      manager.activate('brush');
+      expect(manager.session).toBeNull();
+      expect(session.calls.at(-1)).toBe('deactivate');
+    });
+
+    it('end when the manager is disposed', () => {
+      const { manager } = setup();
+      const session = new FakeSession();
+      manager.startSession(session);
+      manager.dispose();
+      expect(session.calls).toEqual(['activate', 'cancel', 'deactivate']);
+    });
   });
 });
