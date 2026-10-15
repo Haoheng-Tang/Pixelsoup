@@ -1,4 +1,5 @@
 import type { CpuCompositor, ImageDocument, LayerId, Rect } from '../../core';
+import { CanvasPyramid } from './canvas-pyramid';
 import { SplitCompositor } from './split-compositor';
 
 /**
@@ -16,9 +17,10 @@ export interface CompositeRenderer {
   readonly image: CanvasImageSource;
   /**
    * The visible layers above the suppressed one, composited onto transparency, to draw
-   * over its preview; null while no layer is suppressed or none is above it.
+   * over its preview, with smaller copies to draw it shrunk from; null while no layer is
+   * suppressed or none is above it.
    */
-  readonly above: CanvasImageSource | null;
+  readonly above: CanvasPyramid | null;
   /** The layer left out of the composite, or null. */
   readonly suppressed: LayerId | null;
   /** Brings `image` and `above` up to date for the given dirty regions (all when omitted). */
@@ -61,6 +63,8 @@ export class CpuCompositeRenderer implements CompositeRenderer {
   private readonly split: SplitCompositor;
   private readonly main: OutputCanvas;
   private aboveCanvas: OutputCanvas | null = null;
+  /** `aboveCanvas`'s pyramid, made when first asked for, and dropped when it changes. */
+  private abovePyramid: CanvasPyramid | null = null;
 
   constructor(
     readonly width: number,
@@ -74,8 +78,10 @@ export class CpuCompositeRenderer implements CompositeRenderer {
     return this.main.canvas;
   }
 
-  get above(): HTMLCanvasElement | null {
-    return this.aboveCanvas?.canvas ?? null;
+  get above(): CanvasPyramid | null {
+    if (!this.aboveCanvas) return null;
+    this.abovePyramid ??= new CanvasPyramid(this.aboveCanvas.canvas, this.width, this.height);
+    return this.abovePyramid;
   }
 
   get suppressed(): LayerId | null {
@@ -87,16 +93,22 @@ export class CpuCompositeRenderer implements CompositeRenderer {
     upload(this.main, updated.below);
     const above = this.split.above;
     if (!above) {
-      this.aboveCanvas = null;
+      this.setAbove(null);
       return;
     }
-    if (this.aboveCanvas?.compositor !== above) this.aboveCanvas = outputCanvas(above);
-    upload(this.aboveCanvas, updated.above);
+    if (this.aboveCanvas?.compositor !== above) this.setAbove(outputCanvas(above));
+    else if (updated.above.length > 0) this.abovePyramid = null;
+    if (this.aboveCanvas) upload(this.aboveCanvas, updated.above);
   }
 
   suppress(doc: ImageDocument, layerId: LayerId | null): Rect[] {
     const areas = this.split.suppress(doc, layerId);
-    if (!this.split.above) this.aboveCanvas = null;
+    if (!this.split.above) this.setAbove(null);
     return areas;
+  }
+
+  private setAbove(canvas: OutputCanvas | null): void {
+    this.aboveCanvas = canvas;
+    this.abovePyramid = null;
   }
 }

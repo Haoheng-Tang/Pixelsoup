@@ -1,4 +1,5 @@
 import type { PixelBuffer, Point, Selection } from '../../core';
+import { CanvasPyramid, drawScale } from '../render/canvas-pyramid';
 import type {
   BrushOverlay,
   CropOverlay,
@@ -33,7 +34,7 @@ export interface OverlayFrame {
    * The layers above the one a transform previews, which the composite leaves out with
    * it: drawn over the preview, at 1 image pixel = 1 document pixel.
    */
-  readonly above: CanvasImageSource | null;
+  readonly above: CanvasPyramid | null;
   /** Null when the document isn't visible. */
   readonly placement: DocumentPlacement | null;
   readonly dpr: number;
@@ -194,7 +195,7 @@ export class SelectionOverlay {
   private checker: CanvasPattern | string | null = null;
   private checkerDpr = 0;
   /** The pixels of a layer under Free Transform, on a canvas to draw them from. */
-  private transformSource: { pixels: PixelBuffer; canvas: HTMLCanvasElement } | null = null;
+  private transformSource: { pixels: PixelBuffer; pyramid: CanvasPyramid } | null = null;
   constructor(private readonly container: HTMLElement) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-overlay';
@@ -583,11 +584,13 @@ export class SelectionOverlay {
   /**
    * A layer under Free Transform as applying would leave it: its own pixels drawn through
    * the transform with its opacity, then the layers above it, which the composite leaves
-   * out with it. Only what lands on the canvas shows, as in the composite.
+   * out with it. Only what lands on the canvas shows, as in the composite. Shrunk, both
+   * are drawn from their pyramids (see `CanvasPyramid`): mipmapped smoothing, as the
+   * composite is drawn with, would cost tens of milliseconds a frame for large layers.
    */
   private drawTransformed(
     transform: TransformOverlay,
-    above: CanvasImageSource | null,
+    above: CanvasPyramid | null,
     placement: DocumentPlacement,
     zoom: number,
   ): void {
@@ -597,35 +600,42 @@ export class SelectionOverlay {
     ctx.beginPath();
     ctx.rect(placement.x, placement.y, placement.width, placement.height);
     ctx.clip();
-    ctx.setTransform(placement.scaleX, 0, 0, placement.scaleY, placement.x, placement.y);
+    const { scaleX, scaleY } = placement;
+    ctx.setTransform(scaleX, 0, 0, scaleY, placement.x, placement.y);
     const [a, b, c, d, e, f] = transform.affine;
     ctx.transform(a, b, c, d, e, f);
     ctx.globalAlpha = transform.opacity;
     // Nearest neighbour shows hard pixels, except zoomed out, where the composite is
     // smoothed too.
-    ctx.imageSmoothingEnabled = transform.interpolation !== 'nearest' || zoom < 1;
-    ctx.imageSmoothingQuality = 'medium';
-    ctx.drawImage(this.transformCanvas(transform.pixels), transform.x, transform.y);
+    const smooth = transform.interpolation !== 'nearest' || zoom < 1;
+    ctx.imageSmoothingEnabled = smooth;
+    ctx.imageSmoothingQuality = 'low';
+    const { pixels } = transform;
+    const source = this.transformPyramid(pixels);
+    const scale = smooth ? drawScale(scaleX * a, scaleY * b, scaleX * c, scaleY * d) : 1;
+    ctx.drawImage(source.at(scale), transform.x, transform.y, pixels.width, pixels.height);
     if (above) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.imageSmoothingEnabled = zoom < 1;
-      ctx.drawImage(above, placement.x, placement.y, placement.width, placement.height);
+      const image = above.at(Math.min(scaleX, scaleY));
+      ctx.drawImage(image, placement.x, placement.y, placement.width, placement.height);
     }
     ctx.restore();
   }
 
-  /** `pixels` on a canvas, kept while the same pixels are being transformed. */
-  private transformCanvas(pixels: PixelBuffer): HTMLCanvasElement {
-    if (this.transformSource?.pixels === pixels) return this.transformSource.canvas;
+  /** `pixels` on a canvas, with its pyramid, kept while the same pixels are transformed. */
+  private transformPyramid(pixels: PixelBuffer): CanvasPyramid {
+    if (this.transformSource?.pixels === pixels) return this.transformSource.pyramid;
     const canvas = document.createElement('canvas');
     canvas.width = pixels.width;
     canvas.height = pixels.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D is not available');
     ctx.putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0);
-    this.transformSource = { pixels, canvas };
-    return canvas;
+    const pyramid = new CanvasPyramid(canvas, pixels.width, pixels.height);
+    this.transformSource = { pixels, pyramid };
+    return pyramid;
   }
 
   /**
