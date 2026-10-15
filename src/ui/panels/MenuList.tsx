@@ -108,7 +108,7 @@ export function MenuList<T extends string>({
             <button
               key={item.command}
               type="button"
-              role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+              role={menuItemRole(item)}
               aria-checked={item.checked}
               tabIndex={-1}
               className="menu-item"
@@ -122,6 +122,11 @@ export function MenuList<T extends string>({
                 {item.checked !== undefined && (
                   <span className="menu-check" aria-hidden="true">
                     {item.checked ? '✓' : ''}
+                  </span>
+                )}
+                {item.icon !== undefined && (
+                  <span className="menu-icon" aria-hidden="true">
+                    {item.icon}
                   </span>
                 )}
                 {item.label}
@@ -142,8 +147,15 @@ export function MenuList<T extends string>({
 /** The menu's items in order. */
 function menuItems(menu: HTMLElement | null): HTMLElement[] {
   return [
-    ...(menu?.querySelectorAll<HTMLElement>('[role=menuitem], [role=menuitemcheckbox]') ?? []),
+    ...(menu?.querySelectorAll<HTMLElement>(
+      '[role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]',
+    ) ?? []),
   ];
+}
+
+function menuItemRole(item: MenuEntry<string>): string {
+  if (item.checked === undefined) return 'menuitem';
+  return item.radio ? 'menuitemradio' : 'menuitemcheckbox';
 }
 
 /**

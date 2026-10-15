@@ -1,9 +1,12 @@
+import type { ReactNode } from 'react';
 import { assertNever } from '../../core';
 
 /** An item in a menu: the menu bar's drop-downs and the canvas's context menu. */
 export interface MenuEntry<T extends string> {
   readonly command: T;
   readonly label: string;
+  /** Drawn before the label, 16 CSS pixels square: a tool's icon in the toolbar's flyouts. */
+  readonly icon?: ReactNode;
   /** Shortcut without the platform modifier, e.g. 'Shift+S' for Ctrl/Cmd+Shift+S. */
   readonly shortcut?: string;
   /** The shortcut takes no Ctrl/Cmd: 'Delete' is the Delete key alone. */
@@ -11,6 +14,8 @@ export interface MenuEntry<T extends string> {
   readonly disabled?: boolean;
   /** Makes the item a checkbox (`menuitemcheckbox`), ticked when true. */
   readonly checked?: boolean;
+  /** With `checked`, the item is one of a set of choices (`menuitemradio`). */
+  readonly radio?: boolean;
 }
 
 /** Groups of items, drawn with separators between them. */

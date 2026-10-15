@@ -117,6 +117,36 @@ describe('ToolManager', () => {
     expect(manager.activeTool).toBe(ellipse);
   });
 
+  it('groups the tools by shortcut key, in toolbar order', () => {
+    const editor = new Editor(createDocument(10, 10));
+    const [rect, brush, ellipse] = [
+      new FakeTool('rect', 'M'),
+      new FakeTool('brush', 'B'),
+      new FakeTool('ellipse', 'M'),
+    ];
+    const manager = new ToolManager([rect, brush, ellipse], editor);
+    expect(manager.groups).toEqual([
+      { key: 'M', tools: [rect, ellipse] },
+      { key: 'B', tools: [brush] },
+    ]);
+  });
+
+  it("reports each group's last-used tool, which its key selects", () => {
+    const { manager, rect, ellipse, brush } = setup();
+    const [marquees, brushes] = manager.groups;
+    if (!marquees || !brushes) throw new Error('expected two groups');
+    expect(manager.lastUsed(marquees)).toBe(rect);
+    expect(manager.lastUsed(brushes)).toBe(brush);
+    manager.activate('ellipse');
+    expect(manager.lastUsed(marquees)).toBe(ellipse);
+    manager.handleShortcut('b', false);
+    expect(manager.lastUsed(marquees)).toBe(ellipse);
+    manager.handleShortcut('m', false);
+    manager.handleShortcut('m', true);
+    expect(manager.lastUsed(marquees)).toBe(rect);
+    expect(manager.activeTool).toBe(rect);
+  });
+
   it('ignores keys of tools that do not exist yet', () => {
     const { manager, rect } = setup();
     expect(manager.handleShortcut('v', false)).toBe(false);

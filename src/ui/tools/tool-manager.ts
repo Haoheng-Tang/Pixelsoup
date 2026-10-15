@@ -10,6 +10,13 @@ import type {
   ToolPointerEvent,
 } from './tool';
 
+/** The tools that share a shortcut key, which the toolbar shows as one button. */
+export interface ToolGroup {
+  readonly key: ToolKey;
+  /** In toolbar order. */
+  readonly tools: readonly [Tool, ...Tool[]];
+}
+
 /**
  * Holds the active tool and routes viewport input to it. Tool switches (buttons or
  * shortcut keys) are ignored while a pointer gesture is in progress; Escape, a cancelled
@@ -17,6 +24,8 @@ import type {
  */
 export class ToolManager {
   readonly tools: readonly Tool[];
+  /** The tools grouped by shortcut key, in toolbar order (each group where its first tool is). */
+  readonly groups: readonly ToolGroup[];
   private active: Tool;
   /** Last tool used in each shortcut group, which the group's key selects. */
   private readonly lastInGroup = new Map<ToolKey, Tool>();
@@ -34,9 +43,13 @@ export class ToolManager {
     if (ids.size !== tools.length) throw new Error('Tool IDs must be unique');
 
     this.tools = tools;
+    const groups = new Map<ToolKey, [Tool, ...Tool[]]>();
     for (const tool of tools) {
-      if (!this.lastInGroup.has(tool.shortcut)) this.lastInGroup.set(tool.shortcut, tool);
+      const group = groups.get(tool.shortcut);
+      if (group) group.push(tool);
+      else groups.set(tool.shortcut, [tool]);
     }
+    this.groups = [...groups].map(([key, members]) => ({ key, tools: members }));
     this.context = {
       editor,
       overlayChanged: () => {
@@ -89,19 +102,27 @@ export class ToolManager {
   }
 
   /**
+   * The tool that `group`'s key selects and its toolbar button shows: the one last used,
+   * at first the group's first tool. The active tool is always the last used of its group.
+   */
+  lastUsed(group: ToolGroup): Tool {
+    return this.lastInGroup.get(group.key) ?? group.tools[0];
+  }
+
+  /**
    * Handles a tool shortcut key (case-insensitive). The key selects the last-used tool of
    * its group; with Shift, while that group is active, it cycles to the group's next
    * tool. Returns true if the key belongs to an existing tool.
    */
   handleShortcut(key: string, shiftKey: boolean): boolean {
     const shortcut = key.toUpperCase();
-    const group = this.tools.filter((tool) => tool.shortcut === shortcut);
-    const first = group[0];
-    if (!first) return false;
-    const current = group.indexOf(this.active);
+    const group = this.groups.find((g) => g.key === shortcut);
+    if (!group) return false;
+    const { tools } = group;
+    const current = tools.indexOf(this.active);
     let next: Tool;
-    if (current < 0) next = this.lastInGroup.get(first.shortcut) ?? first;
-    else if (shiftKey) next = group[(current + 1) % group.length] ?? first;
+    if (current < 0) next = this.lastUsed(group);
+    else if (shiftKey) next = tools[(current + 1) % tools.length] ?? tools[0];
     else next = this.active;
     this.activate(next.id);
     return true;
