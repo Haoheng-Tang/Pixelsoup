@@ -20,7 +20,7 @@ Step 5 of the build order. Pixelsoup now has selections and the tool system ever
 - **Status bar** with the pointer's document position and the selection (or drag) size.
 
 Selection changes are undo steps, as in Photoshop, but don't mark the document unsaved:
-selections aren't stored in `.pixelsoup` files.
+selections aren't stored in `.soup` files.
 
 ## What's included
 
@@ -178,5 +178,5 @@ key events and by hand.
 - **Lasso and magic wand** (step 10); the L and W keys are reserved.
 - **Selection refinements**: feather, grow/shrink, border, moving or transforming the selection
   outline, fixed-ratio or fixed-size marquees, and an anti-alias toggle for the ellipse.
-- **Saving the selection** in `.pixelsoup` files; the format is unchanged.
+- **Saving the selection** in `.soup` files; the format is unchanged.
 - **Reserved tools in the toolbar**: V, B, L, W, T and C get buttons when their tools exist.

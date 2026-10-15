@@ -1,7 +1,7 @@
 import type { FileType } from '../io/file-store';
 
 export const PIXELSOUP_MIME_TYPE = 'application/x-pixelsoup';
-export const PIXELSOUP_EXTENSION = '.pixelsoup';
+export const PIXELSOUP_EXTENSION = '.soup';
 
 export const PIXELSOUP_FILE_TYPE: FileType = {
   description: 'Pixelsoup document',
@@ -17,7 +17,7 @@ export const IMAGE_FILE_TYPE: FileType = {
 export const OPEN_FILE_TYPES: readonly FileType[] = [
   {
     description: 'Pixelsoup documents and images',
-    accept: { ...PIXELSOUP_FILE_TYPE.accept, ...IMAGE_FILE_TYPE.accept },
+    accept: { [PIXELSOUP_MIME_TYPE]: [PIXELSOUP_EXTENSION], ...IMAGE_FILE_TYPE.accept },
   },
   PIXELSOUP_FILE_TYPE,
   IMAGE_FILE_TYPE,

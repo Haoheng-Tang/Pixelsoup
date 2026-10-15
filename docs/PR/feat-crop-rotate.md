@@ -23,7 +23,7 @@ resampling core that step 12's Free Transform will reuse.
 
 Every operation is one undo step that restores the exact bytes, and each commits a floating
 selection first, except Rotate Layer on the floating selection itself, which turns the pixels
-and the ants together. The `.pixelsoup` format is unchanged.
+and the ants together. The `.soup` format is unchanged.
 
 ## What's included
 

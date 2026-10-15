@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { drawBox, hitCursor, hitTest, moveBox, reshapeBox, resizeBox } from './crop-geometry';
+import {
+  drawBox,
+  fitBox,
+  hitCursor,
+  hitTest,
+  moveBox,
+  reshapeBox,
+  resizeBox,
+} from './crop-geometry';
 import { cropRatio, CropOptions, orientedRatio } from './crop-options';
 
 const box = { x: 10, y: 20, width: 30, height: 30 };
@@ -138,9 +146,28 @@ describe('resizeBox', () => {
   });
 });
 
-describe('moveBox and reshapeBox', () => {
+describe('moveBox, fitBox and reshapeBox', () => {
   it('moves by whole pixels', () => {
     expect(moveBox(box, -12, 3)).toEqual({ x: -2, y: 23, width: 30, height: 30 });
+  });
+
+  it('fits the largest box of a ratio inside another, centred', () => {
+    const outer = { x: 2, y: 3, width: 40, height: 24 };
+    // Square: as tall as the box, (40 − 24) / 2 = 8 in from the left.
+    expect(fitBox(outer, 1)).toEqual({ x: 10, y: 3, width: 24, height: 24 });
+    // 16:9: as wide as the box, 40 × 9 / 16 = 22.5 → 23 tall, half a pixel up.
+    expect(fitBox(outer, 16 / 9)).toEqual({ x: 2, y: 3, width: 40, height: 23 });
+    // 3:4 portrait: 24 × 3 / 4 = 18 wide.
+    expect(fitBox(outer, 0.75)).toEqual({ x: 13, y: 3, width: 18, height: 24 });
+    // Its own ratio gives the box back.
+    expect(fitBox(outer, 40 / 24)).toEqual(outer);
+    // Never less than a pixel.
+    expect(fitBox({ x: 0, y: 0, width: 1, height: 1 }, 100)).toEqual({
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    });
   });
 
   it('keeps the area and centre while changing the shape', () => {

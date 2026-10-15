@@ -92,14 +92,16 @@ export interface BrushOverlay {
 }
 
 /**
- * The Crop tool's box, with handles; everything outside it is dimmed. It may extend past
- * the canvas.
+ * The Crop tool's box, with handles; everything outside it is dimmed, unless it's the
+ * whole canvas. It may extend past the canvas.
  */
 export interface CropOverlay {
   readonly shape: 'crop';
   readonly rect: Rect;
   /** Show a rule-of-thirds grid inside the box (while it's being adjusted). */
   readonly grid: boolean;
+  /** Dim everything outside the box: false while it's the whole canvas. */
+  readonly shade: boolean;
 }
 
 /**

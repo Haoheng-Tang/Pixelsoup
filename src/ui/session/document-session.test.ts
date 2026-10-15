@@ -18,7 +18,7 @@ import { decodePng, encodePng } from '../io/png';
 import type { DocumentSessionDeps } from './document-session';
 import { DocumentSession, FileOperationError, baseName } from './document-session';
 import type { ExportOptions } from './file-types';
-import { IMAGE_FILE_TYPE, OPEN_FILE_TYPES } from './file-types';
+import { IMAGE_FILE_TYPE, OPEN_FILE_TYPES, PIXELSOUP_MIME_TYPE } from './file-types';
 import { MemoryFileStore } from './memory-file-store';
 
 const png: PngCodec = {
@@ -106,7 +106,7 @@ describe('DocumentSession', () => {
     hideBottomLayer(editor);
 
     expect(await session.save()).toBe(true);
-    expect(store.savePickers.map((r) => r.suggestedName)).toEqual(['Untitled-1.pixelsoup']);
+    expect(store.savePickers.map((r) => r.suggestedName)).toEqual(['Untitled-1.soup']);
     expect(session.name).toBe('picked');
     expect(session.isDirty).toBe(false);
     expect(session.savesInPlace).toBe(true);
@@ -117,11 +117,11 @@ describe('DocumentSession', () => {
     expect(store.savePickers).toHaveLength(1);
     expect(session.isDirty).toBe(false);
 
-    store.saveName = 'copy.pixelsoup';
+    store.saveName = 'copy.soup';
     expect(await session.saveAs()).toBe(true);
     expect(store.savePickers).toHaveLength(2);
     expect(session.name).toBe('copy');
-    expect([...store.files.keys()]).toEqual(['picked.pixelsoup', 'copy.pixelsoup']);
+    expect([...store.files.keys()]).toEqual(['picked.soup', 'copy.soup']);
   });
 
   it('writes a file that loads back as the same document', async () => {
@@ -131,7 +131,7 @@ describe('DocumentSession', () => {
     setPixel(layer.pixels, 1, 2, [12, 34, 56, 78]);
     await session.save();
 
-    const bytes = new Uint8Array(await store.file('picked.pixelsoup').arrayBuffer());
+    const bytes = new Uint8Array(await store.file('picked.soup').arrayBuffer());
     const loaded = await deserializeDocument(bytes, png);
     expect(loaded.width).toBe(4);
     expect(loaded.layers).toEqual(editor.document.layers);
@@ -162,11 +162,11 @@ describe('DocumentSession', () => {
     await session.save();
     expect(editor.floating).not.toBeNull();
 
-    store.saveName = 'picked.pixelsoup';
+    store.saveName = 'picked.soup';
     expect(await session.save()).toBe(true);
     expect(editor.floating).toBeNull();
     expect(session.isDirty).toBe(false);
-    const bytes = new Uint8Array(await store.file('picked.pixelsoup').arrayBuffer());
+    const bytes = new Uint8Array(await store.file('picked.soup').arrayBuffer());
     const loaded = await deserializeDocument(bytes, png);
     expect(loaded.layers.map((layer) => layer.name)).toEqual(['Background']);
     const pixels = loaded.layers[0]?.pixels ?? createPixelBuffer(0, 0);
@@ -190,16 +190,16 @@ describe('DocumentSession', () => {
     expect(session.isDirty).toBe(false);
   });
 
-  it('opens a .pixelsoup file and saves back to it', async () => {
+  it('opens a .soup file and saves back to it', async () => {
     const { session, store, editor } = setup();
     session.newDocument({ width: 2, height: 2, background: 'white' });
     hideBottomLayer(editor);
-    store.saveName = 'art.pixelsoup';
+    store.saveName = 'art.soup';
     await session.saveAs();
     const saved = editor.document;
 
     session.close();
-    store.pick = store.file('art.pixelsoup');
+    store.pick = store.file('art.soup');
     expect(await session.open()).toBe(true);
     expect(store.openPickers.at(-1)).toBe(OPEN_FILE_TYPES);
     expect(session.name).toBe('art');
@@ -210,6 +210,18 @@ describe('DocumentSession', () => {
     hideBottomLayer(editor);
     await session.save();
     expect(store.savePickers).toHaveLength(1);
+  });
+
+  it('saves and opens .soup files only', async () => {
+    const { session, store } = setup();
+    await session.save();
+    expect(store.savePickers[0]?.type.accept).toEqual({ [PIXELSOUP_MIME_TYPE]: ['.soup'] });
+
+    store.pick = store.file('picked.soup');
+    await session.open();
+    const [everything, documents] = store.openPickers.at(-1) ?? [];
+    expect(everything?.accept[PIXELSOUP_MIME_TYPE]).toEqual(['.soup']);
+    expect(documents?.accept).toEqual({ [PIXELSOUP_MIME_TYPE]: ['.soup'] });
   });
 
   it('opens an image as a new single-layer document that Save does not overwrite', async () => {
@@ -227,14 +239,14 @@ describe('DocumentSession', () => {
     expect(session.savesInPlace).toBe(false);
 
     await session.save();
-    expect(store.savePickers.map((r) => r.suggestedName)).toEqual(['holiday.final.pixelsoup']);
+    expect(store.savePickers.map((r) => r.suggestedName)).toEqual(['holiday.final.soup']);
   });
 
-  it('recognises .pixelsoup files without the extension', async () => {
+  it('recognises documents without the extension', async () => {
     const { session, store } = setup();
-    store.saveName = 'art.pixelsoup';
+    store.saveName = 'art.soup';
     await session.save();
-    store.pick = new File([store.file('art.pixelsoup')], 'renamed.zip');
+    store.pick = new File([store.file('art.soup')], 'renamed.zip');
     await session.open();
     expect(session.name).toBe('renamed');
   });
@@ -242,11 +254,11 @@ describe('DocumentSession', () => {
   it('reports files it cannot open and keeps the current document', async () => {
     const { session, store, editor } = setup();
     const before = editor.document;
-    store.pick = new File(['{}'], 'broken.pixelsoup');
+    store.pick = new File(['{}'], 'broken.soup');
     const result = session.open();
     await expect(result).rejects.toBeInstanceOf(FileOperationError);
     await expect(result).rejects.toMatchObject({
-      title: "Couldn't open “broken.pixelsoup”",
+      title: "Couldn't open “broken.soup”",
       message: expect.stringMatching(/zip archive/) as unknown,
     });
     expect(editor.document).toBe(before);
@@ -349,7 +361,7 @@ describe('DocumentSession', () => {
 describe('baseName', () => {
   it('drops the last extension only', () => {
     expect(baseName('photo.final.png')).toBe('photo.final');
-    expect(baseName('art.pixelsoup')).toBe('art');
+    expect(baseName('art.soup')).toBe('art');
     expect(baseName('README')).toBe('README');
     expect(baseName('.hidden')).toBe('.hidden');
   });

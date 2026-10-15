@@ -28,7 +28,7 @@ plugs into the existing tool system, selection masks, selection modes and clippi
 Every lasso and wand result goes through `combineSelections` and one `SetSelectionCommand`, like
 the marquees. Every fill, clear and bucket click is one `FillCommand` or `ClearCommand`, which
 weights each pixel by its selection coverage and undoes to the exact bytes. A click or key that
-would change nothing adds no undo step. The `.pixelsoup` format is unchanged.
+would change nothing adds no undo step. The `.soup` format is unchanged.
 
 ## What's included
 
@@ -342,5 +342,5 @@ errors:
 - **Cut, Copy and Paste**: the Edit menu leaves room for them.
 - **Magnetic Lasso, Quick Selection, Color Range, Grow, Similar, Feather and Refine Edge.**
 - **Pattern and content-aware fills, Edit → Stroke, and blend modes for fills.**
-- **Saving selections** in `.pixelsoup` files: they're still session-only.
+- **Saving selections** in `.soup` files: they're still session-only.
 - **Flood fills in a worker or on the GPU.**

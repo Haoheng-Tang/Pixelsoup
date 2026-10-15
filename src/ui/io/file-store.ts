@@ -3,7 +3,7 @@
  * never knows which implementation is active:
  *
  * - `FileSystemAccessStore` (Chromium): native open/save pickers, and Save writes back to
- *   the same file through its handle.
+ *   the same file through its handle, for a dropped file too.
  * - `DownloadFileStore` (elsewhere): `<input type="file">` to open, and every save
  *   downloads a new copy.
  */
@@ -12,8 +12,31 @@ export interface FileStore {
   readonly savesInPlace: boolean;
   /** Lets the user pick one file. Resolves to null if they cancel. */
   open(types: readonly FileType[]): Promise<OpenedFile | null>;
+  /**
+   * The first file dropped on the page, or null if the drop carried none. Call it during
+   * the drop event: the browser empties `data` once the event is over.
+   */
+  dropped(data: DroppedData): Promise<OpenedFile> | null;
   /** Writes a file. Resolves to where it went, or null if the user cancelled. */
   save(request: SaveRequest): Promise<FileRef | null>;
+}
+
+/** What a drop carries: a `DataTransfer`, narrowed so tests can make one. */
+export interface DroppedData {
+  readonly items: ArrayLike<DroppedItem>;
+}
+
+export interface DroppedItem {
+  /** 'file' for a file, 'string' for text and links. */
+  readonly kind: string;
+  getAsFile(): File | null;
+  /** Chromium only: the file's handle, which Save can write back to. */
+  getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
+}
+
+/** The first item of a drop that is a file. */
+function firstDroppedFile(data: DroppedData): DroppedItem | undefined {
+  return Array.from(data.items).find((item) => item.kind === 'file');
 }
 
 /** A file the store can write to again. Opaque apart from its name. */
@@ -125,6 +148,18 @@ class FileSystemAccessStore implements FileStore {
     return { file: await handle.getFile(), ref: new HandleRef(handle) };
   }
 
+  dropped(data: DroppedData): Promise<OpenedFile> | null {
+    const item = firstDroppedFile(data);
+    const file = item?.getAsFile();
+    if (!item || !file) return null;
+    // Both must be asked for during the drop event; the handle arrives later.
+    const handle = item.getAsFileSystemHandle?.().catch(() => null) ?? Promise.resolve(null);
+    return handle.then((h) => ({
+      file,
+      ref: h?.kind === 'file' ? new HandleRef(h as FileSystemFileHandle) : null,
+    }));
+  }
+
   async save({ target, suggestedName, type, data }: SaveRequest): Promise<FileRef | null> {
     let handle = target instanceof HandleRef ? target.handle : null;
     // A handle from the open picker is read-only until the user allows writing.
@@ -183,6 +218,11 @@ class DownloadFileStore implements FileStore {
       document.body.append(input);
       input.click();
     });
+  }
+
+  dropped(data: DroppedData): Promise<OpenedFile> | null {
+    const file = firstDroppedFile(data)?.getAsFile();
+    return file ? Promise.resolve({ file, ref: null }) : null;
   }
 
   async save({ suggestedName, data }: SaveRequest): Promise<FileRef> {

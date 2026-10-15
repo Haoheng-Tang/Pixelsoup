@@ -69,11 +69,11 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
 - **Active layer**: `editor.activeLayerId` is session state, as in Photoshop: never part of the
   document, never saved, never a history step. It always names an existing layer (null only
   with no layers); `Editor` fixes it up after each change. Layer commands, panel: @docs/layers.md
-- **Files**: core reads and writes `.pixelsoup` bytes through an injected `PngCodec`; decoding
+- **Files**: core reads and writes `.soup` bytes through an injected `PngCodec`; decoding
   images lives in `src/ui/io`. **`FileStore`** (`src/ui/io/file-store.ts`) alone knows how files
-  are picked and written (File System Access API, else file input and downloads). Pickers need
-  user activation, so file commands start synchronously in the click or key press.
-  `DocumentSession` runs file operations; `AppController` runs File commands and dialogs.
+  are picked, dropped and written (File System Access API, else file input and downloads).
+  Pickers need user activation, so file commands start synchronously in the click or key press.
+  `DocumentSession` runs file operations; `AppController` runs File commands, drops and dialogs.
 - **Compositor**: `Compositor.composite(doc, dirtyRects?)` flattens visible layers (Normal blend
   × layer opacity) into its own output, touching only the dirty regions. `CpuCompositor` is the
   reference; on the UI side `CompositeRenderer` (a `CanvasImageSource`) is the GPU seam.
@@ -106,7 +106,7 @@ src/
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
     paint/               dab placement, stroke masks, paint math, colour sampling, flood regions
     resample/            kernels, resizing, affine transforms (premultiplied interpolation)
-    serialization/       .pixelsoup read/write, PngCodec interface
+    serialization/       .soup read/write, PngCodec interface
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
     use-*.ts             shortcut hooks; select-commands, *-actions, canvas-menu: menu actions
@@ -177,7 +177,7 @@ src/
 - **Vite 7 for now.** Vite 8 runs on Rolldown/Oxc prebuilt binaries; check them against the
   no-Rust constraint (AppLocker in particular) before upgrading.
 - **Startup** is a new blank 1920×1080 white document; the demo is under File → Demo Document.
-- **`.pixelsoup` is the native format**: a zip of `document.json` plus one PNG per raster layer.
+- **`.soup` is the native format**: a zip of `document.json` plus one PNG per raster layer.
   PNG, JPEG and WebP are import and export only. Layer PNGs use the lossless codec in
   `src/ui/io/png.ts`, as canvas premultiplies. Spec, layer IDs, versioning: @docs/file-format.md
 

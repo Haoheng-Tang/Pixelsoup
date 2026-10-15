@@ -1,11 +1,16 @@
-# The `.pixelsoup` file format
+# The `.soup` file format
 
 Pixelsoup's native, layered document format. Implemented in
 `src/core/serialization/pixelsoup-format.ts`; keep this spec and that file in step.
 
+## Extension
+
+Documents are saved as `.soup` files (`Untitled-1.soup`): Save and Save As suggest it, the
+file pickers offer it and the download fallback uses it (`src/ui/session/file-types.ts`).
+
 ## Container
 
-A `.pixelsoup` file is a standard zip archive (written with `fflate`):
+A `.soup` file is a standard zip archive (written with `fflate`):
 
 | Path              | Contents                                     | Compression |
 | ----------------- | -------------------------------------------- | ----------- |
@@ -17,7 +22,7 @@ images through each layer's `file` field, not by assuming the `layers/<id>.png` 
 ignore any archive entries the manifest doesn't reference.
 
 MIME type used by the app: `application/x-pixelsoup`. Readers detect the format by the
-`.pixelsoup` extension or the zip signature `PK\x03\x04`.
+`.soup` extension or the zip signature `PK\x03\x04`.
 
 ## `document.json`
 

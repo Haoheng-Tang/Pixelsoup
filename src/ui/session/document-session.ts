@@ -13,7 +13,7 @@ import {
   indexAbove,
   serializeDocument,
 } from '../../core';
-import type { FileRef, FileStore } from '../io/file-store';
+import type { DroppedData, FileRef, FileStore, OpenedFile } from '../io/file-store';
 import type { ExportOptions } from './file-types';
 import {
   EXPORT_FORMATS,
@@ -28,7 +28,7 @@ import {
 export interface DocumentSessionDeps {
   readonly editor: Editor;
   readonly store: FileStore;
-  /** Codec for layer images inside .pixelsoup files. */
+  /** Codec for layer images inside .soup files. */
   readonly png: PngCodec;
   /** Decodes an imported image file (PNG, JPEG, WebP). */
   readonly decodeImage: (file: Blob) => Promise<PixelBuffer>;
@@ -113,14 +113,30 @@ export class DocumentSession {
   }
 
   /**
-   * Asks for a .pixelsoup document or an image and opens it in place of the current
+   * Asks for a .soup document or an image and opens it in place of the current
    * document. An image becomes a new single-layer document. Resolves to false if the
    * user cancelled.
    */
   async open(): Promise<boolean> {
     const opened = await this.deps.store.open(OPEN_FILE_TYPES);
     if (!opened) return false;
-    const { file, ref } = opened;
+    await this.openFile(opened);
+    return true;
+  }
+
+  /**
+   * Reads the first file of a drop, during the drop event, for `openFile`. Null if the
+   * drop carried no file.
+   */
+  dropped(data: DroppedData): Promise<OpenedFile> | null {
+    return this.deps.store.dropped(data);
+  }
+
+  /**
+   * Opens a file chosen or dropped in place of the current document, as `open` does: a
+   * .soup document, which Save then writes back to if the store can, or an image.
+   */
+  async openFile({ file, ref }: OpenedFile): Promise<void> {
     const name = baseName(file.name);
     let doc: ImageDocument;
     let saveTarget: FileRef | null = null;
@@ -129,7 +145,7 @@ export class DocumentSession {
         doc = await deserializeDocument(new Uint8Array(await file.arrayBuffer()), this.deps.png);
         saveTarget = ref;
       } else {
-        // Save must never overwrite the image with a .pixelsoup file, so keep no target.
+        // Save must never overwrite the image with a document, so keep no target.
         const pixels = await this.deps.decodeImage(file);
         doc = createDocument(pixels.width, pixels.height);
         doc.layers.push(createRasterLayer({ id: createLayerId(doc), name, pixels }));
@@ -140,7 +156,6 @@ export class DocumentSession {
       });
     }
     this.replace(doc, name, saveTarget);
-    return true;
   }
 
   /**

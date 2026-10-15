@@ -1,4 +1,11 @@
-import type { FileRef, FileStore, FileType, OpenedFile, SaveRequest } from '../io/file-store';
+import type {
+  DroppedData,
+  FileRef,
+  FileStore,
+  FileType,
+  OpenedFile,
+  SaveRequest,
+} from '../io/file-store';
 
 /**
  * In-memory FileStore for tests. `pick` is what the next open picker returns, and
@@ -7,7 +14,7 @@ import type { FileRef, FileStore, FileType, OpenedFile, SaveRequest } from '../i
 export class MemoryFileStore implements FileStore {
   readonly files = new Map<string, Blob>();
   pick: File | null = null;
-  saveName: string | null = 'picked.pixelsoup';
+  saveName: string | null = 'picked.soup';
   openPickers: (readonly FileType[])[] = [];
   savePickers: SaveRequest[] = [];
   /** Runs inside `save` after the data is produced, to simulate work during a save. */
@@ -19,6 +26,15 @@ export class MemoryFileStore implements FileStore {
     this.openPickers.push(types);
     const file = this.pick;
     return Promise.resolve(file ? { file, ref: { name: file.name } } : null);
+  }
+
+  /** As the File System Access store: the first file, which Save can write back to. */
+  dropped(data: DroppedData): Promise<OpenedFile> | null {
+    const file = Array.from(data.items)
+      .find((item) => item.kind === 'file')
+      ?.getAsFile();
+    if (!file) return null;
+    return Promise.resolve({ file, ref: this.savesInPlace ? { name: file.name } : null });
   }
 
   async save(request: SaveRequest): Promise<FileRef | null> {

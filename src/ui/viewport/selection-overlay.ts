@@ -463,9 +463,10 @@ export class SelectionOverlay {
   }
 
   /**
-   * The crop box: everything outside it shaded, the area it adds beyond the canvas shown as
-   * transparent, a rule-of-thirds grid while it's being adjusted, its outline and eight
-   * square handles. Drawn in device pixels, with the box's edges on the device pixel grid.
+   * The crop box: everything outside it shaded (unless it's the whole canvas), the area it
+   * adds beyond the canvas shown as transparent, a rule-of-thirds grid while it's being
+   * adjusted, its outline and eight square handles. Drawn in device pixels, with the box's
+   * edges on the device pixel grid.
    */
   private drawCrop(
     crop: CropOverlay,
@@ -507,11 +508,13 @@ export class SelectionOverlay {
       ctx.fill(added, 'evenodd');
     }
 
-    const shade = new Path2D();
-    shade.rect(0, 0, this.canvas.width, this.canvas.height);
-    shade.rect(left, top, width, height);
-    ctx.fillStyle = this.cropShade;
-    ctx.fill(shade, 'evenodd');
+    if (crop.shade) {
+      const shade = new Path2D();
+      shade.rect(0, 0, this.canvas.width, this.canvas.height);
+      shade.rect(left, top, width, height);
+      ctx.fillStyle = this.cropShade;
+      ctx.fill(shade, 'evenodd');
+    }
 
     if (crop.grid) {
       const grid = new Path2D();

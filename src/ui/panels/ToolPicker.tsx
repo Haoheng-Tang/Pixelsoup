@@ -1,6 +1,13 @@
-import type { ReactNode } from 'react';
-import type { ToolManager } from '../tools/tool-manager';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Tool } from '../tools/tool';
+import type { ToolGroup, ToolManager } from '../tools/tool-manager';
 import { useActiveTool } from '../tools/use-active-tool';
+import { ContextMenu } from './ContextMenu';
+import { toolButtonView, toolFlyoutSections, toolGroupLabel } from './tool-groups';
+
+/** How long a press on a grouped tool's button is held to open its flyout, in ms. */
+const LONG_PRESS_MS = 400;
 
 const ICON_PROPS = {
   width: 16,
@@ -72,27 +79,142 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
   ),
 };
 
-/** One button per tool, showing its shortcut key; the active tool is pressed. */
+function iconFor(tool: Tool): ReactNode {
+  return ICONS[tool.id] ?? tool.name.charAt(0);
+}
+
+/**
+ * One button per shortcut group (`ToolManager.groups`), showing its last-used tool's icon
+ * and key; the active tool's button is pressed. Buttons for groups of several tools have a
+ * corner triangle and a flyout to choose among them.
+ */
 export function ToolPicker({ tools }: { tools: ToolManager }) {
-  const active = useActiveTool(tools);
+  // Activating a tool is what changes a group's last-used one.
+  useActiveTool(tools);
   return (
     <div className="toolbar-group" role="group" aria-label="Tools">
-      {tools.tools.map((tool) => (
-        <button
-          key={tool.id}
-          type="button"
-          className="tool-button"
-          aria-pressed={tool === active}
-          aria-label={tool.name}
-          title={`${tool.name} (${tool.shortcut})`}
-          onClick={() => tools.activate(tool.id)}
-        >
-          {ICONS[tool.id] ?? tool.name.charAt(0)}
-          <span className="tool-key" aria-hidden="true">
-            {tool.shortcut}
-          </span>
-        </button>
+      {tools.groups.map((group) => (
+        <ToolButton key={group.key} tools={tools} group={group} />
       ))}
     </div>
   );
+}
+
+/**
+ * A group's button. A click activates the tool it shows. On a grouped button, a right-click,
+ * a press held for `LONG_PRESS_MS`, a click on the corner triangle, Arrow Down or the
+ * context menu key open the flyout below it.
+ */
+function ToolButton({ tools, group }: { tools: ToolManager; group: ToolGroup }) {
+  const view = toolButtonView(tools, group);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [flyoutAt, setFlyoutAt] = useState<{ x: number; y: number } | null>(null);
+  /** The click ending this press does nothing: the press opened or closed the flyout. */
+  const ignoreClick = useRef(false);
+
+  const openFlyout = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setFlyoutAt({ x: rect.left, y: rect.bottom + 4 });
+  }, []);
+  const closeFlyout = useCallback(() => {
+    setFlyoutAt(null);
+    buttonRef.current?.focus();
+  }, []);
+  const hold = useLongPress(() => {
+    ignoreClick.current = true;
+    openFlyout();
+  });
+
+  const onClick = (e: ReactMouseEvent) => {
+    // A keyboard click (detail 0) always counts.
+    if (e.detail > 0 && ignoreClick.current) {
+      ignoreClick.current = false;
+      return;
+    }
+    if (view.grouped && e.target instanceof Element && e.target.closest('.tool-group-mark')) {
+      openFlyout();
+      return;
+    }
+    tools.activate(view.tool.id);
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="tool-button"
+        aria-pressed={view.pressed}
+        aria-label={view.tool.name}
+        aria-haspopup={view.grouped ? 'menu' : undefined}
+        aria-expanded={view.grouped ? flyoutAt !== null : undefined}
+        title={view.title}
+        onClick={onClick}
+        onPointerDown={(e) => {
+          ignoreClick.current = false;
+          if (view.grouped && e.button === 0) hold.start();
+        }}
+        onPointerUp={hold.cancel}
+        onPointerLeave={hold.cancel}
+        onPointerCancel={hold.cancel}
+        onContextMenu={(e) => {
+          if (!view.grouped) return;
+          e.preventDefault();
+          hold.cancel();
+          // A Control-click on a Mac may still click.
+          ignoreClick.current = true;
+          openFlyout();
+        }}
+        onKeyDown={(e) => {
+          if (!view.grouped || e.key !== 'ArrowDown') return;
+          if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+          e.preventDefault();
+          openFlyout();
+        }}
+      >
+        {iconFor(view.tool)}
+        <span className="tool-key" aria-hidden="true">
+          {view.tool.shortcut}
+        </span>
+        {view.grouped && <span className="tool-group-mark" aria-hidden="true" />}
+      </button>
+      {flyoutAt && (
+        <ContextMenu
+          x={flyoutAt.x}
+          y={flyoutAt.y}
+          label={toolGroupLabel(group.key)}
+          sections={toolFlyoutSections(tools, group, iconFor)}
+          onClose={closeFlyout}
+          // A press on the button while its flyout is open only closes the flyout.
+          swallowsPress={(target) => {
+            const onButton = target instanceof Node && !!buttonRef.current?.contains(target);
+            if (onButton) ignoreClick.current = true;
+            return onButton;
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/** Calls `onLongPress` once a press has been held for `LONG_PRESS_MS`, unless cancelled. */
+function useLongPress(onLongPress: () => void): { start: () => void; cancel: () => void } {
+  const timer = useRef<number | undefined>(undefined);
+  const callback = useRef(onLongPress);
+  useEffect(() => {
+    callback.current = onLongPress;
+  });
+  const cancel = useCallback(() => {
+    window.clearTimeout(timer.current);
+    timer.current = undefined;
+  }, []);
+  const start = useCallback(() => {
+    cancel();
+    timer.current = window.setTimeout(() => {
+      timer.current = undefined;
+      callback.current();
+    }, LONG_PRESS_MS);
+  }, [cancel]);
+  useEffect(() => cancel, [cancel]);
+  return { start, cancel };
 }

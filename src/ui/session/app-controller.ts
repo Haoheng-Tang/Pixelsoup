@@ -4,6 +4,7 @@ import type { FillSettings } from '../edit-actions';
 import { DEFAULT_FILL_SETTINGS, canFill, runFill } from '../edit-actions';
 import type { RotateTarget } from '../image-actions';
 import { rotateLayerTarget } from '../image-actions';
+import type { DroppedData } from '../io/file-store';
 import { canRunLayerAction, runLayerAction } from '../layer-actions';
 import type { FrameClock } from '../tools/frame-clock';
 import { browserClock } from '../tools/frame-clock';
@@ -40,8 +41,8 @@ export type Modal =
   | { readonly kind: 'error'; readonly title: string; readonly message: string };
 
 /**
- * Runs File commands from the menu and shortcuts, the Image and Edit menus' dialogs and
- * the canvas menu's Duplicate Layer and Delete Layer dialogs:
+ * Runs File commands from the menu and shortcuts, files dropped on the page, the Image and
+ * Edit menus' dialogs and the canvas menu's Duplicate Layer and Delete Layer dialogs:
  * asks before discarding unsaved work, shows the dialogs and carries out what they ask,
  * reports errors, and ignores new commands while a dialog is open or an operation is
  * still running. Plain TypeScript; React renders `modal`.
@@ -158,6 +159,22 @@ export class AppController {
       default:
         assertNever(command);
     }
+  }
+
+  /**
+   * Opens the file dropped on the page (`data`, from the drop event), as File → Open would:
+   * after asking before discarding unsaved changes, and not while blocked. Returns false if
+   * there was nothing to open, or it was blocked.
+   */
+  openDropped(data: DroppedData): boolean {
+    if (this.blocked) return false;
+    const dropped = this.session.dropped(data);
+    if (!dropped) return false;
+    this.task(async () => {
+      const opened = await dropped;
+      if (await this.confirmDiscard()) await this.session.openFile(opened);
+    });
+    return true;
   }
 
   /** Confirms the New dialog. */

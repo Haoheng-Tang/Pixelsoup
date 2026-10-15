@@ -149,6 +149,8 @@ button.danger:hover:not(:disabled) {
   width: 30px;
   height: 26px;
   padding: 0;
+  /* A long press opens a grouped tool's flyout, not the browser's callout. */
+  -webkit-touch-callout: none;
 }
 
 .tool-key {
@@ -168,6 +170,31 @@ button.danger:hover:not(:disabled) {
 }
 
 .tool-button[aria-pressed='true'] .tool-key {
+  color: #fff;
+}
+
+/* Marks a button standing for a group of tools; a click on it opens the group's flyout. */
+.tool-group-mark {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  color: var(--text-muted);
+}
+
+.tool-group-mark::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.tool-button[aria-pressed='true'] .tool-group-mark {
   color: #fff;
 }
 
@@ -471,6 +498,30 @@ button.danger:hover:not(:disabled) {
   cursor: progress;
 }
 
+/* Shown while files are dragged over the page. It takes no pointer events, so the drag's
+   enter and leave events still come from the page beneath. */
+.drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: rgb(0 0 0 / 35%);
+  outline: 3px dashed var(--accent);
+  outline-offset: -12px;
+}
+
+.drop-hint-label {
+  padding: var(--space-5) var(--space-6);
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+
 /* File menu */
 
 .menu {
@@ -533,6 +584,14 @@ button.danger:hover:not(:disabled) {
 .menu-check {
   display: inline-block;
   width: 1.25em;
+}
+
+.menu-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
 }
 
 .menu-separator {
