@@ -83,8 +83,9 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
   panel, preview overlay). `ToolManager` holds the active tool; the viewport routes input to it
   after its own pan and zoom. Tools edit only through commands; painting tools run the core
   stroke engine once per frame. Colours and the clipboard are session state. More: @docs/tools.md
-- **Transforms**: Crop, Canvas Size, turns and flips (lossless), Image Size and Rotate Layer are
-  core commands; resampling interpolates premultiplied alpha. Details: @docs/transform.md
+- **Transforms**: Crop, Canvas Size, turns and flips (lossless), Image Size and layer transforms
+  are core commands; resampling interpolates premultiplied alpha. Free Transform previews on the
+  overlay as the editor's pending edit, which any other edit applies first. @docs/transform.md
 
 ## Folder layout
 
@@ -111,12 +112,12 @@ src/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
     use-*.ts             shortcut hooks; select-commands, *-actions, canvas-menu: menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
-    session/             DocumentSession, AppController, file types, Rotate Layer preview
-    dialogs/             New, Export, Image/Canvas Size, Rotate, Fill, Duplicate Layer, confirm, error
+    session/             DocumentSession, AppController, file types, Image/Canvas Size options
+    dialogs/             New, Export, Image/Canvas Size, Fill, Duplicate Layer, confirm, error
     color/, clipboard/   Colors, HSV picker, colour math; PixelClipboard and system clipboard
     tools/               ToolManager; marquee, lasso, wand, move, brush, bucket, eyedropper, crop
-    viewport/            ViewportController, ants overlay, view math, zoom and status readouts
-    render/              CompositeRenderer (CPU → canvas; GPU seam)
+    transform/           Free Transform: its session, handle math, options and options bar
+    viewport/, render/   ViewportController, ants overlay, readouts; CompositeRenderer (GPU seam)
     panels/              Toolbar, menus and ContextMenu, ToolPicker, ToolOptionsBar, LayerPanel
 ```
 
@@ -167,7 +168,7 @@ src/
 9. Adjustments
 10. Lasso + magic wand (done: lassos, Magic Wand, Paint Bucket, Edit menu with Fill and Clear)
 11. Text
-12. Transform, filters, layer masks
+12. Transform (done: Free Transform, Edit → Transform), filters, layer masks
 
 ## Decisions
 
@@ -187,8 +188,7 @@ Simplest choices made so far that may be revisited:
 
 - **History storage**: `LinearHistory` keeps whole commands and their snapshots, up to 200 steps.
   Strokes keep 64 px tiles (11 MB to cover 1920×1200); Image Size and transforms keep whole layers.
-- **Dirty rects for property changes** are the layer's bounds clipped to the canvas. Each change
-  recomposites that rect synchronously; batching or tiling can come later if profiling demands it.
+- **Dirty rects for property changes**: the layer's bounds on the canvas, recomposited at once.
 - **Viewport rendering**: zoom range 1 %–6400 %; bilinear below 100 %, nearest-neighbour at and
   above. The checkerboard uses fixed 8 CSS-px squares anchored to the document origin.
 - **CSP**: production builds only; the dev server needs inline scripts for Fast Refresh.
