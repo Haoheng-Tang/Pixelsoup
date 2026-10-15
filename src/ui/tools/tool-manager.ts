@@ -1,4 +1,5 @@
 import type { Editor } from '../../core';
+import type { ContextMenuSections } from '../panels/menu-logic';
 import type {
   BrushProperty,
   Tool,
@@ -106,7 +107,9 @@ export class ToolManager {
     return true;
   }
 
+  /** Routes a press to the active tool: primary presses only (see `ToolPointerEvent.button`). */
   pointerDown(event: ToolPointerEvent): void {
+    if ((event.button ?? 0) !== 0) return;
     this.pointerIsDown = true;
     this.active.pointerDown?.(event);
   }
@@ -121,9 +124,12 @@ export class ToolManager {
     this.active.pointerUp?.(event);
   }
 
-  /** Routes a double-click to the active tool, unless a pointer gesture is in progress. */
+  /**
+   * Routes a primary double-click to the active tool, unless a pointer gesture is in
+   * progress.
+   */
   doubleClick(event: ToolPointerEvent): void {
-    if (this.pointerIsDown) return;
+    if (this.pointerIsDown || (event.button ?? 0) !== 0) return;
     this.active.doubleClick?.(event);
   }
 
@@ -151,6 +157,11 @@ export class ToolManager {
     if (!this.active.stepBrush) return false;
     this.active.stepBrush(property, direction);
     return true;
+  }
+
+  /** The active tool's own items for the canvas's context menu (see `Tool.contextMenu`). */
+  contextMenu(): ContextMenuSections {
+    return this.active.contextMenu?.() ?? [];
   }
 
   /** Calls `listener` when the active tool changes. */

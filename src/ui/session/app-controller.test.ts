@@ -7,10 +7,12 @@ import {
   SetLayerVisibilityCommand,
   SetSelectionCommand,
   createBlankDocument,
+  duplicateName,
   liftSelectionCommand,
 } from '../../core';
 import type { FillSettings } from '../edit-actions';
 import { DEFAULT_FILL_SETTINGS } from '../edit-actions';
+import { runLayerAction } from '../layer-actions';
 import { decodePng, encodePng } from '../io/png';
 import { FakeClock } from '../tools/fake-clock';
 import { AppController } from './app-controller';
@@ -483,5 +485,97 @@ describe('AppController Fill dialog', () => {
     editor.history.execute(new SetLayerVisibilityCommand('layer-1', false));
     controller.openFill();
     expect(controller.modal).toBeNull();
+  });
+});
+
+describe('AppController: Duplicate Layer…', () => {
+  const layerNames = (editor: Editor) => editor.document.layers.map((layer) => layer.name);
+
+  it('asks for a name, offering “<name> copy”', () => {
+    const { controller } = setup();
+    controller.openDuplicateLayer();
+    expect(controller.modal).toEqual({ kind: 'duplicate-layer', layerName: 'Background' });
+    expect(duplicateName('Background')).toBe('Background copy');
+  });
+
+  it('duplicates the active layer under the name given, directly above, in one step', () => {
+    const { controller, editor } = setup();
+    runLayerAction(editor, 'new');
+    editor.setActiveLayer('layer-1');
+    controller.openDuplicateLayer();
+    controller.duplicateLayer('  Sky  ');
+    expect(controller.modal).toBeNull();
+    expect(layerNames(editor)).toEqual(['Background', 'Sky', 'Layer 1']);
+    expect(editor.activeLayer?.name).toBe('Sky');
+    expect(Array.from(editor.activeLayer?.pixels.data ?? [])).toEqual(
+      Array.from(editor.document.layers[0]?.pixels.data ?? []),
+    );
+    expect(editor.history.undoLabel).toBe('Duplicate Layer');
+    editor.history.undo();
+    expect(layerNames(editor)).toEqual(['Background', 'Layer 1']);
+  });
+
+  it('refuses a blank name and keeps the dialog open', () => {
+    const { controller, editor } = setup();
+    controller.openDuplicateLayer();
+    controller.duplicateLayer('   ');
+    expect(controller.modal).toEqual({ kind: 'duplicate-layer', layerName: 'Background' });
+    expect(editor.history.canUndo).toBe(false);
+  });
+
+  it('changes nothing on Cancel', () => {
+    const { controller, editor } = setup();
+    controller.openDuplicateLayer();
+    controller.dismiss();
+    expect(controller.modal).toBeNull();
+    controller.duplicateLayer('Sky');
+    expect(layerNames(editor)).toEqual(['Background']);
+    expect(editor.history.canUndo).toBe(false);
+  });
+});
+
+describe('AppController: Delete Layer', () => {
+  function twoLayers() {
+    const context = setup();
+    runLayerAction(context.editor, 'new');
+    return context;
+  }
+
+  it('asks for confirmation, naming the layer', () => {
+    const { controller } = twoLayers();
+    controller.openDeleteLayer();
+    expect(controller.modal).toEqual({ kind: 'delete-layer', layerName: 'Layer 1' });
+  });
+
+  it('keeps the layer on Cancel', () => {
+    const { controller, editor } = twoLayers();
+    controller.openDeleteLayer();
+    controller.dismiss();
+    expect(controller.modal).toBeNull();
+    controller.deleteLayer();
+    expect(editor.document.layers).toHaveLength(2);
+    expect(editor.history.undoLabel).toBe('New Layer');
+  });
+
+  it('deletes the active layer on Delete, undoably', () => {
+    const { controller, editor } = twoLayers();
+    controller.openDeleteLayer();
+    controller.deleteLayer();
+    expect(controller.modal).toBeNull();
+    expect(editor.document.layers.map((layer) => layer.name)).toEqual(['Background']);
+    expect(editor.history.undoLabel).toBe('Delete Layer');
+    editor.history.undo();
+    expect(editor.document.layers.map((layer) => layer.name)).toEqual(['Background', 'Layer 1']);
+  });
+
+  it("doesn't ask for the only layer, or over another dialog", () => {
+    const { controller, editor } = setup();
+    controller.openDeleteLayer();
+    expect(controller.modal).toBeNull();
+    runLayerAction(editor, 'new');
+    controller.run('export');
+    controller.openDeleteLayer();
+    controller.openDuplicateLayer();
+    expect(controller.modal).toEqual({ kind: 'export' });
   });
 });

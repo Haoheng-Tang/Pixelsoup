@@ -33,6 +33,8 @@ Photoshop.
   reordering and inline renaming; the active layer is highlighted
 - Layer menu and panel buttons: new layer, duplicate, delete, move up and down, merge down and
   flatten image. Merging bakes in each layer's opacity, so the image looks the same afterwards
+- Layer via Copy and Layer via Cut: the selected pixels, soft edges included, become a new
+  layer, copied or cut out of the active one
 - Rectangular and elliptical marquee tools (the ellipse has anti-aliased edges) in New, Add,
   Subtract and Intersect modes, picked in the tool-options bar or with modifier keys
 - Lasso and Polygonal Lasso with anti-aliased edges, in the same modes. An outline that
@@ -60,9 +62,14 @@ Photoshop.
 - Eyedropper that picks a colour from the image, or from the active layer alone
 - Paint Bucket that fills similar colours with the foreground colour, at any opacity, blending
   into anti-aliased edges instead of leaving a fringe
-- Edit menu: Undo, Redo, Fill… (the foreground or background colour, black, white, 50% grey
-  or any colour, at any opacity, optionally preserving transparency) and Clear, with
-  Photoshop's shortcuts. Both respect the selection's soft edges
+- Edit menu: Undo, Redo, Cut, Copy, Copy Merged and Paste, Fill… (the foreground or
+  background colour, black, white, 50% grey or any colour, at any opacity, optionally
+  preserving transparency) and Clear, with Photoshop's shortcuts. All respect the
+  selection's soft edges. Copies go on the system clipboard as PNG too, and images copied in
+  other apps paste as new layers
+- Right-click menu on the canvas: Deselect, Select Inverse, Layer via Copy and Layer via Cut
+  with a selection; Duplicate Layer… (name the copy) and Delete Layer (with a confirmation)
+  without one
 - Crop tool: draw a box, then resize it with eight handles or move it, freely or at a fixed
   ratio (the original's, 1:1, 4:3, 3:2, 16:9 or custom), with a rule-of-thirds grid while
   adjusting. A box past the canvas enlarges it with transparent space. Cropped-away pixels stay
@@ -119,19 +126,22 @@ Anti-alias, and Sample all layers (otherwise it looks at the active layer only).
 
 ### Layer shortcuts
 
-| Keys                       | Action                               |
-| -------------------------- | ------------------------------------ |
-| Ctrl/Cmd+Shift+N           | new layer above the active one       |
-| Ctrl/Cmd+J                 | duplicate the active layer           |
-| Ctrl/Cmd+E                 | merge down                           |
-| Ctrl/Cmd+[, Ctrl/Cmd+]     | move the active layer down, up       |
-| Alt+[, Alt+]               | select the layer below, above        |
-| Double-click a name, or F2 | rename (Enter keeps it, Esc cancels) |
-| Drag a layer               | reorder (Esc cancels)                |
+| Keys                       | Action                                                      |
+| -------------------------- | ----------------------------------------------------------- |
+| Ctrl/Cmd+Shift+N           | new layer above the active one                              |
+| Ctrl/Cmd+J                 | Layer via Copy with a selection, else duplicate the layer   |
+| Ctrl/Cmd+Shift+J           | Layer via Cut: cut the selected pixels out into a new layer |
+| Ctrl/Cmd+E                 | merge down                                                  |
+| Ctrl/Cmd+[, Ctrl/Cmd+]     | move the active layer down, up                              |
+| Alt+[, Alt+]               | select the layer below, above                               |
+| Double-click a name, or F2 | rename (Enter keeps it, Esc cancels)                        |
+| Drag a layer               | reorder (Esc cancels)                                       |
+| Right-click the canvas     | the context menu                                            |
 
 Selecting a layer isn't an edit: it isn't saved and isn't an undo step. Merge Down needs both
-layers visible. Flatten Image discards hidden layers. Browsers may keep Ctrl/Cmd+Shift+N for a
-new private window; Layer → New Layer and the panel's button always work.
+layers visible. Flatten Image discards hidden layers. Layer via Copy and Cut put the new layer
+directly above the active one and deselect. Browsers may keep Ctrl/Cmd+Shift+N for a new
+private window, and Ctrl/Cmd+Shift+J for their developer tools; the Layer menu always works.
 
 ### Move tool shortcuts
 
@@ -179,12 +189,20 @@ undo step too; the bucket has the Magic Wand's options, plus an opacity.
 | Shift added to either                | the same, preserving transparency                       |
 | Shift+Backspace (Shift+Delete)       | Edit → Fill…                                            |
 | Delete or Backspace (Delete)         | Edit → Clear: clear the selected pixels to transparency |
+| Ctrl/Cmd+X, Ctrl/Cmd+C               | cut, copy the selected pixels of the active layer       |
+| Ctrl/Cmd+Shift+C                     | copy merged: the selected pixels of all visible layers  |
+| Ctrl/Cmd+V                           | paste as a new layer                                    |
 | Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y | undo, redo                                              |
 
 Fills and clears are one undo step each, act on the active layer and respect the selection's
 soft edges. Preserving transparency recolours only the pixels that aren't transparent and
 keeps their transparency, to recolour a brush stroke for example. The Fill dialog remembers
 its settings until the page is reloaded.
+
+A paste goes back where it was copied from, or else into the middle of the view, as a new
+layer above the active one. Copies also go on the system clipboard as PNG where the browser
+allows it, and Ctrl/Cmd+V pastes an image copied in another app. Details and browser support:
+[docs/tools.md](docs/tools.md#clipboard).
 
 ### Crop shortcuts
 

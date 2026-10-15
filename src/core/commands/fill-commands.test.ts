@@ -290,6 +290,12 @@ describe('ClearCommand', () => {
     expect(editor.history.undoLabel).toBe('Clear');
   });
 
+  it('takes the undo label it is given, for Cut', () => {
+    const { doc, layer } = setup([OPAQUE]);
+    doc.selection = Selection.fromMask(1, 1, [255]);
+    expect(clearCommand(doc, layer.id, null, 'Cut')?.label).toBe('Cut');
+  });
+
   it('restores the exact pixels on undo and clears them again on redo', () => {
     const { doc, layer, editor, changes } = setup([OPAQUE, TRANSLUCENT, OPAQUE, OPAQUE], 6, 1);
     doc.selection = Selection.fromMask(6, 1, [255, 255, 200, 0, 0, 0]);

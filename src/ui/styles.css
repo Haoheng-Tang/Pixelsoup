@@ -541,6 +541,13 @@ button.danger:hover:not(:disabled) {
   background: var(--border);
 }
 
+/* The canvas's context menu, at the pointer; ContextMenu keeps it inside the window. */
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 200px;
+}
+
 /* Document name */
 
 .document-name {
@@ -594,6 +601,10 @@ button.danger:hover:not(:disabled) {
 .dialog-form {
   display: grid;
   gap: 14px;
+}
+
+.dialog-form .dialog-text {
+  margin: 0;
 }
 
 .dialog-actions {

@@ -18,11 +18,13 @@ const REPEATABLE: ReadonlySet<LayerAction> = new Set([
 ]);
 
 /**
- * The layer action for a key press, if any. Brackets are matched by key position as well as
- * by character, because Option+[ types a quotation mark on a Mac. Ctrl+Alt (AltGr on
- * Windows) never matches, so characters typed with AltGr don't trigger anything.
+ * The layer action for a key press, if any. Ctrl/Cmd+J is Layer via Copy while there's a
+ * selection (`hasSelection`) and Duplicate Layer otherwise, as in Photoshop. Brackets are
+ * matched by key position as well as by character, because Option+[ types a quotation
+ * mark on a Mac. Ctrl+Alt (AltGr on Windows) never matches, so characters typed with AltGr
+ * don't trigger anything.
  */
-export function layerActionFor(e: ShortcutKeys): LayerAction | null {
+export function layerActionFor(e: ShortcutKeys, hasSelection: boolean): LayerAction | null {
   const bracket = bracketOf(e);
   const mod = e.ctrlKey || e.metaKey;
   if (e.altKey) {
@@ -38,7 +40,8 @@ export function layerActionFor(e: ShortcutKeys): LayerAction | null {
     case 'n':
       return e.shiftKey ? 'new' : null;
     case 'j':
-      return e.shiftKey ? null : 'duplicate';
+      if (e.shiftKey) return 'layer-via-cut';
+      return hasSelection ? 'layer-via-copy' : 'duplicate';
     case 'e':
       return e.shiftKey ? null : 'merge-down';
     case 'enter':
@@ -56,16 +59,17 @@ export function bracketOf(e: Pick<KeyboardEvent, 'key' | 'code'>): '[' | ']' | n
 }
 
 /**
- * Layer shortcuts: Ctrl/Cmd+Shift+N new layer, +J duplicate, +E merge down, +[ and +] move
- * the active layer down and up, +Enter commit a floating selection; Alt+[ and Alt+] select
- * the layer below and above. They suppress the browser's own action (downloads, search,
- * back/forward) but leave text fields alone. Inactive while `gate.blocked`.
+ * Layer shortcuts: Ctrl/Cmd+Shift+N new layer, +J Layer via Copy (with a selection) or
+ * duplicate, +Shift+J Layer via Cut, +E merge down, +[ and +] move the active layer down
+ * and up, +Enter commit a floating selection; Alt+[ and Alt+] select the layer below and
+ * above. They suppress the browser's own action (downloads, search, back/forward) but
+ * leave text fields alone. Inactive while `gate.blocked`.
  */
 export function useLayerShortcuts(editor: Editor, gate: { readonly blocked: boolean }): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTextEntry(e.target)) return;
-      const action = layerActionFor(e);
+      const action = layerActionFor(e, editor.document.selection !== null);
       if (!action) return;
       e.preventDefault();
       if (gate.blocked || (e.repeat && !REPEATABLE.has(action))) return;

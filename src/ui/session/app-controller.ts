@@ -4,6 +4,7 @@ import type { FillSettings } from '../edit-actions';
 import { DEFAULT_FILL_SETTINGS, canFill, runFill } from '../edit-actions';
 import type { RotateTarget } from '../image-actions';
 import { rotateLayerTarget } from '../image-actions';
+import { canRunLayerAction, runLayerAction } from '../layer-actions';
 import type { FrameClock } from '../tools/frame-clock';
 import { browserClock } from '../tools/frame-clock';
 import type { DocumentSession } from './document-session';
@@ -33,11 +34,14 @@ export type Modal =
   | { readonly kind: 'canvas-size' }
   | { readonly kind: 'rotate-layer'; readonly target: RotateTarget }
   | { readonly kind: 'fill' }
+  | { readonly kind: 'duplicate-layer'; readonly layerName: string }
+  | { readonly kind: 'delete-layer'; readonly layerName: string }
   | { readonly kind: 'confirm-discard'; readonly documentName: string }
   | { readonly kind: 'error'; readonly title: string; readonly message: string };
 
 /**
- * Runs File commands from the menu and shortcuts and the Image and Edit menus' dialogs:
+ * Runs File commands from the menu and shortcuts, the Image and Edit menus' dialogs and
+ * the canvas menu's Duplicate Layer and Delete Layer dialogs:
  * asks before discarding unsaved work, shows the dialogs and carries out what they ask,
  * reports errors, and ignores new commands while a dialog is open or an operation is
  * still running. Plain TypeScript; React renders `modal`.
@@ -268,6 +272,54 @@ export class AppController {
     }
   }
 
+  /**
+   * Opens the Duplicate Layer dialog (the canvas's context menu) for the active layer,
+   * unless blocked or it can't be duplicated.
+   */
+  openDuplicateLayer(): void {
+    const { editor } = this.session;
+    const layer = editor.activeLayer;
+    if (this.blocked || !layer || !canRunLayerAction(editor, 'duplicate')) return;
+    this.show({ kind: 'duplicate-layer', layerName: layer.name });
+  }
+
+  /**
+   * Confirms Duplicate Layer: copies the active layer directly above as `name` (trimmed)
+   * and makes the copy active, one undo step. A blank name is refused and leaves the
+   * dialog open.
+   */
+  duplicateLayer(name: string): void {
+    if (this.currentModal?.kind !== 'duplicate-layer' || name.trim() === '') return;
+    this.show(null);
+    try {
+      runLayerAction(this.session.editor, 'duplicate', { name });
+    } catch (error) {
+      this.showError(error);
+    }
+  }
+
+  /**
+   * Opens the confirmation for deleting the active layer (the canvas's context menu),
+   * unless blocked or it can't be deleted (the only layer).
+   */
+  openDeleteLayer(): void {
+    const { editor } = this.session;
+    const layer = editor.activeLayer;
+    if (this.blocked || !layer || !canRunLayerAction(editor, 'delete')) return;
+    this.show({ kind: 'delete-layer', layerName: layer.name });
+  }
+
+  /** Confirms Delete Layer: deletes the active layer, one undo step. */
+  deleteLayer(): void {
+    if (this.currentModal?.kind !== 'delete-layer') return;
+    this.show(null);
+    try {
+      runLayerAction(this.session.editor, 'delete');
+    } catch (error) {
+      this.showError(error);
+    }
+  }
+
   /** Closes the current dialog without acting (Cancel, Escape). */
   dismiss(): void {
     if (this.currentModal?.kind === 'confirm-discard') {
@@ -313,7 +365,8 @@ export class AppController {
       .finally(() => this.setBusy(false));
   }
 
-  private showError(error: unknown): void {
+  /** Shows `error` in a dialog: a `FileOperationError`'s own title and message, if it is one. */
+  showError(error: unknown): void {
     console.error(error);
     if (error instanceof FileOperationError) {
       this.show({ kind: 'error', title: error.title, message: error.message });

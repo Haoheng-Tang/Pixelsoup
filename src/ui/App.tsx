@@ -1,7 +1,10 @@
-import { useState } from 'react';
-import type { Editor } from '../core';
+import { useCallback, useEffect, useState } from 'react';
+import type { Editor, Rect } from '../core';
+import type { PixelClipboard } from './clipboard/pixel-clipboard';
+import { useClipboardShortcuts } from './clipboard/use-clipboard-shortcuts';
 import type { Colors } from './color/colors';
 import { ModalHost } from './dialogs/ModalHost';
+import { CanvasMenu } from './panels/CanvasMenu';
 import { LayerPanel } from './panels/LayerPanel';
 import { ToolOptionsBar } from './panels/ToolOptionsBar';
 import { Toolbar } from './panels/Toolbar';
@@ -26,16 +29,25 @@ import type { ViewOptions } from './viewport/view-options';
 interface AppProps {
   editor: Editor;
   controller: AppController;
+  clipboard: PixelClipboard;
   tools: ToolManager;
   colors: Colors;
   view: ViewOptions;
 }
 
-export function App({ editor, controller, tools, colors, view }: AppProps) {
+export function App({ editor, controller, clipboard, tools, colors, view }: AppProps) {
   const [viewport, setViewport] = useState<ViewportController | null>(null);
+  const viewArea = useCallback((): Rect | null => viewport?.visibleArea() ?? null, [viewport]);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => viewport?.onContextMenu(setMenuAt), [viewport]);
+  const closeMenu = useCallback(() => {
+    setMenuAt(null);
+    viewport?.focus();
+  }, [viewport]);
   useRevision(controller);
   useHistoryShortcuts(editor, controller);
   useEditShortcuts(editor, colors, controller);
+  useClipboardShortcuts(clipboard, controller, viewArea);
   useSelectionShortcuts(editor, controller);
   useLayerShortcuts(editor, controller);
   useViewShortcuts(view, controller);
@@ -54,6 +66,8 @@ export function App({ editor, controller, tools, colors, view }: AppProps) {
         colors={colors}
         view={view}
         viewport={viewport}
+        clipboard={clipboard}
+        viewArea={viewArea}
       />
       <ToolOptionsBar tools={tools} />
       <main className="workspace">
@@ -69,6 +83,16 @@ export function App({ editor, controller, tools, colors, view }: AppProps) {
         </aside>
       </main>
       <StatusBar viewport={viewport} tools={tools} />
+      {menuAt && viewport && (
+        <CanvasMenu
+          at={menuAt}
+          editor={editor}
+          controller={controller}
+          tools={tools}
+          viewport={viewport}
+          onClose={closeMenu}
+        />
+      )}
       <ModalHost controller={controller} colors={colors} />
     </div>
   );

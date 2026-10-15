@@ -82,7 +82,7 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
 - **Tools** (`src/ui/tools`) implement `Tool` (document-space pointer and key handlers, options
   panel, preview overlay). `ToolManager` holds the active tool; the viewport routes input to it
   after its own pan and zoom. Tools edit only through commands; painting tools run the core
-  stroke engine once per frame. Colours (`Colors`) are session state. Tools, fills: @docs/tools.md
+  stroke engine once per frame. Colours and the clipboard are session state. More: @docs/tools.md
 - **Transforms**: Crop, Canvas Size, turns and flips (lossless), Image Size and Rotate Layer are
   core commands; resampling interpolates premultiplied alpha. Details: @docs/transform.md
 
@@ -102,22 +102,22 @@ src/
     editor.ts            Editor: document + history + change events + save point + active layer
     blank-document.ts    new (and startup) documents; demo-document.ts: the demo document
     history/             Command and History interfaces, LinearHistory
-    commands/            layers, merge, selection, move, float, stroke, fill, canvas, transforms
+    commands/            layers, merge, selection, move, float, copy, stroke, fill, canvas, transforms
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
     paint/               dab placement, stroke masks, paint math, colour sampling, flood regions
     resample/            kernels, resizing, affine transforms (premultiplied interpolation)
     serialization/       .pixelsoup read/write, PngCodec interface
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
-    use-*.ts             shortcut hooks; select-commands, layer-/image-/edit-actions: menu actions
+    use-*.ts             shortcut hooks; select-commands, *-actions, canvas-menu: menu actions
     io/                  FileStore, lossless PNG codec, browser decode, export encoders
     session/             DocumentSession, AppController, file types, Rotate Layer preview
-    dialogs/             New, Export, Image/Canvas Size, Rotate Layer, Fill, confirm and error
-    color/               Colors (foreground, background), swatches, HSV picker, colour math
+    dialogs/             New, Export, Image/Canvas Size, Rotate, Fill, Duplicate Layer, confirm, error
+    color/, clipboard/   Colors, HSV picker, colour math; PixelClipboard and system clipboard
     tools/               ToolManager; marquee, lasso, wand, move, brush, bucket, eyedropper, crop
     viewport/            ViewportController, ants overlay, view math, zoom and status readouts
     render/              CompositeRenderer (CPU → canvas; GPU seam)
-    panels/              Toolbar, menus, ToolPicker, ToolOptionsBar, LayerPanel (drag, thumbnails)
+    panels/              Toolbar, menus and ContextMenu, ToolPicker, ToolOptionsBar, LayerPanel
 ```
 
 ## Coding conventions

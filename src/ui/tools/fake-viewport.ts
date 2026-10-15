@@ -13,6 +13,8 @@ export interface PointerExtras {
    * together with it as coalesced samples.
    */
   readonly via?: readonly (readonly [number, number])[];
+  /** The button a press is for: 0 primary (the default), 2 secondary. */
+  readonly button?: number;
 }
 
 export const NO_MODIFIERS: Required<ToolModifiers> = {
@@ -90,7 +92,11 @@ export class FakeViewport {
     return this.tools.keyUp({ key, code: key, repeat: false, ...this.held, ...mods });
   }
 
-  private event(sx: number, sy: number, { pressure, via }: PointerExtras): ToolPointerEvent {
+  private event(
+    sx: number,
+    sy: number,
+    { pressure, via, button }: PointerExtras,
+  ): ToolPointerEvent {
     const sample = (x: number, y: number): ToolPointerSample => ({
       x: (x - this.panX) / this.zoom,
       y: (y - this.panY) / this.zoom,
@@ -102,6 +108,7 @@ export class FakeViewport {
       zoom: this.zoom,
       ...this.held,
       ...(samples ? { samples } : {}),
+      ...(button === undefined ? {} : { button }),
     };
   }
 }

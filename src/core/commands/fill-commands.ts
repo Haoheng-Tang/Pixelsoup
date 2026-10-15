@@ -192,7 +192,6 @@ export function fillCommand(
  * pixels it replaced.
  */
 export class ClearCommand implements Command {
-  readonly label = 'Clear';
   private readonly floating: FloatingEdit | null;
   /** What the last apply changed: the area and the pixels it replaced. */
   private applied: { readonly area: Rect; readonly before: PixelSnapshot } | null = null;
@@ -201,6 +200,8 @@ export class ClearCommand implements Command {
     readonly layerId: LayerId,
     /** The editor's floating selection: clearing its layer marks it as edited. */
     floating: FloatingSelection | null = null,
+    /** The undo label: "Clear", or "Cut" when Cut clears what it copied. */
+    readonly label = 'Clear',
   ) {
     const floats = floating?.layerId === layerId ? floating : null;
     this.floating =
@@ -260,10 +261,11 @@ export function clearCommand(
   doc: ImageDocument,
   layerId: LayerId,
   floating: FloatingSelection | null = null,
+  label = 'Clear',
 ): ClearCommand | null {
   const layer = findLayer(doc, layerId);
   if (!doc.selection || !layer?.visible) return null;
-  const command = new ClearCommand(layerId, floating);
+  const command = new ClearCommand(layerId, floating, label);
   return command.area(doc) ? command : null;
 }
 

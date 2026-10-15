@@ -3,7 +3,8 @@
 How layers are managed: the active layer, floating selections, the layer commands, and the
 Layer panel, menu and shortcuts. The code lives in `src/core/editor.ts` (active layer, floating
 selection), `src/core/commands` (`layer-commands.ts`, `merge-commands.ts`, `move-commands.ts`,
-`float-commands.ts`, `layer-growth.ts`), `src/ui/layer-actions.ts` and `src/ui/panels`.
+`float-commands.ts`, `copy-commands.ts`, `selected-pixels.ts`, `layer-growth.ts`),
+`src/ui/layer-actions.ts`, `src/ui/canvas-menu.ts` and `src/ui/panels`.
 
 ## The active layer
 
@@ -33,35 +34,42 @@ runs. Code that only asks whether an action is possible (`canRunLayerAction`) mu
 All are undoable and report dirty rects as usual. Each factory returns null when its command
 would do nothing, like the selection helpers.
 
-| Factory                                 | Effect                                                        | Null when                                       |
-| --------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------- |
-| `newLayerCommand(doc, aboveId)`         | transparent canvas-sized "Layer N" above `aboveId` (or top)   | never                                           |
-| `duplicateLayerCommand(doc, id)`        | copies the layer, pixels included, as "… copy" directly above | the layer is missing                            |
-| `removeLayerCommand(doc, id)`           | deletes the layer                                             | missing, or the only layer                      |
-| `reorderLayerCommand(doc, id, toIndex)` | moves it to stack index `toIndex` (0 = bottom)                | missing, already there, or out of range         |
-| `renameLayerCommand(doc, id, name)`     | renames it                                                    | missing, blank name, or unchanged               |
-| `mergeDownCommand(doc, id)`             | merges it into the layer below                                | no layer below, or either layer hidden          |
-| `flattenCommand(doc)`                   | flattens the visible layers into one                          | nothing visible, or already one plain layer     |
-| `moveLayerCommand(doc, id, x, y, opts)` | puts its top-left pixel at x, y (and can move the selection)  | missing, or nothing would change                |
-| `liftSelectionCommand(doc, id, copy)`   | lifts (or copies) the selected pixels into a floating layer   | missing, no selection, or it misses the layer   |
-| `commitFloatingCommand(doc, floating)`  | merges a floating selection back into its source              | the floating layer isn't right above its source |
+| Factory                                 | Effect                                                       | Null when                                       |
+| --------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------- |
+| `newLayerCommand(doc, aboveId)`         | transparent canvas-sized "Layer N" above `aboveId` (or top)  | never                                           |
+| `duplicateLayerCommand(doc, id, name?)` | copies the layer, pixels included, directly above, as `name` | the layer is missing, or `name` is blank        |
+| `removeLayerCommand(doc, id)`           | deletes the layer                                            | missing, or the only layer                      |
+| `reorderLayerCommand(doc, id, toIndex)` | moves it to stack index `toIndex` (0 = bottom)               | missing, already there, or out of range         |
+| `renameLayerCommand(doc, id, name)`     | renames it                                                   | missing, blank name, or unchanged               |
+| `mergeDownCommand(doc, id)`             | merges it into the layer below                               | no layer below, or either layer hidden          |
+| `flattenCommand(doc)`                   | flattens the visible layers into one                         | nothing visible, or already one plain layer     |
+| `moveLayerCommand(doc, id, x, y, opts)` | puts its top-left pixel at x, y (and can move the selection) | missing, or nothing would change                |
+| `liftSelectionCommand(doc, id, copy)`   | lifts (or copies) the selected pixels into a floating layer  | missing, no selection, or it misses the layer   |
+| `commitFloatingCommand(doc, floating)`  | merges a floating selection back into its source             | the floating layer isn't right above its source |
+| `layerViaCopyCommand(doc, id)`          | copies the selected pixels into a new layer directly above   | no selection, hidden or missing, or it misses   |
+| `layerViaCutCommand(doc, id)`           | cuts the selected pixels out into a new layer directly above | as for Layer via Copy                           |
+| `pasteCommand(doc, aboveId, pixels, …)` | adds the pixels as "Layer N" above `aboveId` at x, y         | never                                           |
 
 `newLayerCommand` returns an `AddLayerCommand`; the others return the matching class
 (`DuplicateLayerCommand`, `RemoveLayerCommand`, …). A document always keeps at least one layer.
+A duplicate is named "… copy" unless given a name (trimmed), so the Duplicate Layer dialog
+needs no rename step.
 
 - **Dirty rects**: adding, removing, duplicating or reordering a layer dirties its canvas area,
   and moving it dirties its old and new canvas area. Renaming dirties nothing. Merge and flatten
   dirty the result's canvas area. Lifting dirties the selection's bounds, and committing the
   floating layer's bounds plus the area of the source it changed. A brush or eraser stroke, a
-  fill and a clear dirty the area they changed.
+  fill and a clear dirty the area they changed. Layer via Copy or Cut and Paste dirty the new
+  layer's canvas area, and report the selection they clear.
 - **`layerPixels`**: merge and flatten list the result layer in `DocumentChange.layerPixels`,
   both ways, because the layer with that ID has different pixels. **Every command that changes
   a layer's pixels must list it there** (layer space; `rect: null` for the whole layer), or its
   thumbnail won't update. Lifting and committing list the source both ways: lifting with the
   rect it cut (a copy lists nothing), committing with the rect it changed, or `rect: null` if
   the source grew (a copy committed where it was lifted changes nothing). A stroke, a fill and
-  a clear list the rect they changed, or `rect: null` if they grew the layer. Moving a layer
-  changes no pixels and lists nothing.
+  a clear list the rect they changed, or `rect: null` if they grew the layer. Layer via Cut
+  lists the source with the rect it cut, both ways. Moving a layer changes no pixels and lists
+  nothing.
 
 ### Merge down
 
@@ -78,6 +86,22 @@ would do nothing, like the selection helpers.
 
 All visible layers become one canvas-sized layer at 0, 0 that keeps the ID and name of the
 bottom visible layer. Hidden layers are discarded and transparent areas stay transparent.
+
+### Layer via Copy and Layer via Cut
+
+- The selected pixels of the active layer go into a new raster layer "Layer N" the size of
+  the selection's bounds, directly above it, which becomes active. The selection is cleared,
+  as in Photoshop; undo brings it back along with the source's pixels.
+- They're weighted by coverage as lifting a floating selection weights them
+  (`splitSelectedPixels` in `selected-pixels.ts`, which lifting, Layer via and the
+  clipboard's copies share): a pixel with alpha a and coverage c gives the new layer alpha
+  round(a × c / 255), colour unchanged. Layer via Cut leaves the rest in the source, saving
+  the area it cut in a `PixelSnapshot` for undo; Copy leaves the source alone.
+- The new layer takes the source's opacity and blend mode, so the pixels look as they did.
+- Null without a selection, for a missing or hidden layer (Photoshop refuses hidden layers
+  too), or when the selection's bounds miss the layer. A selection over transparent pixels
+  still makes a layer, a transparent one.
+- `runLayerAction` commits a floating selection first, so they take the merged pixels.
 
 ## Floating selections
 
@@ -111,7 +135,8 @@ its source, the selection and position as lifted, and a `PixelSnapshot` of the p
   The first change marks it as `edited` (undo clears that again), so that committing it where
   it was lifted composites it like a moved one and keeps the paint.
 - **What commits it**: Layer → Commit Floating Selection (Ctrl/Cmd+Enter) and Merge Down; New
-  Layer and Flatten Image, first; making another layer active (clicking its row, Alt+[ or
+  Layer, Flatten Image, Layer via Copy and Cut, and Edit → Cut, Copy, Copy Merged and Paste,
+  first; making another layer active (clicking its row, Alt+[ or
   Alt+]); hiding or fading the source; any selection change (a marquee, a lasso, a Magic Wand
   click on the canvas, Select All, Deselect, Inverse); switching from the Move tool to
   another; Save, Save As and Export, after the file picker (cancelling it keeps the selection
@@ -155,16 +180,19 @@ its source, the selection and position as lifted, and a `PixelSnapshot` of the p
 
 ## Layer menu and shortcuts
 
-| Keys                   | Action                                       |
-| ---------------------- | -------------------------------------------- |
-| Ctrl/Cmd+Shift+N       | new layer above the active one               |
-| Ctrl/Cmd+J             | duplicate the active layer                   |
-| Ctrl/Cmd+E             | merge down                                   |
-| Ctrl/Cmd+[, Ctrl/Cmd+] | move the active layer down, up               |
-| Alt+[, Alt+]           | select the layer below, above (no menu item) |
-| Ctrl/Cmd+Enter         | commit the floating selection                |
+| Keys                   | Action                                                           |
+| ---------------------- | ---------------------------------------------------------------- |
+| Ctrl/Cmd+Shift+N       | new layer above the active one                                   |
+| Ctrl/Cmd+J             | Layer via Copy with a selection, else duplicate the active layer |
+| Ctrl/Cmd+Shift+J       | Layer via Cut (needs a selection)                                |
+| Ctrl/Cmd+E             | merge down                                                       |
+| Ctrl/Cmd+[, Ctrl/Cmd+] | move the active layer down, up                                   |
+| Alt+[, Alt+]           | select the layer below, above (no menu item)                     |
+| Ctrl/Cmd+Enter         | commit the floating selection                                    |
 
-The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts.
+The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts. Ctrl/Cmd+J's
+badge shows on the item it would run: Layer via Copy while there's a selection, Duplicate
+Layer otherwise.
 
 - Shortcuts call `preventDefault`, so the browser's own action doesn't run (downloads,
   search, back and forward). They're ignored while typing in a text field. Only the move and
@@ -172,7 +200,23 @@ The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts.
 - Brackets match by key position as well as character, because Option+[ types a quotation
   mark on a Mac. Ctrl+Alt (AltGr) never matches.
 - Browsers may keep Ctrl/Cmd+Shift+N for themselves (a new private window in Chrome, Edge and
-  Safari), so in a normal tab use the menu or the New layer button.
+  Safari), so in a normal tab use the menu or the New layer button. Likewise Ctrl/Cmd+Shift+J,
+  which opens the developer tools in some browsers.
+
+## Duplicate and Delete from the canvas
+
+Without a selection, the canvas's context menu ([tools.md](tools.md#context-menu)) offers
+Duplicate Layer… and Delete Layer, which ask first (`AppController.openDuplicateLayer` and
+`openDeleteLayer`, then `runLayerAction` as the menu bar does):
+
+- **Duplicate Layer…** opens "Duplicate Layer", showing "Duplicate: <name>" and an "As:" field
+  that starts as "<name> copy", selected so it can be typed over. OK or Enter makes the copy
+  under that name, trimmed, directly above, and makes it active: one undo step, "Duplicate
+  Layer". A blank name is refused, as when renaming (OK is disabled); Esc cancels.
+- **Delete Layer** asks "Delete the layer “<name>”?" with Cancel, which has the focus so that
+  Enter is safe, and Delete; Esc cancels. Disabled for the only layer. Undo brings it back.
+- The Layer menu's Duplicate Layer and Delete Layer and the panel's buttons still act straight
+  away, as before.
 
 ## Open decisions
 
@@ -183,6 +227,9 @@ The Layer menu also has Delete Layer and Flatten Image, which have no shortcuts.
   overlap, because the merged pair is rounded before it's composited.
 - **Flatten naming** keeps the bottom visible layer's name; Photoshop names the result
   "Background".
+- **Asking first**: only the context menu asks before duplicating or deleting; the Layer menu
+  and the panel's buttons act at once. They could share the dialogs later if that feels
+  inconsistent.
 - **Memory**: merge, flatten, and a commit, stroke or fill that grows its layer keep the
   replaced layers whole in history; a lift, a clear and any other commit, stroke or fill keep
   only what they changed (a stroke in 64 px tiles). Image Size and Rotate Layer keep whole
