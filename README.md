@@ -17,8 +17,9 @@ Photoshop.
 ## Features so far
 
 - New documents up to 8192×8192 pixels with a white or transparent background
-- Native layered `.pixelsoup` files (a zip of `document.json` plus one PNG per layer; see
-  [docs/file-format.md](docs/file-format.md)) that keep every layer's pixels exactly
+- Native layered `.soup` files (a zip of `document.json` plus one PNG per layer; see
+  [docs/file-format.md](docs/file-format.md)) that keep every layer's pixels exactly. Files
+  saved as `.pixelsoup` by earlier versions still open, and Save writes back to them
 - Open PNG, JPEG and WebP images as new documents, or import them as a centred new layer
 - Export the visible layers, flattened, as PNG, JPEG (with a quality setting) or WebP
 - Unsaved-changes marker in the toolbar and window title, with a prompt before anything is
@@ -35,6 +36,9 @@ Photoshop.
   flatten image. Merging bakes in each layer's opacity, so the image looks the same afterwards
 - Layer via Copy and Layer via Cut: the selected pixels, soft edges included, become a new
   layer, copied or cut out of the active one
+- Toolbar with one button per tool group: the marquees share one, as do the lassos, showing
+  the one last used. Right-click it, hold it down or click its corner triangle to choose
+  another from a flyout
 - Rectangular and elliptical marquee tools (the ellipse has anti-aliased edges) in New, Add,
   Subtract and Intersect modes, picked in the tool-options bar or with modifier keys
 - Lasso and Polygonal Lasso with anti-aliased edges, in the same modes. An outline that
@@ -70,7 +74,8 @@ Photoshop.
 - Right-click menu on the canvas: Deselect, Select Inverse, Layer via Copy and Layer via Cut
   with a selection; Duplicate Layer… (name the copy) and Delete Layer (with a confirmation)
   without one
-- Crop tool: draw a box, then resize it with eight handles or move it, freely or at a fixed
+- Crop tool: a box appears straight away, around the selection or the whole canvas. Resize it
+  with eight handles, draw a new one, or move it once you've adjusted it, freely or at a fixed
   ratio (the original's, 1:1, 4:3, 3:2, 16:9 or custom), with a rule-of-thirds grid while
   adjusting. A box past the canvas enlarges it with transparent space. Cropped-away pixels stay
   on their layers unless "Delete cropped pixels" is on
@@ -99,7 +104,7 @@ Photoshop.
 
 Shift or Alt used to pick the mode at the start of a drag constrain or centre the shape only
 after being released and pressed again. With no selection, they constrain straight away.
-Selections aren't saved in `.pixelsoup` files, and changing one doesn't count as an unsaved
+Selections aren't saved in `.soup` files, and changing one doesn't count as an unsaved
 change. Some browsers keep Ctrl/Cmd+D (bookmark) or Ctrl/Cmd+Shift+I (developer tools) for
 themselves, and Mac browsers usually take Cmd+H to hide themselves; the Select and View menus
 always work.
@@ -206,15 +211,16 @@ allows it, and Ctrl/Cmd+V pastes an image copied in another app. Details and bro
 
 ### Crop shortcuts
 
-| Keys                             | Action                                                  |
-| -------------------------------- | ------------------------------------------------------- |
-| C                                | crop tool (the box starts as the selection's bounds)    |
-| Drag                             | draw a crop box                                         |
-| Drag a handle, or inside the box | resize, move                                            |
-| Shift during a drag              | keep the box square, or its shape (with the Free ratio) |
-| Alt during a drag                | draw or resize from the centre                          |
-| Enter, or double-click inside    | crop                                                    |
-| Esc                              | remove the box (during a drag: put it back as it was)   |
+| Keys                          | Action                                                          |
+| ----------------------------- | --------------------------------------------------------------- |
+| C                             | crop tool, with a box around the selection, or the whole canvas |
+| Drag outside the box          | draw a new box                                                  |
+| Drag inside the box           | draw a new box at first; move the box once it's been adjusted   |
+| Drag a handle                 | resize                                                          |
+| Shift during a drag           | keep the box square, or its shape (with the Free ratio)         |
+| Alt during a drag             | draw or resize from the centre                                  |
+| Enter, or double-click inside | crop (not while the box is still the untouched whole canvas)    |
+| Esc                           | put back the starting box (during a drag: the box as it was)    |
 
 Each crop is one undo step. The Image menu holds the rest: Crop to Selection, Image Size…,
 Canvas Size…, the rotations and flips (exact: four quarter turns or two flips give back the

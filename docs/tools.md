@@ -1,14 +1,14 @@
 # Tools, selections and painting
 
-How editing tools plug into the viewport, how selections work, how the painting tools paint,
-how Fill, Clear and the Paint Bucket fill, the clipboard, the canvas's context menu and the
-Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
+How editing tools plug into the viewport and the toolbar, how selections work, how the painting
+tools paint, how Fill, Clear and the Paint Bucket fill, the clipboard, the canvas's context menu
+and the Crop tool. The code lives in `src/core/selection.ts` (masks), `src/core/paint` and
 `src/core/commands/stroke-commands.ts` (the stroke engine), `src/core/paint/flood-region.ts`
 and `src/core/commands/fill-commands.ts` (flood regions, Fill and Clear), `src/ui/tools`
 (tools), `src/ui/edit-actions.ts` and `src/ui/use-edit-shortcuts.ts` (the Edit menu's actions
 and shortcuts), `src/ui/clipboard` (Cut, Copy, Paste), `src/ui/canvas-menu.ts` and
-`src/ui/panels` (`ContextMenu`, `MenuList`), `src/ui/color` (colours) and `src/ui/viewport`
-(input routing and drawing).
+`src/ui/panels` (`ContextMenu`, `MenuList`, and `ToolPicker` with `tool-groups.ts`),
+`src/ui/color` (colours) and `src/ui/viewport` (input routing and drawing).
 
 ## Selections (core)
 
@@ -33,7 +33,7 @@ and shortcuts), `src/ui/clipboard` (Cut, Copy, Paste), `src/ui/canvas-menu.ts` a
   through `selectAllCommand`, `deselectCommand` and `invertSelectionCommand` (null when they
   would change nothing). It reports the old and new bounds as `DocumentChange.selectionDirty`
   with no pixel `dirty` rect, and sets `changesContent: false`: selection changes are undo steps
-  but don't make the document unsaved, because selections aren't saved in `.pixelsoup` files.
+  but don't make the document unsaved, because selections aren't saved in `.soup` files.
   Other commands change it as they move pixels: a `MoveLayerCommand` given a `selection` moves
   a floating selection's outline in the same step, and the canvas and transform commands carry
   or clear it ([transform.md](transform.md)).
@@ -87,6 +87,18 @@ tools). A click tool (the Magic Wand, the Paint Bucket) makes one step per click
   group's last-used tool and Shift+key cycles through it. They're ignored with Ctrl, Cmd or Alt,
   while typing and while a dialog is open. `TOOL_KEYS` has M marquee, L lasso, W magic wand,
   V move, B brush, E eraser, G paint bucket, I eyedropper and C crop, and reserves T text.
+- **Toolbar** (`ToolPicker`): one button per group (`ToolManager.groups`, in toolbar order).
+  It shows the icon, name and key of the group's last-used tool (`ToolManager.lastUsed`, the
+  only record of it), so it follows the key, Shift+key and the flyout alike, and a click
+  activates that tool. A small triangle in the top-right corner (the key is in the
+  bottom-right one) marks a group of several tools, such as the marquees (M) and the lassos
+  (L). A right-click, a press held for 400 ms (`LONG_PRESS_MS`), a click on the triangle, Arrow
+  Down or the context menu key opens a flyout below the button: a `ContextMenu` (the button has
+  `aria-haspopup="menu"`) listing the group's tools with their icons, names and keys, the
+  last-used one ticked (`menuitemradio`). Choosing one activates it; a choice, Escape or a
+  press outside closes the flyout and puts the focus back on the button, and a press on the
+  button itself only closes it. A new group needs no toolbar changes: tools given the same key
+  share a button and a flyout (`tool-groups.ts` works out what they show).
 - `[` and `]`, with or without Shift (`useBrushShortcuts`), go to `ToolManager.stepBrush`
   wherever the pointer is: the active tool's `stepBrush` handles them, if it has one. X and D
   (`useColorShortcuts`) swap and reset the colours. Both are ignored while typing and while a
@@ -201,11 +213,11 @@ where WebGL 2 isn't available. The ants' logic, free of the DOM, is in `ants.ts`
   than 4 CSS px across, it becomes a crosshair on the device pixel grid. It shows only while the
   pointer is over the canvas (or during a stroke) and not while panning; the tool's own CSS
   cursor is `none` meanwhile.
-- The crop box shades everything outside it (`--crop-shade`), shows any area it adds beyond the
-  canvas as a transparent checkerboard continuing the composite's, and while a drag adjusts it
-  draws a rule-of-thirds grid (`--crop-grid` over `--crop-grid-halo`). Its outline and 7 CSS px
-  square handles sit on the device pixel grid; edge handles are left out where they wouldn't
-  fit between the corners.
+- The crop box shades everything outside it (`--crop-shade`), unless it's the whole canvas,
+  shows any area it adds beyond the canvas as a transparent checkerboard continuing the
+  composite's, and while a drag adjusts it draws a rule-of-thirds grid (`--crop-grid` over
+  `--crop-grid-halo`). Its outline and 7 CSS px square handles sit on the device pixel grid;
+  edge handles are left out where they wouldn't fit between the corners.
 - A floating selection on the move is a new selection each frame it moves, so its outline is
   traced again each time (about 7 ms for a 2000 × 1500 selection at 100 %). Reusing the cached
   path with an offset would be cheaper, except where the canvas edge clips the selection.
@@ -631,17 +643,23 @@ the Edit menu always works.
 ## Crop tool
 
 `CropTool` (C) crops the canvas to a box with `cropCommand` ([transform.md](transform.md)). The
-box is session state: it starts as the selection's bounds when the tool becomes active, and
-goes away when the tool does, or when the document is replaced or changes size.
+box is session state, and goes away when the tool does.
 
-- **Drawing**: dragging outside the box, or anywhere with no box, draws a new one, corners
+- **The initial box**: as the tool becomes active it puts up a box straight away: the
+  selection's bounds if there is a selection, else the whole canvas, with its handles and size
+  readout. It doesn't follow later selection changes. After a crop, and when the document is
+  replaced or the canvas changes size, the box starts again as the whole canvas.
+- **Armed and unarmed**: the initial box is unarmed. Its handles adjust it as usual, but a drag
+  that starts inside it draws a new box, as a drag outside does. Once it's adjusted, drawn
+  afresh or fitted to a ratio, the box is armed, and a drag inside it moves it.
+- **Drawing**: dragging outside the box, or inside the unarmed one, draws a new box, corners
   snapped to whole pixels, at least 1 × 1. It may reach past the canvas, which cropping then
   enlarges with transparent space.
 - **Adjusting**: a press within 6 CSS px of an edge (`HANDLE_REACH`), anywhere along it, drags
-  that edge, or near a corner both edges; inside that, a press moves the box. An edge reaches
-  in at most a third of the box, so even a small box keeps a middle to move it by. Dragging an
-  edge past the opposite one flips the box, and the cursor shows what a press would do. A drag
-  takes hold after 3 CSS px of travel; a click changes nothing.
+  that edge, or near a corner both edges; inside that, a press moves an armed box. An edge
+  reaches in at most a third of the box, so even a small box keeps a middle to move it by.
+  Dragging an edge past the opposite one flips the box, and the cursor shows what a press
+  would do. A drag takes hold after 3 CSS px of travel; a click changes nothing.
 - **Shift and Alt**: in Free, Shift keeps the box square while drawing and keeps its shape
   while resizing. Alt draws or resizes from the centre. Pressing or releasing either mid-drag
   updates the box straight away.
@@ -649,13 +667,17 @@ goes away when the tool does, or when the document is replaced or changes size.
   (terms up to 10000, decimals allowed). Original and the presets fit a portrait box as well as
   a landscape one: the drag's direction decides while drawing, the box's shape while resizing.
   1:1 and Custom are exact. Dragging an edge with a ratio sets the other side about its centre.
-  Changing the ratio reshapes the box about its centre, keeping its area and orientation.
+  Until the box is adjusted or drawn, choosing a ratio fits the largest box of that shape
+  inside the initial box, centred, and arms it (unless that is the initial box); after that,
+  it reshapes the box about its centre, keeping its area and orientation.
 - **Delete cropped pixels** (off by default) trims every layer to the new canvas. Off, layers
   keep the pixels outside it, which come back if the canvas grows again.
 - **Committing**: Enter, a double-click inside the box or the options bar's ✓ crops, as one
-  undo step ("Crop") after committing a floating selection; Escape or ✗ removes the box. A box
-  over 8192 pixels on a side is refused with a message. Escape mid-drag, pointer cancel and
-  window blur put back the box from before the press.
+  undo step ("Crop") after committing a floating selection. The untouched whole-canvas box
+  would crop nothing, so they do nothing then and add no step (✓ is disabled). Escape or ✗
+  puts back the initial box; while the box is unarmed ✗ is disabled and the tool leaves
+  Escape alone. A box over 8192 pixels on a side is refused with a message. Escape mid-drag,
+  pointer cancel and window blur put back the box from before the press.
 
 The status bar shows the box's size, and the grid shows while a drag adjusts the box (see
 [Drawing](#drawing)). `crop-geometry.ts` holds the box arithmetic, tested on its own.
@@ -667,8 +689,10 @@ The status bar shows the box's size, and the grid shows while a drag adjusts the
    commit a floating selection first if they would change its source. Painting tools get the
    clipping from the stroke engine, and filling ones from `fillCommand`; both change only the
    active layer, which while a selection floats is the floating layer, never its source.
-3. Add the tool in `createToolManager` and give it an icon in `ToolPicker`. Items it wants in
-   the canvas's context menu go in `contextMenu`.
+3. Add the tool in `createToolManager` and give it an icon in `ToolPicker`. A tool sharing
+   another's key joins that group's toolbar button and flyout; nothing else changes. Items it
+   wants in the canvas's context menu go in `contextMenu`.
 4. Unit-test pointer sequences against `FakeViewport` (`fake-viewport.ts`) and, for tools that
    work per animation frame, `FakeClock` (`fake-clock.ts`), as `marquee-tool.test.ts`,
    `lasso-tool.test.ts`, `move-tool.test.ts`, `paint-tool.test.ts` and `crop-tool.test.ts` do.
+   `tool-groups.test.ts` covers what the toolbar's buttons and flyouts show.
