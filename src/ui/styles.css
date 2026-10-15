@@ -1133,6 +1133,11 @@ button.danger:hover:not(:disabled) {
   border-color: var(--invalid);
 }
 
+/* Room for a position or size with decimals, and a minus sign. */
+.options-number-wide {
+  width: 68px;
+}
+
 .options-select {
   padding: var(--space-1) var(--space-2);
   font: inherit;

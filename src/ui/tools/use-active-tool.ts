@@ -16,3 +16,22 @@ export function useToolOptions(tools: ToolManager): Tool | ToolSession {
   const subscribe = useCallback((notify: () => void) => tools.subscribe(notify), [tools]);
   return useSyncExternalStore(subscribe, () => tools.options);
 }
+
+/**
+ * The name the options bar shows, following a session that switches between Free
+ * Transform, Scale and Rotate as well.
+ */
+export function useToolOptionsName(tools: ToolManager): string {
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const unsubscribeTools = tools.subscribe(notify);
+      const unsubscribeOverlay = tools.subscribeOverlay(notify);
+      return () => {
+        unsubscribeTools();
+        unsubscribeOverlay();
+      };
+    },
+    [tools],
+  );
+  return useSyncExternalStore(subscribe, () => tools.options.name);
+}

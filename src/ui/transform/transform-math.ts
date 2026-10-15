@@ -443,3 +443,15 @@ export function withField(
       return assertNever(field);
   }
 }
+
+/** How the options bar shows a field's value: to two decimal places at most. */
+export function fieldText(value: number): string {
+  return String(Math.round(value * 100) / 100 || 0);
+}
+
+/** The number typed into an options-bar field, or null if it isn't one. */
+export function parseFieldText(text: string): number | null {
+  if (text.trim() === '') return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}

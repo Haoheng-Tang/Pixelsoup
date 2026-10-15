@@ -3,12 +3,14 @@ import type { Affine, Point, Rect } from '../../core';
 import { multiply, scaling, transformPoint, translation } from '../../core';
 import type { TransformParams } from './transform-math';
 import {
+  fieldText,
   hitTransform,
   identityParams,
   isIdentity,
   moveParams,
   normalizeAngle,
   orientParams,
+  parseFieldText,
   rotateCursor,
   rotateParams,
   scaleParams,
@@ -355,5 +357,17 @@ describe('the options-bar fields', () => {
     expect(withField(wide, params, 'x', Number.NaN, 'px', false)).toBeNull();
     expect(withField(wide, params, 'y', 1e6, 'px', false)).toBeNull();
     expect(withField(wide, params, 'width', -100, 'px', false)).toMatchObject({ scaleX: -1 });
+  });
+
+  it('show two decimal places at most, and read back what was typed', () => {
+    expect(fieldText(100 / 3)).toBe('33.33');
+    expect(fieldText(150)).toBe('150');
+    expect(fieldText(-37.5)).toBe('-37.5');
+    expect(fieldText(-0.004)).toBe('0');
+    expect(parseFieldText(' 45 ')).toBe(45);
+    expect(parseFieldText('-12.5')).toBe(-12.5);
+    expect(parseFieldText('')).toBeNull();
+    expect(parseFieldText('abc')).toBeNull();
+    expect(parseFieldText('Infinity')).toBeNull();
   });
 });
