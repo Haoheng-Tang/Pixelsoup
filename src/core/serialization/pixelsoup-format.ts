@@ -7,7 +7,7 @@ import { assertNever, createRasterLayer, isBlendMode } from '../layer';
 import type { PixelBuffer } from '../pixel-buffer';
 import type { PngCodec } from './png-codec';
 
-// The .pixelsoup format: a zip archive holding `document.json` (a DocumentManifest) and
+// The .soup format: a zip archive holding `document.json` (a DocumentManifest) and
 // one PNG per raster layer. The full specification is in docs/file-format.md.
 
 /** Version of document.json this build writes, and the newest version it can read. */
@@ -57,7 +57,7 @@ export interface RasterLayerEntry extends LayerEntryBase {
  */
 export type LayerEntry = RasterLayerEntry;
 
-/** A .pixelsoup file that cannot be read: damaged, malformed, or from a newer version. */
+/** A .soup file that cannot be read: damaged, malformed, or from a newer version. */
 export class DocumentFormatError extends Error {
   override name = 'DocumentFormatError';
 }
@@ -94,7 +94,7 @@ function layerEntry(layer: Layer): LayerEntry {
 }
 
 /**
- * Writes `doc` as .pixelsoup archive bytes.
+ * Writes `doc` as .soup archive bytes.
  *
  * The layer list and properties are captured synchronously when this is called. Layer
  * pixel buffers are encoded afterwards, so they must not be modified until the returned
@@ -126,7 +126,7 @@ function layerImage(layer: Layer): PixelBuffer | null {
 }
 
 /**
- * Reads .pixelsoup archive bytes into a new document.
+ * Reads .soup archive bytes into a new document.
  * Throws `DocumentFormatError` with a user-readable message if the file can't be used.
  */
 export async function deserializeDocument(

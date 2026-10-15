@@ -1,7 +1,7 @@
 import type { PixelBuffer } from '../pixel-buffer';
 
 /**
- * Encodes and decodes the PNG images that hold raster layer pixels in .pixelsoup files.
+ * Encodes and decodes the PNG images that hold raster layer pixels in .soup files.
  * Injected by the UI so core needs no image APIs.
  *
  * Implementations must be lossless: `decode(await encode(p))` returns exactly the

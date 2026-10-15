@@ -7,7 +7,7 @@ import type { FileRef, FileStore, FileType, OpenedFile, SaveRequest } from '../i
 export class MemoryFileStore implements FileStore {
   readonly files = new Map<string, Blob>();
   pick: File | null = null;
-  saveName: string | null = 'picked.pixelsoup';
+  saveName: string | null = 'picked.soup';
   openPickers: (readonly FileType[])[] = [];
   savePickers: SaveRequest[] = [];
   /** Runs inside `save` after the data is produced, to simulate work during a save. */

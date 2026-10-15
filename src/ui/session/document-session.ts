@@ -18,6 +18,7 @@ import type { ExportOptions } from './file-types';
 import {
   EXPORT_FORMATS,
   IMAGE_FILE_TYPE,
+  LEGACY_PIXELSOUP_EXTENSION,
   OPEN_FILE_TYPES,
   PIXELSOUP_EXTENSION,
   PIXELSOUP_FILE_TYPE,
@@ -28,7 +29,7 @@ import {
 export interface DocumentSessionDeps {
   readonly editor: Editor;
   readonly store: FileStore;
-  /** Codec for layer images inside .pixelsoup files. */
+  /** Codec for layer images inside .soup files. */
   readonly png: PngCodec;
   /** Decodes an imported image file (PNG, JPEG, WebP). */
   readonly decodeImage: (file: Blob) => Promise<PixelBuffer>;
@@ -113,9 +114,10 @@ export class DocumentSession {
   }
 
   /**
-   * Asks for a .pixelsoup document or an image and opens it in place of the current
-   * document. An image becomes a new single-layer document. Resolves to false if the
-   * user cancelled.
+   * Asks for a document or an image and opens it in place of the current document. A
+   * document (`.soup`, or `.pixelsoup` from before) becomes the file Save writes back to,
+   * whatever its extension; an image becomes a new single-layer document. Resolves to false
+   * if the user cancelled.
    */
   async open(): Promise<boolean> {
     const opened = await this.deps.store.open(OPEN_FILE_TYPES);
@@ -129,7 +131,7 @@ export class DocumentSession {
         doc = await deserializeDocument(new Uint8Array(await file.arrayBuffer()), this.deps.png);
         saveTarget = ref;
       } else {
-        // Save must never overwrite the image with a .pixelsoup file, so keep no target.
+        // Save must never overwrite the image with a document, so keep no target.
         const pixels = await this.deps.decodeImage(file);
         doc = createDocument(pixels.width, pixels.height);
         doc.layers.push(createRasterLayer({ id: createLayerId(doc), name, pixels }));
@@ -278,9 +280,12 @@ export function baseName(fileName: string): string {
   return dot > 0 ? fileName.slice(0, dot) : fileName;
 }
 
-/** By extension, or by the zip signature for files saved without one. */
+/** By extension (`.soup` or `.pixelsoup`), or by the zip signature for files without one. */
 async function isPixelsoupFile(file: Blob & { readonly name: string }): Promise<boolean> {
-  if (file.name.toLowerCase().endsWith(PIXELSOUP_EXTENSION)) return true;
+  const name = file.name.toLowerCase();
+  if (name.endsWith(PIXELSOUP_EXTENSION) || name.endsWith(LEGACY_PIXELSOUP_EXTENSION)) {
+    return true;
+  }
   const header = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   return header[0] === 0x50 && header[1] === 0x4b && header[2] === 0x03 && header[3] === 0x04;
 }
