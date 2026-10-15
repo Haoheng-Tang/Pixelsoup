@@ -6,7 +6,7 @@ Step 4 of the build order. Pixelsoup now starts with a new blank document instea
 hard-coded demo, and has a File menu: New, Open, Import Image as Layer, Save, Save As, Export,
 Close and Demo Document.
 
-- Documents are saved in a new native layered format, `.pixelsoup`: a zip of `document.json`
+- Documents are saved in a new native layered format, `.soup`: a zip of `document.json`
   plus one PNG per layer, specified in `docs/file-format.md`.
 - PNG, JPEG and WebP images can be opened as a new document or imported as a centred layer.
 - The visible layers can be exported, flattened, as PNG, JPEG (with a quality slider) or WebP.
@@ -32,7 +32,7 @@ Commits are meant to be reviewed one at a time:
    - `Editor` tracks the save point (`isDirty`, `markSaved`) and gains `replaceDocument`, which
      swaps in another document with a fresh, clean history and announces the swap.
    - `createBlankDocument` (1–8192 px, white or transparent background) and `MAX_IMAGE_SIZE`.
-3. **`.pixelsoup` serialization in core**: `serializeDocument` / `deserializeDocument` with an
+3. **`.soup` serialization in core**: `serializeDocument` / `deserializeDocument` with an
    injected `PngCodec`, so core stays DOM-free. Loading validates the whole manifest and throws
    `DocumentFormatError` with a message written for the user. Adds `fflate` (pre-approved).
 4. **Lossless PNG codec and image decoding** (`src/ui/io`): a small pure-TypeScript PNG
@@ -59,10 +59,10 @@ Commits are meant to be reviewed one at a time:
    describes the `FileStore` seam and resolves the startup-document, layer-ID and file-format
    open decisions; the README lists the new features and the Chromium note for Save.
 
-## The `.pixelsoup` format
+## The `.soup` format
 
 ```
-holiday.pixelsoup (zip)
+holiday.soup (zip)
 ├── document.json        deflated
 └── layers/layer-1.png   stored (already compressed), one per raster layer
 ```
@@ -107,11 +107,11 @@ In Chrome or Edge:
 - [ ] File → Import Image as Layer… with a JPEG adds a centred layer named after the file; one
       Ctrl+Z removes it.
 - [ ] File → Open on a PNG, JPEG or WebP gives a one-layer document; Save then asks for a new
-      `.pixelsoup` file and never overwrites the image.
+      `.soup` file and never overwrites the image.
 - [ ] Ctrl+Shift+E exports PNG, JPEG (quality slider; transparent areas become white) and WebP.
 - [ ] With unsaved changes, New, Open, Close, Demo Document and closing or reloading the tab all
       ask first; Cancel keeps the document.
-- [ ] Opening a file that isn't an image or a valid `.pixelsoup` shows an error and leaves the
+- [ ] Opening a file that isn't an image or a valid `.soup` shows an error and leaves the
       current document unchanged.
 
 In Firefox or Safari:
@@ -132,7 +132,7 @@ the pickers disabled.
 - **Discard prompt** offers Discard or Cancel, not Save: a save picker would need another user
   activation.
 - **Canvas precision**: JPEG/WebP import and WebP export go through a canvas, so translucent
-  pixels may lose a little colour precision. `.pixelsoup` files and PNG export are exact.
+  pixels may lose a little colour precision. `.soup` files and PNG export are exact.
 - **Write permission**: if the user denies write access to an opened file, Save does nothing;
   Save As still works.
 - **Old browsers**: the file-input fallback relies on the input's `cancel` event (Firefox 91+,
@@ -143,5 +143,5 @@ the pickers disabled.
 - **Several open documents**, recent files, autosave and crash recovery.
 - **Saving the selection**: there are no selection tools yet (step 5).
 - **Layer management** (delete, reorder, rename) beyond importing an image as a layer.
-- **Opening `.pixelsoup` files from the OS** (file handlers need the PWA, which isn't started).
+- **Opening `.soup` files from the OS** (file handlers need the PWA, which isn't started).
 - **Exporting single layers**, colour profiles and high bit depth (8-bit sRGB only, by design).

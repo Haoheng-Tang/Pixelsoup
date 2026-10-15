@@ -212,7 +212,7 @@ describe('DocumentSession', () => {
     expect(store.savePickers).toHaveLength(1);
   });
 
-  it('saves .soup files, and opens .soup and older .pixelsoup ones', async () => {
+  it('saves and opens .soup files only', async () => {
     const { session, store } = setup();
     await session.save();
     expect(store.savePickers[0]?.type.accept).toEqual({ [PIXELSOUP_MIME_TYPE]: ['.soup'] });
@@ -220,39 +220,8 @@ describe('DocumentSession', () => {
     store.pick = store.file('picked.soup');
     await session.open();
     const [everything, documents] = store.openPickers.at(-1) ?? [];
-    expect(everything?.accept[PIXELSOUP_MIME_TYPE]).toEqual(['.soup', '.pixelsoup']);
-    expect(documents?.accept).toEqual({ [PIXELSOUP_MIME_TYPE]: ['.soup', '.pixelsoup'] });
-  });
-
-  it('saves an opened .pixelsoup file back in place, and suggests .soup for Save As', async () => {
-    const { session, store, editor } = setup();
-    await session.save();
-    // The format hasn't changed: this is what an older version would have saved.
-    store.pick = new File([store.file('picked.soup')], 'old.pixelsoup');
-    expect(await session.open()).toBe(true);
-    expect(session.name).toBe('old');
-    expect(session.savesInPlace).toBe(true);
-
-    hideBottomLayer(editor);
-    expect(await session.save()).toBe(true);
-    expect(store.savePickers).toHaveLength(1);
-    expect(session.isDirty).toBe(false);
-    const bytes = new Uint8Array(await store.file('old.pixelsoup').arrayBuffer());
-    const loaded = await deserializeDocument(bytes, png);
-    expect(loaded.layers[0]?.visible).toBe(false);
-
-    store.saveName = null;
-    expect(await session.saveAs()).toBe(false);
-    expect(store.savePickers.at(-1)?.suggestedName).toBe('old.soup');
-  });
-
-  it('downloads an opened .pixelsoup file as .soup when the store cannot save in place', async () => {
-    const { session, store } = setup(new MemoryFileStore(false));
-    await session.save();
-    store.pick = new File([store.file('Untitled-1.soup')], 'old.pixelsoup');
-    await session.open();
-    await session.save();
-    expect(store.savePickers.map((r) => r.suggestedName)).toEqual(['Untitled-1.soup', 'old.soup']);
+    expect(everything?.accept[PIXELSOUP_MIME_TYPE]).toEqual(['.soup']);
+    expect(documents?.accept).toEqual({ [PIXELSOUP_MIME_TYPE]: ['.soup'] });
   });
 
   it('opens an image as a new single-layer document that Save does not overwrite', async () => {
@@ -294,12 +263,6 @@ describe('DocumentSession', () => {
     });
     expect(editor.document).toBe(before);
     expect(session.name).toBe('Untitled-1');
-
-    // An older .pixelsoup file is read as a document too, not as an image.
-    store.pick = new File(['{}'], 'broken.pixelsoup');
-    await expect(session.open()).rejects.toMatchObject({
-      message: expect.stringMatching(/zip archive/) as unknown,
-    });
   });
 
   it('returns false when the open picker is cancelled', async () => {

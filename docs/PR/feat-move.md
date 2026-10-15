@@ -21,7 +21,7 @@ lays the undo foundation the brush will reuse.
 - **`Selection.translate(dx, dy)`**, clipped to the canvas, so the marching ants follow moving
   pixels.
 
-A floating selection is never saved: Save commits it first. The `.pixelsoup` format is unchanged.
+A floating selection is never saved: Save commits it first. The `.soup` format is unchanged.
 
 ## What's included
 
@@ -276,4 +276,4 @@ pointer and key events and by hand, on a 1920 × 1200 JPEG photo. Results:
 - **Snapping, guides, alignment, and moving several layers at once.**
 - **Sub-pixel moves**: offsets stay whole pixels, so moving never resamples.
 - **Tiled snapshots and a faster compositor**: follow-ups, noted above.
-- **Saving a floating selection**: Save commits it, so the `.pixelsoup` format is unchanged.
+- **Saving a floating selection**: Save commits it, so the `.soup` format is unchanged.

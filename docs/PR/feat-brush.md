@@ -25,7 +25,7 @@ animation frame, from every pointer position the browser reports (coalesced even
 fast strokes leave no gaps. Shift-click draws a straight line from where the last stroke ended,
 and Esc cancels a stroke in progress.
 
-Colours aren't saved and changing them isn't an undo step. The `.pixelsoup` format is unchanged.
+Colours aren't saved and changing them isn't an undo step. The `.soup` format is unchanged.
 
 ## What's included
 

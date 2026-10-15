@@ -28,7 +28,7 @@ This is a small step between steps 5 and 6 of the build order.
 - **Layer menu and shortcuts**: Ctrl/Cmd+Shift+N, Ctrl/Cmd+J, Ctrl/Cmd+E, Ctrl/Cmd+[ and ],
   Alt+[ and ]. The menu also has Delete Layer and Flatten Image.
 
-The `.pixelsoup` format is unchanged. Layer order, names and pixels already round-trip, and the
+The `.soup` format is unchanged. Layer order, names and pixels already round-trip, and the
 active layer isn't saved.
 
 ## What's included
@@ -48,7 +48,7 @@ Commits are meant to be reviewed one at a time.
      - a move to where the layer already is;
      - a blank or unchanged name.
    - Helpers: `findLayerIndex` and `getLayerIndex` (`document.ts`), `duplicateLayer` (`layer.ts`).
-   - A `.pixelsoup` round-trip test with duplicated, renamed and reordered layers.
+   - A `.soup` round-trip test with duplicated, renamed and reordered layers.
 2. **Merge down and flatten** (core):
    - `MergeDownCommand`:
      - The result is `compositeLayers([lower, upper], area)`, which runs `CpuCompositor` on just
@@ -184,7 +184,7 @@ Unit tests cover:
 - **Flatten**: the visible layers are composited and hidden ones discarded; undo restores them all.
 - **Active-layer fix-up** after delete, merge, flatten, reorder, undo and document replace. It's
   never an undo step or an unsaved change.
-- **`.pixelsoup` round trip** with duplicated, renamed and reordered layers; numbering continues
+- **`.soup` round trip** with duplicated, renamed and reordered layers; numbering continues
   after loading.
 - **UI logic, without a DOM**:
   - layer actions and when they're enabled;

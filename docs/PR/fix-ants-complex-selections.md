@@ -30,7 +30,7 @@ panning lost all its slow frames. At 100 %, drawing the ants with WebGL rather t
 the GPU process from 260 to 51 ms a second animating, 547 to 124 panning and 625 to 123 under
 a hovering brush. Full numbers below.
 
-The selection model, the tracer's results at a cell of one pixel and the `.pixelsoup` format
+The selection model, the tracer's results at a cell of one pixel and the `.soup` format
 are unchanged. There are no new dependencies.
 
 ## What's included

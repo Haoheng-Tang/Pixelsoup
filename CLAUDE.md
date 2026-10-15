@@ -177,9 +177,9 @@ src/
 - **Vite 7 for now.** Vite 8 runs on Rolldown/Oxc prebuilt binaries; check them against the
   no-Rust constraint (AppLocker in particular) before upgrading.
 - **Startup** is a new blank 1920×1080 white document; the demo is under File → Demo Document.
-- **`.soup` is the native format** (older `.pixelsoup` files open too): a zip of `document.json`
-  plus one PNG per raster layer; PNG, JPEG and WebP are import and export only. Layer PNGs use
-  the lossless codec in `src/ui/io/png.ts` (canvas premultiplies). Spec: @docs/file-format.md
+- **`.soup` is the native format**: a zip of `document.json` plus one PNG per raster layer.
+  PNG, JPEG and WebP are import and export only. Layer PNGs use the lossless codec in
+  `src/ui/io/png.ts`, as canvas premultiplies. Spec, layer IDs, versioning: @docs/file-format.md
 
 ## Open decisions
 

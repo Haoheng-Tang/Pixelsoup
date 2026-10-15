@@ -18,7 +18,6 @@ import type { ExportOptions } from './file-types';
 import {
   EXPORT_FORMATS,
   IMAGE_FILE_TYPE,
-  LEGACY_PIXELSOUP_EXTENSION,
   OPEN_FILE_TYPES,
   PIXELSOUP_EXTENSION,
   PIXELSOUP_FILE_TYPE,
@@ -114,10 +113,9 @@ export class DocumentSession {
   }
 
   /**
-   * Asks for a document or an image and opens it in place of the current document. A
-   * document (`.soup`, or `.pixelsoup` from before) becomes the file Save writes back to,
-   * whatever its extension; an image becomes a new single-layer document. Resolves to false
-   * if the user cancelled.
+   * Asks for a .soup document or an image and opens it in place of the current
+   * document. An image becomes a new single-layer document. Resolves to false if the
+   * user cancelled.
    */
   async open(): Promise<boolean> {
     const opened = await this.deps.store.open(OPEN_FILE_TYPES);
@@ -280,12 +278,9 @@ export function baseName(fileName: string): string {
   return dot > 0 ? fileName.slice(0, dot) : fileName;
 }
 
-/** By extension (`.soup` or `.pixelsoup`), or by the zip signature for files without one. */
+/** By extension, or by the zip signature for files saved without one. */
 async function isPixelsoupFile(file: Blob & { readonly name: string }): Promise<boolean> {
-  const name = file.name.toLowerCase();
-  if (name.endsWith(PIXELSOUP_EXTENSION) || name.endsWith(LEGACY_PIXELSOUP_EXTENSION)) {
-    return true;
-  }
+  if (file.name.toLowerCase().endsWith(PIXELSOUP_EXTENSION)) return true;
   const header = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   return header[0] === 0x50 && header[1] === 0x4b && header[2] === 0x03 && header[3] === 0x04;
 }

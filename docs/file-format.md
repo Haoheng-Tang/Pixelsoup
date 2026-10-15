@@ -6,12 +6,7 @@ Pixelsoup's native, layered document format. Implemented in
 ## Extension
 
 Documents are saved as `.soup` files (`Untitled-1.soup`): Save and Save As suggest it, the
-save picker offers it and the download fallback uses it (`src/ui/session/file-types.ts`).
-
-Earlier versions saved the same format as `.pixelsoup`, and those files still open: the
-extension changed, not the format (still `formatVersion` 1). An opened `.pixelsoup` file is
-the file Save writes back to, under its old name, where the browser can save in place; Save
-As, and every save that downloads a copy, suggest the `.soup` name.
+file pickers offer it and the download fallback uses it (`src/ui/session/file-types.ts`).
 
 ## Container
 
@@ -27,7 +22,7 @@ images through each layer's `file` field, not by assuming the `layers/<id>.png` 
 ignore any archive entries the manifest doesn't reference.
 
 MIME type used by the app: `application/x-pixelsoup`. Readers detect the format by the
-`.soup` or `.pixelsoup` extension or the zip signature `PK\x03\x04`.
+`.soup` extension or the zip signature `PK\x03\x04`.
 
 ## `document.json`
 

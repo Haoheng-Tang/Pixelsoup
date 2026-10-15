@@ -18,8 +18,7 @@ Photoshop.
 
 - New documents up to 8192×8192 pixels with a white or transparent background
 - Native layered `.soup` files (a zip of `document.json` plus one PNG per layer; see
-  [docs/file-format.md](docs/file-format.md)) that keep every layer's pixels exactly. Files
-  saved as `.pixelsoup` by earlier versions still open, and Save writes back to them
+  [docs/file-format.md](docs/file-format.md)) that keep every layer's pixels exactly
 - Open PNG, JPEG and WebP images as new documents, or import them as a centred new layer
 - Export the visible layers, flattened, as PNG, JPEG (with a quality setting) or WebP
 - Unsaved-changes marker in the toolbar and window title, with a prompt before anything is

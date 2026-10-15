@@ -27,7 +27,7 @@ selection masks, floating selections and layer actions.
   gesture.
 
 Every new edit is one undo step and undoes to the exact bytes. Copying isn't an undo step,
-and the clipboard is session state, like the colours. The `.pixelsoup` format is unchanged,
+and the clipboard is session state, like the colours. The `.soup` format is unchanged,
 and there are no new dependencies.
 
 ## What's included
