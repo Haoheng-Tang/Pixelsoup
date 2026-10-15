@@ -17,7 +17,7 @@ interface ContextMenuProps {
    */
   onClose: () => void;
   /**
-   * Whether a press outside the menu, on 	arget, should only close it: it's stopped
+   * Whether a press outside the menu, on `target`, should only close it: it's stopped
    * there, so dismissing the menu over the canvas never starts a tool's gesture.
    */
   swallowsPress?: (target: EventTarget | null) => boolean;
