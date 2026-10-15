@@ -291,3 +291,109 @@ describe('Editor floating selection', () => {
     expect(editor.activeLayerId).toBe('layer-1');
   });
 });
+
+describe('Editor pending edit', () => {
+  /** A pending edit that hides the layer when applied, and records what was asked of it. */
+  function pendingEdit(editor: Editor, layerId: string) {
+    const calls: string[] = [];
+    const edit = {
+      label: 'Test Edit',
+      apply: () => {
+        calls.push('apply');
+        // Applying an edit may itself commit or apply: it mustn't come back to this one.
+        editor.applyPending();
+        editor.history.execute(new SetLayerVisibilityCommand(layerId, false));
+      },
+      cancel: () => {
+        calls.push('cancel');
+        editor.cancelPending();
+      },
+    };
+    return { edit, calls };
+  }
+
+  it('begins, and is applied once, as an undo step of its own', () => {
+    const { editor, changes, layerId } = setup();
+    const { edit, calls } = pendingEdit(editor, layerId);
+    editor.beginPending(edit);
+    expect(editor.pending).toBe(edit);
+    expect(changes.at(-1)).toMatchObject({ dirty: null, pendingChanged: true });
+    expect(editor.isDirty).toBe(false);
+
+    expect(editor.applyPending()).toBe(true);
+    expect(calls).toEqual(['apply']);
+    expect(editor.pending).toBeNull();
+    expect(changes.at(-1)).toMatchObject({ pendingChanged: true });
+    expect(editor.history.undoLabel).toBe('Hide Layer');
+    expect(editor.applyPending()).toBe(false);
+  });
+
+  it('can be cancelled, and leaves history alone', () => {
+    const { editor, layerId } = setup();
+    const { edit, calls } = pendingEdit(editor, layerId);
+    editor.beginPending(edit);
+    expect(editor.cancelPending()).toBe(true);
+    expect(calls).toEqual(['cancel']);
+    expect(editor.pending).toBeNull();
+    expect(editor.history.canUndo).toBe(false);
+    expect(editor.cancelPending()).toBe(false);
+  });
+
+  it('is applied before a floating selection is committed', () => {
+    const { editor, doc } = stackEditor('A', 'B');
+    doc.selection = Selection.fromRect(10, 10, { x: 0, y: 0, width: 2, height: 2 });
+    const lift = liftSelectionCommand(doc, 'layer-2');
+    if (!lift) throw new Error('Nothing to lift');
+    editor.history.execute(lift);
+    const { edit, calls } = pendingEdit(editor, 'layer-1');
+    editor.beginPending(edit);
+    editor.commitFloating();
+    expect(calls).toEqual(['apply']);
+    expect(editor.floating).toBeNull();
+    expect(editor.history.undoLabel).toBe('Commit Floating Selection');
+  });
+
+  it('is applied before another layer becomes active, but not for the active one', () => {
+    const { editor } = stackEditor('A', 'B');
+    const { edit, calls } = pendingEdit(editor, 'layer-1');
+    editor.beginPending(edit);
+    editor.setActiveLayer('layer-2');
+    expect(calls).toEqual([]);
+    editor.setActiveLayer('layer-1');
+    expect(calls).toEqual(['apply']);
+  });
+
+  it('applies the edit pending before another one begins', () => {
+    const { editor, layerId } = setup();
+    const first = pendingEdit(editor, layerId);
+    const second = pendingEdit(editor, layerId);
+    editor.beginPending(first.edit);
+    editor.beginPending(first.edit);
+    expect(first.calls).toEqual([]);
+    editor.beginPending(second.edit);
+    expect(first.calls).toEqual(['apply']);
+    expect(editor.pending).toBe(second.edit);
+  });
+
+  it('ends without applying or cancelling, only for the pending edit', () => {
+    const { editor, layerId } = setup();
+    const { edit, calls } = pendingEdit(editor, layerId);
+    const other = pendingEdit(editor, layerId);
+    editor.beginPending(edit);
+    editor.endPending(other.edit);
+    expect(editor.pending).toBe(edit);
+    editor.endPending(edit);
+    expect(editor.pending).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it('is dropped when the document is replaced', () => {
+    const { editor, changes, layerId } = setup();
+    const { edit, calls } = pendingEdit(editor, layerId);
+    editor.beginPending(edit);
+    editor.replaceDocument(createDocument(5, 5));
+    expect(editor.pending).toBeNull();
+    expect(calls).toEqual([]);
+    expect(changes.at(-1)).toMatchObject({ documentReplaced: true, pendingChanged: true });
+  });
+});

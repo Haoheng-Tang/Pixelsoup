@@ -9,11 +9,14 @@ export type CropHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
 /** What a press on the crop box grabs: a handle, the inside (to move it) or nothing. */
 export type CropHit = CropHandle | 'inside' | 'outside';
 
+/** How far from a box's edge, in CSS pixels, a press still grabs it. */
+export const HANDLE_REACH = 6;
+
 /** Along one axis: the start edge (−1), the end edge (1) or neither (0). */
-type Side = -1 | 0 | 1;
+export type Side = -1 | 0 | 1;
 
 /** The edges each handle moves, as (x side, y side). */
-const HANDLE_SIDES: Readonly<Record<CropHandle, readonly [Side, Side]>> = {
+export const HANDLE_SIDES: Readonly<Record<CropHandle, readonly [Side, Side]>> = {
   n: [0, -1],
   ne: [1, -1],
   e: [1, 0],
@@ -36,7 +39,7 @@ const HANDLE_CURSORS: Readonly<Record<CropHandle, string>> = {
 };
 
 /** Handles by [y side + 1][x side + 1]; the middle is the inside. */
-const HANDLE_GRID: readonly (readonly (CropHandle | null)[])[] = [
+export const HANDLE_GRID: readonly (readonly (CropHandle | null)[])[] = [
   ['nw', 'n', 'ne'],
   ['w', null, 'e'],
   ['sw', 's', 'se'],
@@ -47,7 +50,7 @@ const HANDLE_GRID: readonly (readonly (CropHandle | null)[])[] = [
  * outside the span. An edge reaches `tolerance` outwards but at most a third of the way
  * in, so even a small box keeps a middle to move it by.
  */
-function sideOf(p: number, start: number, end: number, tolerance: number): Side | null {
+export function sideOf(p: number, start: number, end: number, tolerance: number): Side | null {
   if (p < start - tolerance || p > end + tolerance) return null;
   const inward = Math.min(tolerance, (end - start) / 3);
   if (p <= start + inward) return -1;

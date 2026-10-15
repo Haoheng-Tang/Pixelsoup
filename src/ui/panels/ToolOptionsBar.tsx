@@ -1,9 +1,12 @@
 import type { ToolManager } from '../tools/tool-manager';
-import { useActiveTool } from '../tools/use-active-tool';
+import { useToolOptions } from '../tools/use-active-tool';
 
-/** The bar under the toolbar showing the active tool's name and options. */
+/**
+ * The bar under the toolbar showing the active tool's name and options, or those of a
+ * session that has taken over from it (Free Transform).
+ */
 export function ToolOptionsBar({ tools }: { tools: ToolManager }) {
-  const tool = useActiveTool(tools);
+  const tool = useToolOptions(tools);
   const { OptionsPanel } = tool;
   return (
     <div className="tool-options" role="group" aria-label={`${tool.name} options`}>

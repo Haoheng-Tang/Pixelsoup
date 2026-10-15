@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { Editor, Point, Rect } from '../../core';
+import type { Affine, Editor, Interpolation, LayerId, PixelBuffer, Point, Rect } from '../../core';
 import type { ContextMenuSections } from '../panels/menu-logic';
 
 /**
@@ -119,15 +119,39 @@ export interface LassoOverlay {
 }
 
 /**
+ * A Free Transform session's preview: the layer's pixels as they were (`pixels`, with its
+ * top-left pixel at `x`, `y`) mapped through `affine`, drawn in the layer's place while the
+ * composite leaves the layer out, and the transformed box with its handles.
+ */
+export interface TransformOverlay {
+  readonly shape: 'transform';
+  /** The layer being transformed. */
+  readonly layerId: LayerId;
+  readonly pixels: PixelBuffer;
+  readonly x: number;
+  readonly y: number;
+  /** Canvas coordinates to canvas coordinates, as `TransformLayerCommand` takes it. */
+  readonly affine: Affine;
+  readonly interpolation: Interpolation;
+  /** The layer's opacity, which the preview is drawn with. */
+  readonly opacity: number;
+  /** Where the layer's top-left, top-right, bottom-right and bottom-left corners go. */
+  readonly corners: readonly [Point, Point, Point, Point];
+  /** The point the transform scales and turns about, where it is now. */
+  readonly pivot: Point;
+}
+
+/**
  * What the viewport draws over the document for the active tool. Plain data in document
  * coordinates, so tools stay free of canvas APIs.
  */
-export type ToolOverlay = ShapeOverlay | LassoOverlay | BrushOverlay | CropOverlay;
+export type ToolOverlay =
+  ShapeOverlay | LassoOverlay | BrushOverlay | CropOverlay | TransformOverlay;
 
 /** What `[` and `]` step: a brush's size, or with Shift its hardness. */
 export type BrushProperty = 'size' | 'hardness';
 
-/** What a tool gets from the `ToolManager` when it becomes active. */
+/** What a tool, or a session, gets from the `ToolManager` when it becomes active. */
 export interface ToolContext {
   readonly editor: Editor;
   /** Call whenever `overlay` or `cursor` changes so the viewport redraws them. */
@@ -137,31 +161,26 @@ export interface ToolContext {
 }
 
 /**
- * An editing tool. Tools are UI: they turn pointer and key input into core Commands run
- * through `editor.history`, and never mutate the document directly.
+ * What takes the canvas's input: the active tool, or a session that takes over from it
+ * for a while. It's UI: it turns pointer and key input into core Commands run through
+ * `editor.history`, and never mutates the document directly.
  *
- * The viewport routes input to the active tool through the `ToolManager`; panning and
- * zooming take priority, so tools only see input the viewport doesn't use itself.
- * Pointer handlers only run for the primary button; moves are also forwarded while no
- * button is down (hover). A right-click (or a Control-click on a Mac) opens the canvas's
- * context menu instead.
+ * The viewport routes input to it through the `ToolManager`; panning and zooming take
+ * priority, so it only sees input the viewport doesn't use itself. Pointer handlers only
+ * run for the primary button; moves are also forwarded while no button is down (hover). A
+ * right-click (or a Control-click on a Mac) opens the canvas's context menu instead.
  */
-export interface Tool {
-  /** Stable identifier, e.g. 'rect-marquee'. */
-  readonly id: string;
-  /** Display name, e.g. 'Rectangular Marquee'. */
-  readonly name: string;
-  readonly shortcut: ToolKey;
-  /** CSS cursor over the canvas while this tool is active. Report changes via `overlayChanged`. */
+export interface ToolInput {
+  /** CSS cursor over the canvas while this is active. Report changes via `overlayChanged`. */
   readonly cursor: string;
-  /** Settings shown in the tool-options bar while this tool is active. */
+  /** Settings shown in the tool-options bar while this is active. */
   readonly OptionsPanel?: ComponentType | undefined;
   /** Shape to draw over the document now, if any. Report changes via `overlayChanged`. */
   readonly overlay?: ToolOverlay | null;
 
-  /** The tool became active. Keep `context` for later handlers. */
+  /** It became active. Keep `context` for later handlers. */
   activate?(context: ToolContext): void;
-  /** The tool is no longer active. Any gesture has already been cancelled. */
+  /** It's no longer active. Any gesture has already been cancelled. */
   deactivate?(): void;
 
   pointerDown?(event: ToolPointerEvent): void;
@@ -179,12 +198,30 @@ export interface Tool {
   keyDown?(event: ToolKeyEvent): boolean;
   keyUp?(event: ToolKeyEvent): boolean;
 
-  /** Painting tools: `[` / `]` (with Shift, hardness) step the brush down or up. */
-  stepBrush?(property: BrushProperty, direction: -1 | 1): void;
-
   /**
-   * Items the tool adds to the canvas's context menu, above the standard ones; asked each
-   * time the menu is drawn. No tool has any yet (Fill… or Free Transform could).
+   * Items it adds to the canvas's context menu, above the standard ones; asked each time
+   * the menu is drawn.
    */
   contextMenu?(): ContextMenuSections;
+}
+
+/** An editing tool, chosen in the toolbar or with its shortcut key. */
+export interface Tool extends ToolInput {
+  /** Stable identifier, e.g. 'rect-marquee'. */
+  readonly id: string;
+  /** Display name, e.g. 'Rectangular Marquee'. */
+  readonly name: string;
+  readonly shortcut: ToolKey;
+
+  /** Painting tools: `[` / `]` (with Shift, hardness) step the brush down or up. */
+  stepBrush?(property: BrushProperty, direction: -1 | 1): void;
+}
+
+/**
+ * Something that takes over the canvas's input from the active tool for a while, such as
+ * a Free Transform session, without becoming the active tool (`ToolManager.startSession`).
+ * Its options and name replace the tool's in the options bar meanwhile.
+ */
+export interface ToolSession extends ToolInput {
+  readonly name: string;
 }

@@ -22,6 +22,23 @@ export interface EditorChange extends DocumentChange {
    * or that was undone.
    */
   readonly floatingChanged?: boolean;
+  /** True when `pending` changed: an edit began, or was applied, cancelled or dropped. */
+  readonly pendingChanged?: boolean;
+}
+
+/**
+ * An edit in progress outside history, such as a Free Transform session: it previews its
+ * result without changing the document, and becomes an undo step only when applied.
+ * Session state, like the active layer. Whatever would change the document, the selection
+ * or the active layer applies it first (`Editor.applyPending`).
+ */
+export interface PendingEdit {
+  /** What the edit is called, e.g. "Free Transform", for the Undo item that cancels it. */
+  readonly label: string;
+  /** Carries out the edit through history; it may also find there's nothing to do. */
+  apply(): void;
+  /** Abandons the edit, undoing any step it took itself as it began. */
+  cancel(): void;
 }
 
 export type EditorListener = (change: EditorChange) => void;
@@ -41,6 +58,7 @@ export class Editor {
   /** Stack index of the active layer when last seen, to pick a neighbour if it goes away. */
   private activeIndex = -1;
   private floatingState: FloatingSelection | null = null;
+  private pendingEdit: PendingEdit | null = null;
 
   constructor(document: ImageDocument) {
     this.currentDocument = document;
@@ -83,10 +101,12 @@ export class Editor {
 
   /**
    * Makes another layer of the document active. Throws if the document has no such layer.
-   * Commits a floating selection first, whose layer stays active while it floats.
+   * Applies a pending edit and commits a floating selection first; a floating selection's
+   * layer stays active while it floats.
    */
   setActiveLayer(id: LayerId): void {
     getLayerIndex(this.currentDocument, id);
+    if (id !== this.activeId) this.applyPending();
     if (this.floatingState && id !== this.floatingState.layerId) this.commitFloating();
     this.activeIndex = getLayerIndex(this.currentDocument, id);
     if (id === this.activeId) return;
@@ -105,14 +125,63 @@ export class Editor {
   }
 
   /**
-   * Commits the floating selection into its source layer as one undo step. Returns false
-   * if there was none.
+   * Commits the floating selection into its source layer as one undo step, after applying
+   * a pending edit (which may be what changes the floating selection). Returns false if
+   * there was no floating selection.
    */
   commitFloating(): boolean {
+    this.applyPending();
     const floating = this.floatingState;
     const command = floating && commitFloatingCommand(this.currentDocument, floating);
     if (!command) return false;
     this.currentHistory.execute(command);
+    return true;
+  }
+
+  /** The edit in progress outside history, if any (see `PendingEdit`). */
+  get pending(): PendingEdit | null {
+    return this.pendingEdit;
+  }
+
+  /** Makes `edit` the pending edit, applying any other one first. */
+  beginPending(edit: PendingEdit): void {
+    if (this.pendingEdit === edit) return;
+    this.applyPending();
+    this.pendingEdit = edit;
+    this.emit({ dirty: null, pendingChanged: true });
+  }
+
+  /** Forgets `edit`, if it's the pending edit, without applying or cancelling it. */
+  endPending(edit: PendingEdit): void {
+    if (this.pendingEdit !== edit) return;
+    this.pendingEdit = null;
+    this.emit({ dirty: null, pendingChanged: true });
+  }
+
+  /** Applies the pending edit, if any. Returns false if there was none. */
+  applyPending(): boolean {
+    const edit = this.pendingEdit;
+    if (!edit) return false;
+    // Forgotten first, so that what applying it does can't apply it again.
+    this.pendingEdit = null;
+    try {
+      edit.apply();
+    } finally {
+      this.emit({ dirty: null, pendingChanged: true });
+    }
+    return true;
+  }
+
+  /** Cancels the pending edit, if any. Returns false if there was none. */
+  cancelPending(): boolean {
+    const edit = this.pendingEdit;
+    if (!edit) return false;
+    this.pendingEdit = null;
+    try {
+      edit.cancel();
+    } finally {
+      this.emit({ dirty: null, pendingChanged: true });
+    }
     return true;
   }
 
@@ -128,20 +197,24 @@ export class Editor {
 
   /**
    * Swaps in another document (new, open, close) with a fresh history. It starts clean,
-   * with its top layer active and nothing floating.
+   * with its top layer active, nothing floating and no pending edit: one on the old
+   * document is dropped, neither applied nor cancelled.
    */
   replaceDocument(document: ImageDocument): void {
     const wasFloating = this.floatingState !== null;
+    const wasPending = this.pendingEdit !== null;
     this.currentDocument = document;
     this.currentHistory = this.createHistory(document);
     this.savedStateId = this.currentHistory.stateId;
     this.floatingState = null;
+    this.pendingEdit = null;
     this.activateTopLayer();
     this.emit({
       dirty: documentBounds(document),
       documentReplaced: true,
       activeLayerChanged: true,
       ...(wasFloating && { floatingChanged: true }),
+      ...(wasPending && { pendingChanged: true }),
     });
   }
 

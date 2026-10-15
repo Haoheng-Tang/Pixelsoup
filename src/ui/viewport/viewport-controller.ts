@@ -1,5 +1,5 @@
 import type { Editor, Rect } from '../../core';
-import { assertNever, roundRectOut } from '../../core';
+import { assertNever, roundRectOut, transformedBounds } from '../../core';
 import { isContextClick, isOnCanvas } from '../canvas-menu';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
@@ -98,6 +98,13 @@ function overlayArea(overlay: ToolOverlay | null): Rect | null {
       return overlay.rect;
     case 'lasso':
       return lassoBounds(overlay);
+    case 'transform':
+      return transformedBounds(overlay.affine, {
+        x: overlay.x,
+        y: overlay.y,
+        width: overlay.pixels.width,
+        height: overlay.pixels.height,
+      });
     case 'brush':
       return null;
     default:
@@ -730,7 +737,7 @@ export class ViewportController {
   }
 
   private updateCursor(): void {
-    let cursor = this.tools.activeTool.cursor;
+    let cursor = this.tools.cursor;
     if (this.drag) cursor = 'grabbing';
     else if (this.spaceHeld && this.toolPointerId === null) cursor = 'grab';
     if (cursor === this.cursor) return;
