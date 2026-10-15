@@ -20,7 +20,8 @@ function isAspect(value: string): value is CropAspect {
 /** Options bar for the Crop tool: the box's ratio, whether to trim layers, and ✓ / ✗. */
 export function CropOptionsPanel({ options, tool }: { options: CropOptions; tool: CropTool }) {
   const settings = useSyncExternalStore(options.subscribe, () => options.settings);
-  const hasBox = useSyncExternalStore(tool.subscribe, () => tool.hasBox);
+  const canCommit = useSyncExternalStore(tool.subscribe, () => tool.canCommit);
+  const canReset = useSyncExternalStore(tool.subscribe, () => tool.canReset);
   return (
     <>
       <label className="options-field">
@@ -72,7 +73,7 @@ export function CropOptionsPanel({ options, tool }: { options: CropOptions; tool
           className="options-icon-button"
           aria-label="Commit crop"
           title="Commit crop (Enter)"
-          disabled={!hasBox}
+          disabled={!canCommit}
           onClick={() => tool.commit()}
         >
           <OptionsIcon d="M3 8.5 6.5 12 13 4.5" />
@@ -82,8 +83,8 @@ export function CropOptionsPanel({ options, tool }: { options: CropOptions; tool
           className="options-icon-button"
           aria-label="Cancel crop"
           title="Cancel crop (Esc)"
-          disabled={!hasBox}
-          onClick={() => tool.clearBox()}
+          disabled={!canReset}
+          onClick={() => tool.resetBox()}
         >
           <OptionsIcon d="M4 4l8 8M12 4l-8 8" />
         </button>

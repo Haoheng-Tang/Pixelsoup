@@ -187,6 +187,27 @@ export function moveBox(box: Rect, dx: number, dy: number): Rect {
   return { ...box, x: box.x + dx, y: box.y + dy };
 }
 
+/**
+ * The largest box shaped to `ratio` (width / height, as near as whole pixels allow) that
+ * fits inside `outer`, centred in it; at least one pixel each way.
+ */
+export function fitBox(outer: Rect, ratio: number): Rect {
+  let width = outer.width;
+  let height = Math.round(width / ratio);
+  if (height > outer.height) {
+    height = outer.height;
+    width = Math.min(outer.width, Math.round(height * ratio));
+  }
+  width = Math.max(1, width);
+  height = Math.max(1, height);
+  return {
+    x: outer.x + Math.floor((outer.width - width) / 2),
+    y: outer.y + Math.floor((outer.height - height) / 2),
+    width,
+    height,
+  };
+}
+
 /** A box of the same area and centre as `box` (as near as whole pixels allow), shaped to `ratio`. */
 export function reshapeBox(box: Rect, ratio: number): Rect {
   const width = Math.max(1, Math.round(Math.sqrt(box.width * box.height * ratio)));
