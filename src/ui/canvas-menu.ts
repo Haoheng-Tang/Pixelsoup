@@ -1,6 +1,6 @@
 import type { Editor, ImageDocument } from '../core';
 import { canRunLayerAction, runLayerAction } from './layer-actions';
-import type { ContextMenuSections } from './panels/menu-logic';
+import type { ContextMenuItem, ContextMenuSections } from './panels/menu-logic';
 import { runSelectCommand } from './select-commands';
 
 /** What the canvas menu needs from the app controller. */
@@ -11,6 +11,14 @@ export interface CanvasMenuController {
   openDuplicateLayer(): void;
   /** Asks for confirmation, then deletes the active layer. */
   openDeleteLayer(): void;
+}
+
+/** What the canvas menu needs to start Free Transform (`FreeTransform`). */
+export interface CanvasMenuTransform {
+  /** Whether there's a layer to transform. */
+  canStart(): boolean;
+  /** Starts Free Transform, or says in the status bar why it can't. */
+  start(): boolean;
 }
 
 /**
@@ -35,16 +43,22 @@ export function isContextClick(
 /**
  * The canvas's context menu. With a selection: Deselect and Select Inverse, then Layer
  * via Copy and Layer via Cut. Without one: Duplicate Layer… and Delete Layer, which ask
- * first (a name, a confirmation). The items run the same actions as the menu bar
- * (`runSelectCommand`, `runLayerAction`), so they enable, commit a floating selection and
- * name their undo steps alike. `toolSections`, the active tool's own items (none yet;
- * Fill… or Free Transform could go there), come first.
+ * first (a name, a confirmation). Then Free Transform, either way. The items run the same
+ * actions as the menu bar (`runSelectCommand`, `runLayerAction`, `transform.start`), so
+ * they enable, commit a floating selection and name their undo steps alike.
+ * `toolSections`, the active tool's own items (none yet; Fill… could go there), come
+ * first. While a session such as Free Transform runs, its items are the whole menu
+ * (`exclusive`).
  */
 export function canvasMenuSections(
   editor: Editor,
   controller: CanvasMenuController,
+  transform: CanvasMenuTransform,
   toolSections: ContextMenuSections = [],
+  { exclusive = false }: { readonly exclusive?: boolean } = {},
 ): ContextMenuSections {
+  const own = toolSections.filter((section) => section.length > 0);
+  if (exclusive) return own;
   const { blocked } = controller;
   const layerItem = (
     action: 'layer-via-copy' | 'layer-via-cut',
@@ -96,5 +110,14 @@ export function canvasMenuSections(
           },
         ],
       ];
-  return [...toolSections.filter((section) => section.length > 0), ...standard];
+  const freeTransform: ContextMenuItem = {
+    command: 'free-transform',
+    label: 'Free Transform',
+    shortcut: 'Alt+T',
+    disabled: blocked || !transform.canStart(),
+    run: () => {
+      transform.start();
+    },
+  };
+  return [...own, ...standard, [freeTransform]];
 }

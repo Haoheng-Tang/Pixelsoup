@@ -1,20 +1,32 @@
-import type { Editor, Rect } from '../../core';
-import { assertNever } from '../../core';
+import type { Editor, Orientation, Rect } from '../../core';
+import { ORIENTATION_LABELS, assertNever } from '../../core';
 import type { ClipboardCommand, PixelClipboard } from '../clipboard/pixel-clipboard';
 import { canClear, canFill, runClear } from '../edit-actions';
 import type { AppController } from '../session/app-controller';
+import type { FreeTransform } from '../transform/free-transform';
 import { IS_APPLE } from '../use-file-shortcuts';
 import { useEditorRevision } from '../use-editor-revision';
 import { useRevision } from '../use-revision';
 import type { MenuEntry } from './MenuButton';
 import { MenuButton } from './MenuButton';
 
-type EditCommand = 'undo' | 'redo' | ClipboardCommand | 'fill' | 'clear';
+type EditCommand =
+  | 'undo'
+  | 'redo'
+  | ClipboardCommand
+  | 'fill'
+  | 'clear'
+  | 'free-transform'
+  | 'transform'
+  | 'scale'
+  | 'rotate'
+  | Orientation;
 
 interface EditMenuProps {
   editor: Editor;
   controller: AppController;
   clipboard: PixelClipboard;
+  freeTransform: FreeTransform;
   /** The canvas area in view, in document coordinates, to centre pastes in. */
   viewArea: () => Rect | null;
   /** True while a dialog is open or a file operation is running. */
@@ -25,8 +37,18 @@ interface EditMenuProps {
  * The Edit menu. Fill and Clear also have plain shortcuts (see `useEditShortcuts`); the
  * menu shows the Mac's delete key, which types Backspace, as the key that clears. Paste
  * pastes Pixelsoup's own clipboard: only Ctrl/Cmd+V can paste an image from another app.
+ * Free Transform and Transform's Scale and Rotate start a transform session (or switch the
+ * one running); Transform's turns and flips are composed into it, or applied to the active
+ * layer straight away when none runs.
  */
-export function EditMenu({ editor, controller, clipboard, viewArea, blocked }: EditMenuProps) {
+export function EditMenu({
+  editor,
+  controller,
+  clipboard,
+  freeTransform,
+  viewArea,
+  blocked,
+}: EditMenuProps) {
   useEditorRevision(editor);
   useRevision(clipboard);
   const { history } = editor;
@@ -35,6 +57,12 @@ export function EditMenu({ editor, controller, clipboard, viewArea, blocked }: E
     label,
     shortcut,
     disabled: blocked || !clipboard.canRun(command),
+  });
+  const noTransform = blocked || !freeTransform.canStart();
+  const orient = (command: Orientation): MenuEntry<EditCommand> => ({
+    command,
+    label: ORIENTATION_LABELS[command],
+    disabled: noTransform,
   });
   const sections: readonly (readonly MenuEntry<EditCommand>[])[] = [
     [
@@ -73,6 +101,27 @@ export function EditMenu({ editor, controller, clipboard, viewArea, blocked }: E
         disabled: blocked || !canClear(editor),
       },
     ],
+    [
+      {
+        command: 'free-transform',
+        label: 'Free Transform',
+        shortcut: 'Alt+T',
+        disabled: noTransform,
+      },
+      {
+        command: 'transform',
+        label: 'Transform',
+        disabled: noTransform,
+        submenu: [
+          [
+            { command: 'scale', label: 'Scale', disabled: noTransform },
+            { command: 'rotate', label: 'Rotate', disabled: noTransform },
+          ],
+          [orient('flip-horizontal'), orient('flip-vertical')],
+          [orient('rotate-180'), orient('rotate-cw'), orient('rotate-ccw')],
+        ],
+      },
+    ],
   ];
   return (
     <MenuButton
@@ -97,6 +146,23 @@ export function EditMenu({ editor, controller, clipboard, viewArea, blocked }: E
             break;
           case 'clear':
             runClear(editor);
+            break;
+          case 'free-transform':
+            freeTransform.start('free');
+            break;
+          case 'transform':
+            // Only opens its submenu.
+            break;
+          case 'scale':
+          case 'rotate':
+            freeTransform.start(command);
+            break;
+          case 'flip-horizontal':
+          case 'flip-vertical':
+          case 'rotate-180':
+          case 'rotate-cw':
+          case 'rotate-ccw':
+            freeTransform.orient(command);
             break;
           default:
             assertNever(command);

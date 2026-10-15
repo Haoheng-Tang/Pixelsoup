@@ -600,6 +600,28 @@ button.danger:hover:not(:disabled) {
   background: var(--border);
 }
 
+/* A submenu opens beside its item; MenuList places it (placeSubmenu). */
+.menu-sub {
+  position: relative;
+  display: grid;
+}
+
+.menu-list.submenu {
+  top: -5px;
+  left: 100%;
+  min-width: 220px;
+}
+
+.menu-item[aria-expanded='true']:not([aria-disabled='true']) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.menu-submark {
+  opacity: 0.7;
+}
+
 /* The canvas's context menu, at the pointer; ContextMenu keeps it inside the window. */
 .context-menu {
   position: fixed;

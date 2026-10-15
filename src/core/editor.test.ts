@@ -396,4 +396,40 @@ describe('Editor pending edit', () => {
     expect(calls).toEqual([]);
     expect(changes.at(-1)).toMatchObject({ documentReplaced: true, pendingChanged: true });
   });
+
+  it('is applied before any command runs, as a step of its own', () => {
+    const { editor, layerId } = setup();
+    const { edit, calls } = pendingEdit(editor, layerId);
+    editor.beginPending(edit);
+    editor.history.execute(new SetLayerOpacityCommand(layerId, 0.5));
+    expect(calls).toEqual(['apply']);
+    expect(editor.pending).toBeNull();
+    expect(editor.history.undoLabel).toBe('Change Layer Opacity');
+    editor.history.undo();
+    expect(editor.history.undoLabel).toBe('Hide Layer');
+  });
+
+  it('is what undo takes back while it’s pending, with nothing to redo meanwhile', () => {
+    const { editor, layerId } = setup();
+    const { history } = editor;
+    history.execute(new SetLayerOpacityCommand(layerId, 0.5));
+    history.execute(new SetLayerOpacityCommand(layerId, 0.25));
+    history.undo();
+    const { edit, calls } = pendingEdit(editor, layerId);
+    editor.beginPending(edit);
+    expect([history.canUndo, history.undoLabel]).toEqual([true, 'Test Edit']);
+    expect([history.canRedo, history.redoLabel]).toEqual([false, null]);
+    expect(history.redo()).toBe(false);
+    expect(calls).toEqual([]);
+
+    expect(history.undo()).toBe(true);
+    expect(calls).toEqual(['cancel']);
+    expect(editor.pending).toBeNull();
+    // Only the edit was taken back: the steps before it are as they were.
+    expect(editor.document.layers[0]?.opacity).toBe(0.5);
+    expect([history.undoLabel, history.redoLabel]).toEqual([
+      'Change Layer Opacity',
+      'Change Layer Opacity',
+    ]);
+  });
 });

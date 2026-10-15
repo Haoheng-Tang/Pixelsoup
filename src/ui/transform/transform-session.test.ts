@@ -15,6 +15,7 @@ import {
   transformPixels,
   translation,
 } from '../../core';
+import { canvasMenuSections } from '../canvas-menu';
 import { FakeClock } from '../tools/fake-clock';
 import { FakeViewport } from '../tools/fake-viewport';
 import { MarqueeTool } from '../tools/marquee-tool';
@@ -132,7 +133,9 @@ describe('Free Transform sessions', () => {
       ],
       pivot: { x: 10, y: 8 },
     });
-    expect(editor.history.canUndo).toBe(false);
+    // Nothing in history: undo would cancel the session, and is offered as that.
+    expect(editor.history.undoLabel).toBe('Free Transform');
+    expect(editor.history.canRedo).toBe(false);
     expect(editor.isDirty).toBe(false);
   });
 
@@ -303,7 +306,6 @@ describe('Free Transform sessions', () => {
     const { editor, doc, photo, view, select, start } = setup();
     select({ x: 7, y: 5, width: 4, height: 3 });
     const session = start();
-    expect(editor.history.undoLabel).toBe('Lift Selection');
     const floating = editor.floating;
     expect(floating).not.toBeNull();
     expect(session.source).toMatchObject({
@@ -347,7 +349,6 @@ describe('Free Transform sessions', () => {
     const floating = editor.floating;
     const session = start();
     expect(session.source.layerId).toBe(floating?.layerId);
-    expect(editor.history.undoLabel).toBe('Lift Selection');
     view.keyDown('Escape');
     expect(editor.floating).toBe(floating);
     expect(undoLabels(editor)).toEqual(['Lift Selection', 'Change Selection']);
@@ -385,16 +386,28 @@ describe('Free Transform sessions', () => {
     expect(undoLabels(editor)).toEqual(['Free Transform', 'Free Transform']);
   });
 
-  it('end without a step if the document changes under them', () => {
-    const { editor, tools, select, start } = setup();
+  it('are cancelled by undo, lift and all', () => {
+    const { editor, doc, tools, view, select, start } = setup();
     select({ x: 7, y: 5, width: 4, height: 3 });
     const session = start();
-    // Undoing the lift behind the session's back takes its layer away.
-    editor.history.undo();
+    view.drag(9, 6.5, 14, 6.5);
+    expect(editor.history.undo()).toBe(true);
     expect(session.active).toBe(false);
     expect(tools.session).toBeNull();
     expect(editor.pending).toBeNull();
     expect(editor.floating).toBeNull();
+    expect(doc.layers).toHaveLength(2);
+    expect(undoLabels(editor)).toEqual(['Change Selection']);
+  });
+
+  it('end without a step if the document is replaced under them', () => {
+    const { editor, tools, start } = setup();
+    const session = start();
+    editor.replaceDocument(createDocument(8, 8));
+    expect(session.active).toBe(false);
+    expect(tools.session).toBeNull();
+    expect(editor.pending).toBeNull();
+    expect(editor.history.canUndo).toBe(false);
   });
 
   it('refuse to apply a result too big for a layer, with a message', () => {
@@ -405,7 +418,8 @@ describe('Free Transform sessions', () => {
     view.keyDown('Enter');
     expect(messages).toEqual(['A transformed layer can be at most 8192 × 8192 pixels']);
     expect(tools.session).toBe(session);
-    expect(editor.history.canUndo).toBe(false);
+    expect(editor.pending).toBe(session.edit);
+    expect(editor.isDirty).toBe(false);
   });
 
   it('cut a result too big for a layer to the canvas when applied by something else', () => {
@@ -476,5 +490,137 @@ describe('Free Transform sessions', () => {
     view.keyDown('Enter');
     expect(undoLabels(editor)).toEqual(['Free Transform']);
     expect(photo.pixels).toEqual(oriented(original, 'rotate-ccw'));
+  });
+
+  it('offer their turns and flips, Apply and Cancel on the canvas’s context menu', () => {
+    const { editor, tools, photo, original, start } = setup();
+    start();
+    const menu = tools.contextMenu();
+    expect(menu.map((section) => section.map((item) => item.label))).toEqual([
+      ['Flip Horizontal', 'Flip Vertical'],
+      ['Rotate 180°', 'Rotate 90° Clockwise', 'Rotate 90° Anticlockwise'],
+      ['Apply', 'Cancel'],
+    ]);
+    const run = (label: string) =>
+      tools
+        .contextMenu()
+        .flat()
+        .find((item) => item.label === label)
+        ?.run();
+    run('Rotate 180°');
+    expect(photo.pixels).toEqual(original);
+    run('Apply');
+    expect(tools.session).toBeNull();
+    expect(undoLabels(editor)).toEqual(['Free Transform']);
+    expect(photo.pixels).toEqual(oriented(original, 'rotate-180'));
+
+    start();
+    run('Flip Vertical');
+    run('Cancel');
+    expect(tools.session).toBeNull();
+    expect(undoLabels(editor)).toEqual(['Free Transform']);
+    expect(photo.pixels).toEqual(oriented(original, 'rotate-180'));
+  });
+
+  it('start from the canvas’s context menu as from the Edit menu, lifting a selection', () => {
+    const { editor, tools, freeTransform, select } = setup();
+    select({ x: 6, y: 5, width: 4, height: 3 });
+    const controller = { blocked: false, openDuplicateLayer() {}, openDeleteLayer() {} };
+    const menu = () =>
+      canvasMenuSections(editor, controller, freeTransform, tools.contextMenu(), {
+        exclusive: tools.session !== null,
+      });
+    const item = menu()
+      .flat()
+      .find((entry) => entry.label === 'Free Transform');
+    expect(item?.disabled).toBe(false);
+    item?.run();
+    expect(freeTransform.session?.mode).toBe('free');
+    expect(editor.floating?.layerId).toBe(editor.activeLayerId);
+    expect(editor.pending?.label).toBe('Free Transform');
+    expect(
+      menu()
+        .flat()
+        .map((entry) => entry.label),
+    ).toEqual([
+      'Flip Horizontal',
+      'Flip Vertical',
+      'Rotate 180°',
+      'Rotate 90° Clockwise',
+      'Rotate 90° Anticlockwise',
+      'Apply',
+      'Cancel',
+    ]);
+  });
+});
+
+describe('Edit → Transform’s turns and flips', () => {
+  it('turn the active layer losslessly, one step each, back to the same bytes and place', () => {
+    const { editor, freeTransform, photo, original } = setup();
+    expect(freeTransform.orient('rotate-cw')).toBe(true);
+    expect(photo.pixels).toEqual(oriented(original, 'rotate-cw'));
+    // About its centre, (10, 8).
+    expect(boundsOf(photo)).toEqual({ x: 6, y: 3, width: 8, height: 10 });
+    expect(freeTransform.orient('rotate-ccw')).toBe(true);
+    freeTransform.orient('flip-horizontal');
+    freeTransform.orient('flip-horizontal');
+    expect(photo.pixels).toEqual(original);
+    expect(boundsOf(photo)).toEqual({ x: 5, y: 4, width: 10, height: 8 });
+    expect(freeTransform.session).toBeNull();
+    expect(undoLabels(editor)).toEqual([
+      'Flip Horizontal',
+      'Flip Horizontal',
+      'Rotate 90° Anticlockwise',
+      'Rotate 90° Clockwise',
+    ]);
+  });
+
+  it('turn the whole layer under a selection, which stays as it is', () => {
+    const { doc, editor, freeTransform, photo, original, select } = setup();
+    select({ x: 7, y: 5, width: 4, height: 3 });
+    freeTransform.orient('flip-horizontal');
+    expect(photo.pixels).toEqual(oriented(original, 'flip-horizontal'));
+    expect(boundsOf(photo)).toEqual({ x: 5, y: 4, width: 10, height: 8 });
+    expect(doc.selection?.bounds()).toEqual({ x: 7, y: 5, width: 4, height: 3 });
+    expect(editor.floating).toBeNull();
+  });
+
+  it('turn a floating selection with its outline', () => {
+    const { doc, editor, freeTransform, photo, select } = setup();
+    select({ x: 7, y: 5, width: 4, height: 3 });
+    const lift = liftSelectionCommand(doc, photo.id);
+    if (lift) editor.history.execute(lift);
+    const floating = editor.floating;
+    expect(freeTransform.orient('rotate-cw')).toBe(true);
+    // 3 × 4 about (9, 6.5) would start at (7.5, 4.5): half a pixel further from (7, 5).
+    const float = doc.layers.find((layer) => layer.id === floating?.layerId);
+    expect(float && boundsOf(float)).toEqual({ x: 8, y: 4, width: 3, height: 4 });
+    expect(doc.selection?.bounds()).toEqual({ x: 8, y: 4, width: 3, height: 4 });
+    expect(editor.floating).toMatchObject({ layerId: floating?.layerId, edited: true });
+    expect(undoLabels(editor)).toEqual([
+      'Rotate 90° Clockwise',
+      'Lift Selection',
+      'Change Selection',
+    ]);
+  });
+
+  it('compose into a running session instead', () => {
+    const { editor, freeTransform, photo, original, view, start } = setup();
+    const session = start();
+    expect(freeTransform.orient('flip-vertical')).toBe(true);
+    expect(photo.pixels).toEqual(original);
+    expect(editor.pending).toBe(session.edit);
+    view.keyDown('Enter');
+    expect(photo.pixels).toEqual(oriented(original, 'flip-vertical'));
+    expect(undoLabels(editor)).toEqual(['Free Transform']);
+  });
+
+  it('refuse a hidden layer, and say why', () => {
+    const { editor, freeTransform, photo, original, messages } = setup();
+    editor.history.execute(new SetLayerVisibilityCommand(photo.id, false));
+    expect(freeTransform.orient('flip-horizontal')).toBe(false);
+    expect(messages).toEqual(['The active layer is hidden']);
+    expect(photo.pixels).toEqual(original);
+    expect(undoLabels(editor)).toHaveLength(1);
   });
 });

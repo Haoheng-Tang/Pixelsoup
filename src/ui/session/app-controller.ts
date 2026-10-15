@@ -365,8 +365,12 @@ export class AppController {
     }
   }
 
-  /** Resolves to true if there is nothing to lose or the user agrees to discard it. */
+  /**
+   * Resolves to true if there is nothing to lose or the user agrees to discard it. A
+   * transform in progress is applied first, so that it counts as a change to lose.
+   */
   private confirmDiscard(): Promise<boolean> {
+    this.session.editor.applyPending();
     if (!this.session.isDirty) return Promise.resolve(true);
     return new Promise((resolve) => {
       this.resolveConfirm = resolve;

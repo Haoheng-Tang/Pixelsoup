@@ -100,11 +100,20 @@ describe('transformedBounds', () => {
 
 describe('alignToPixels', () => {
   it('puts the transformed bounds on pixel corners', () => {
-    // Turned about its centre (1.5, 1), a 3 × 2 rect spans x 0.5–2.5 and y -0.5–2.5.
+    // Turned about its centre (1.5, 1), a 3 × 2 rect spans x 0.5–2.5 and y -0.5–2.5. Half
+    // a pixel off the grid each way, it moves on away from (0, 0): right and up.
     const area = { x: 0, y: 0, width: 3, height: 2 };
     const m = alignToPixels(aboutPivot(rotation(90), 1.5, 1), area);
-    expect(transformedBounds(m, area)).toEqual({ x: 1, y: 0, width: 2, height: 3 });
-    expect(transformPoint(m, 0, 0)).toEqual([3, 0]);
+    expect(transformedBounds(m, area)).toEqual({ x: 1, y: -1, width: 2, height: 3 });
+    expect(transformPoint(m, 0, 0)).toEqual([3, -1]);
+  });
+
+  it('brings quarter turns back where they were when turned back', () => {
+    const area = { x: 5, y: 4, width: 3, height: 2 };
+    const turned = transformedBounds(alignToPixels(aboutPivot(rotation(90), 6.5, 5), area), area);
+    expect(turned).toEqual({ x: 6, y: 3, width: 2, height: 3 });
+    const back = alignToPixels(aboutPivot(rotation(-90), 7, 4.5), turned);
+    expect(transformedBounds(back, turned)).toEqual(area);
   });
 
   it('leaves aligned transforms alone', () => {

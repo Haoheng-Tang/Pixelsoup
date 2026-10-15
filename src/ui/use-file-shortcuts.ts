@@ -5,7 +5,17 @@ import type { AppController, FileCommand } from './session/app-controller';
 export const IS_APPLE = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 
 /** Keys as Apple keyboards label them. */
-const APPLE_KEYS: Readonly<Record<string, string>> = { Backspace: '⌫', Delete: '⌦' };
+const APPLE_KEYS: Readonly<Record<string, string>> = {
+  Backspace: '⌫',
+  Delete: '⌦',
+  Enter: '↩',
+  Escape: '⎋',
+};
+
+/** Keys as other keyboards label them, where that differs from the key's name. */
+const PC_KEYS: Readonly<Record<string, string>> = {
+  Escape: 'Esc',
+};
 
 export interface ShortcutFormat {
   /** The keys alone, without Ctrl/Cmd: "Delete" is just the Delete key. */
@@ -15,8 +25,9 @@ export interface ShortcutFormat {
 }
 
 /**
- * Formats a shortcut such as "Shift+S" with the platform's modifier: Ctrl+Shift+S or ⇧⌘S.
- * A plain one has no modifier added: "Shift+Backspace" is Shift+Backspace or ⇧⌫.
+ * Formats a shortcut such as "Shift+S" with the platform's modifier: Ctrl+Shift+S or ⇧⌘S,
+ * and "Alt+T" as Ctrl+Alt+T or ⌥⌘T. A plain one has no modifier added: "Shift+Backspace"
+ * is Shift+Backspace or ⇧⌫.
  */
 export function formatShortcut(
   keys: string,
@@ -24,9 +35,12 @@ export function formatShortcut(
 ): string {
   const parts = keys.split('+');
   const key = parts.pop() ?? '';
+  const alt = parts.includes('Alt');
   const shift = parts.includes('Shift');
-  if (apple) return `${shift ? '⇧' : ''}${plain ? '' : '⌘'}${APPLE_KEYS[key] ?? key}`;
-  return `${plain ? '' : 'Ctrl+'}${shift ? 'Shift+' : ''}${key}`;
+  if (apple) {
+    return `${alt ? '⌥' : ''}${shift ? '⇧' : ''}${plain ? '' : '⌘'}${APPLE_KEYS[key] ?? key}`;
+  }
+  return `${plain ? '' : 'Ctrl+'}${alt ? 'Alt+' : ''}${shift ? 'Shift+' : ''}${PC_KEYS[key] ?? key}`;
 }
 
 function commandFor(key: string, shift: boolean): FileCommand | null {

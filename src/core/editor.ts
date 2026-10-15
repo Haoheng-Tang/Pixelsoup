@@ -3,7 +3,7 @@ import type { ImageDocument } from './document';
 import { documentBounds, findLayer, findLayerIndex, getLayerIndex } from './document';
 import type { FloatingSelection } from './floating-selection';
 import { isFloatingIn } from './floating-selection';
-import type { DocumentChange } from './history/command';
+import type { Command, DocumentChange } from './history/command';
 import type { History } from './history/history';
 import { LinearHistory } from './history/history';
 import type { Layer, LayerId } from './layer';
@@ -30,7 +30,8 @@ export interface EditorChange extends DocumentChange {
  * An edit in progress outside history, such as a Free Transform session: it previews its
  * result without changing the document, and becomes an undo step only when applied.
  * Session state, like the active layer. Whatever would change the document, the selection
- * or the active layer applies it first (`Editor.applyPending`).
+ * or the active layer applies it first (`Editor.applyPending`): executing any command
+ * does so by itself. While it's pending, undo cancels it instead (see `Editor.history`).
  */
 export interface PendingEdit {
   /** What the edit is called, e.g. "Free Transform", for the Undo item that cancels it. */
@@ -71,7 +72,11 @@ export class Editor {
     return this.currentDocument;
   }
 
-  /** History of the current document. Read it at use time: `replaceDocument` swaps it. */
+  /**
+   * History of the current document. Read it at use time: `replaceDocument` swaps it.
+   * Executing a command applies a pending edit first. While one is pending, undo cancels
+   * it (and `undoLabel` is its label) rather than undoing a step, and redo does nothing.
+   */
   get history(): History {
     return this.currentHistory;
   }
@@ -226,7 +231,7 @@ export class Editor {
   }
 
   private createHistory(document: ImageDocument): History {
-    return new LinearHistory(document, (change) => {
+    const steps = new LinearHistory(document, (change) => {
       // Ignore a stale history whose document has since been replaced.
       if (document !== this.currentDocument) return;
       let emitted: EditorChange = change;
@@ -234,6 +239,7 @@ export class Editor {
       if (this.keepActiveLayer()) emitted = { ...emitted, activeLayerChanged: true };
       this.emit(emitted);
     });
+    return new EditorHistory(steps, this);
   }
 
   private activateTopLayer(): void {
@@ -284,5 +290,54 @@ export class Editor {
   private emit(change: EditorChange): void {
     this.revisionCounter++;
     for (const listener of [...this.listeners]) listener(change);
+  }
+}
+
+/**
+ * A document's history as the editor offers it, keeping a pending edit out of the way:
+ * executing a command applies the edit first, and while it's pending, undo cancels it
+ * (offered under its label) and there's nothing to redo.
+ */
+class EditorHistory implements History {
+  constructor(
+    private readonly steps: History,
+    private readonly editor: Editor,
+  ) {}
+
+  execute(command: Command): void {
+    this.editor.applyPending();
+    this.steps.execute(command);
+  }
+
+  undo(): boolean {
+    return this.editor.cancelPending() || this.steps.undo();
+  }
+
+  redo(): boolean {
+    return this.editor.pending === null && this.steps.redo();
+  }
+
+  get canUndo(): boolean {
+    return this.editor.pending !== null || this.steps.canUndo;
+  }
+
+  get canRedo(): boolean {
+    return this.editor.pending === null && this.steps.canRedo;
+  }
+
+  get undoLabel(): string | null {
+    return this.editor.pending?.label ?? this.steps.undoLabel;
+  }
+
+  get redoLabel(): string | null {
+    return this.editor.pending === null ? this.steps.redoLabel : null;
+  }
+
+  get stateId(): number {
+    return this.steps.stateId;
+  }
+
+  clear(): void {
+    this.steps.clear();
   }
 }

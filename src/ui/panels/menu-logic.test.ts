@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampMenuPosition, closesContextMenu, menuKeyAction } from './menu-logic';
+import { clampMenuPosition, closesContextMenu, menuKeyAction, placeSubmenu } from './menu-logic';
 
 describe('menuKeyAction', () => {
   it('maps the WAI-ARIA menu keys', () => {
@@ -9,14 +9,36 @@ describe('menuKeyAction', () => {
     expect(menuKeyAction('End')).toBe('last');
     expect(menuKeyAction('Enter')).toBe('choose');
     expect(menuKeyAction(' ')).toBe('choose');
+    expect(menuKeyAction('ArrowRight')).toBe('open');
+    expect(menuKeyAction('ArrowLeft')).toBe('back');
     expect(menuKeyAction('Escape')).toBe('close');
     expect(menuKeyAction('Tab')).toBe('leave');
   });
 
   it('ignores other keys', () => {
     expect(menuKeyAction('a')).toBeNull();
-    expect(menuKeyAction('ArrowLeft')).toBeNull();
     expect(menuKeyAction('Backspace')).toBeNull();
+  });
+});
+
+describe('placeSubmenu', () => {
+  const item = (left: number, right: number, top = 50) => ({ left, right, top });
+
+  it('goes to the right, its first item level with the item, when it fits there', () => {
+    expect(placeSubmenu(item(100, 300), 200, 100, 1000, 800)).toEqual({ side: 'right', top: -5 });
+  });
+
+  it('goes to the left when only that side has room, else to the side with more', () => {
+    // 1000 − 4 − 950 = 46 px of room on the right, 696 on the left.
+    expect(placeSubmenu(item(700, 950), 200, 100, 1000, 800).side).toBe('left');
+    expect(placeSubmenu(item(100, 900), 400, 100, 1000, 800).side).toBe('right');
+    expect(placeSubmenu(item(150, 900), 400, 100, 1000, 800).side).toBe('left');
+  });
+
+  it('moves up as little as it must to stay in the window, but not past its top', () => {
+    // Its bottom may reach 800 − 4: it starts at 696 rather than 745.
+    expect(placeSubmenu(item(100, 300, 750), 200, 100, 1000, 800).top).toBe(696 - 750);
+    expect(placeSubmenu(item(100, 300, 750), 200, 900, 1000, 800).top).toBe(4 - 750);
   });
 });
 

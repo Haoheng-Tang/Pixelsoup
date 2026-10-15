@@ -10,7 +10,7 @@ import {
   createRasterLayer,
   liftSelectionCommand,
 } from '../core';
-import type { CanvasMenuController } from './canvas-menu';
+import type { CanvasMenuController, CanvasMenuTransform } from './canvas-menu';
 import { canvasMenuSections, isContextClick, isOnCanvas } from './canvas-menu';
 import type { LayerAction } from './layer-actions';
 import { runLayerAction } from './layer-actions';
@@ -55,8 +55,24 @@ class FakeController implements CanvasMenuController {
   }
 }
 
-function sections(editor: Editor, controller = new FakeController()): ContextMenuSections {
-  return canvasMenuSections(editor, controller);
+class FakeTransform implements CanvasMenuTransform {
+  layer = true;
+  started = 0;
+  canStart(): boolean {
+    return this.layer;
+  }
+  start(): boolean {
+    this.started++;
+    return true;
+  }
+}
+
+function sections(
+  editor: Editor,
+  controller = new FakeController(),
+  transform = new FakeTransform(),
+): ContextMenuSections {
+  return canvasMenuSections(editor, controller, transform);
 }
 
 /** Labels, with a ✕ on disabled items, section by section. */
@@ -98,18 +114,25 @@ describe('canvasMenuSections', () => {
     expect(shown(menu)).toEqual([
       ['Deselect', 'Select Inverse'],
       ['Layer via Copy', 'Layer via Cut'],
+      ['Free Transform'],
     ]);
-    expect(menu.flat().map((entry) => entry.shortcut)).toEqual(['D', 'Shift+I', 'J', 'Shift+J']);
+    expect(menu.flat().map((entry) => entry.shortcut)).toEqual([
+      'D',
+      'Shift+I',
+      'J',
+      'Shift+J',
+      'Alt+T',
+    ]);
   });
 
   it('offers Duplicate Layer… and Delete Layer without a selection', () => {
     const menu = sections(setup('Background', 'Top'));
-    expect(shown(menu)).toEqual([['Duplicate Layer…', 'Delete Layer']]);
-    expect(menu.flat().map((entry) => entry.shortcut)).toEqual([undefined, undefined]);
+    expect(shown(menu)).toEqual([['Duplicate Layer…', 'Delete Layer'], ['Free Transform']]);
+    expect(menu.flat().map((entry) => entry.shortcut)).toEqual([undefined, undefined, 'Alt+T']);
   });
 
   it('disables Delete Layer for the only layer', () => {
-    expect(shown(sections(setup('Background')))).toEqual([['Duplicate Layer…', 'Delete Layer ✕']]);
+    expect(shown(sections(setup('Background')))[0]).toEqual(['Duplicate Layer…', 'Delete Layer ✕']);
   });
 
   it('disables Layer via Copy and Cut when the selection misses the active layer', () => {
@@ -119,6 +142,7 @@ describe('canvasMenuSections', () => {
     expect(shown(sections(editor))).toEqual([
       ['Deselect', 'Select Inverse'],
       ['Layer via Copy ✕', 'Layer via Cut ✕'],
+      ['Free Transform'],
     ]);
   });
 
@@ -133,13 +157,15 @@ describe('canvasMenuSections', () => {
     const controller = new FakeController();
     controller.blocked = true;
     const editor = setup('Background', 'Top');
-    expect(shown(canvasMenuSections(editor, controller))).toEqual([
+    expect(shown(sections(editor, controller))).toEqual([
       ['Duplicate Layer… ✕', 'Delete Layer ✕'],
+      ['Free Transform ✕'],
     ]);
     select(editor);
-    expect(shown(canvasMenuSections(editor, controller))).toEqual([
+    expect(shown(sections(editor, controller))).toEqual([
       ['Deselect ✕', 'Select Inverse ✕'],
       ['Layer via Copy ✕', 'Layer via Cut ✕'],
+      ['Free Transform ✕'],
     ]);
   });
 
@@ -149,20 +175,49 @@ describe('canvasMenuSections', () => {
     expect(shown(sections(editor))).toEqual([
       ['Deselect', 'Select Inverse'],
       ['Layer via Copy', 'Layer via Cut'],
+      ['Free Transform'],
     ]);
+  });
+
+  it('starts Free Transform, disabled when there’s no layer to transform', () => {
+    const editor = setup('Background');
+    const transform = new FakeTransform();
+    item(sections(editor, new FakeController(), transform), 'Free Transform').run();
+    expect(transform.started).toBe(1);
+    expect(editor.history.canUndo).toBe(false);
+    transform.layer = false;
+    expect(item(sections(editor, new FakeController(), transform), 'Free Transform').disabled).toBe(
+      true,
+    );
   });
 
   it("puts the active tool's sections first, dropping empty ones", () => {
     const editor = setup('Background', 'Top');
     const toolItem: ContextMenuItem = { command: 'tool', label: 'Tool Item', run: () => {} };
-    const menu = canvasMenuSections(editor, new FakeController(), [[], [toolItem]]);
-    expect(shown(menu)).toEqual([['Tool Item'], ['Duplicate Layer…', 'Delete Layer']]);
+    const menu = canvasMenuSections(editor, new FakeController(), new FakeTransform(), [
+      [],
+      [toolItem],
+    ]);
+    expect(shown(menu)).toEqual([
+      ['Tool Item'],
+      ['Duplicate Layer…', 'Delete Layer'],
+      ['Free Transform'],
+    ]);
+  });
+
+  it("shows only a session's items while one runs", () => {
+    const editor = setup('Background', 'Top');
+    const apply: ContextMenuItem = { command: 'apply', label: 'Apply', run: () => {} };
+    const menu = canvasMenuSections(editor, new FakeController(), new FakeTransform(), [[apply]], {
+      exclusive: true,
+    });
+    expect(shown(menu)).toEqual([['Apply']]);
   });
 
   it('asks before duplicating or deleting, through the controller', () => {
     const editor = setup('Background', 'Top');
     const controller = new FakeController();
-    const menu = canvasMenuSections(editor, controller);
+    const menu = sections(editor, controller);
     const before = state(editor);
     item(menu, 'Duplicate Layer…').run();
     item(menu, 'Delete Layer').run();
@@ -170,7 +225,6 @@ describe('canvasMenuSections', () => {
     expect(state(editor)).toEqual(before);
     expect(editor.history.canUndo).toBe(false);
   });
-
   const BAR: readonly (readonly [string, (editor: Editor) => void])[] = [
     ['Deselect', (editor) => runSelectCommand(editor, 'deselect' satisfies SelectCommand)],
     ['Select Inverse', (editor) => runSelectCommand(editor, 'inverse' satisfies SelectCommand)],

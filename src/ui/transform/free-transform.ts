@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
-import type { Editor, Layer } from '../../core';
-import { assertNever, liftSelectionCommand, rasterBounds } from '../../core';
+import type { Editor, Layer, Orientation } from '../../core';
+import { assertNever, liftSelectionCommand, orientLayerCommand, rasterBounds } from '../../core';
 import type { ToolManager } from '../tools/tool-manager';
 import type { TransformMode } from './transform-math';
 import { TransformOptions } from './transform-options';
@@ -15,9 +15,10 @@ export interface FreeTransformInit {
 }
 
 /**
- * Starts Free Transform (Edit → Free Transform, Ctrl/Cmd+T) and Edit → Transform → Scale
- * and Rotate on the active layer, and tracks the session they run. One session at a time:
- * starting another while one runs just switches its mode.
+ * Starts Free Transform (Edit → Free Transform, Ctrl/Cmd+Alt+T, or the canvas's context
+ * menu) and Edit → Transform → Scale and Rotate on the active layer, and tracks the
+ * session they run. One session at a time: starting another while one runs just switches
+ * its mode. Edit → Transform's turns and flips come here too (`orient`).
  */
 export class FreeTransform {
   readonly options: TransformOptions;
@@ -103,6 +104,32 @@ export class FreeTransform {
       this.current = session;
       this.notify();
     }
+    return true;
+  }
+
+  /**
+   * Edit → Transform's turns and flips: composed into the running session, or else applied
+   * to the active layer straight away, losslessly, as one undo step (a floating selection
+   * turns with its outline). Shows why in the status bar, and returns false, if the layer
+   * is hidden.
+   */
+  orient(orientation: Orientation): boolean {
+    const running = this.current;
+    if (running) {
+      running.orient(orientation);
+      return true;
+    }
+    const { editor, tools } = this;
+    const layer = editor.activeLayer;
+    if (!layer) return false;
+    if (!layer.visible) {
+      tools.showMessage('The active layer is hidden');
+      return false;
+    }
+    const floating = editor.floating?.layerId === layer.id ? editor.floating : null;
+    const command = orientLayerCommand(editor.document, layer.id, orientation, floating);
+    if (!command) return false;
+    editor.history.execute(command);
     return true;
   }
 

@@ -12,11 +12,13 @@ import type {
 } from '../../core';
 import {
   MAX_IMAGE_SIZE,
+  ORIENTATION_LABELS,
   findLayer,
   transformLayerCommand,
   transformPoint,
   transformedBounds,
 } from '../../core';
+import type { ContextMenuItem, ContextMenuSections } from '../panels/menu-logic';
 import { nudgeOffset } from '../tools/nudge';
 import type {
   ToolContext,
@@ -100,9 +102,8 @@ interface TransformDrag {
  * `TransformLayerCommand` or cancelled.
  *
  * It's the editor's pending edit meanwhile, so anything else that would change the
- * document applies it first. It ends by itself, adding nothing to history, if the
- * document changes under it all the same (it's replaced, or its layer is changed or goes
- * away, say by undo).
+ * document applies it first, and undo cancels it. It ends by itself, adding nothing to
+ * history, if the document changes under it all the same (when it's replaced, say).
  */
 export class TransformSession implements ToolSession {
   readonly OptionsPanel: ComponentType | undefined;
@@ -247,6 +248,37 @@ export class TransformSession implements ToolSession {
     if (this.ended) return;
     if (this.editor.pending === this.edit) this.editor.cancelPending();
     else this.revert();
+  }
+
+  /** The canvas's context menu while the session runs: its turns and flips, Apply, Cancel. */
+  contextMenu(): ContextMenuSections {
+    const orient = (orientation: Orientation): ContextMenuItem => ({
+      command: `transform-${orientation}`,
+      label: ORIENTATION_LABELS[orientation],
+      run: () => this.orient(orientation),
+    });
+    return [
+      [orient('flip-horizontal'), orient('flip-vertical')],
+      [orient('rotate-180'), orient('rotate-cw'), orient('rotate-ccw')],
+      [
+        {
+          command: 'transform-apply',
+          label: 'Apply',
+          shortcut: 'Enter',
+          plain: true,
+          run: () => {
+            this.apply();
+          },
+        },
+        {
+          command: 'transform-cancel',
+          label: 'Cancel',
+          shortcut: 'Escape',
+          plain: true,
+          run: () => this.discard(),
+        },
+      ],
+    ];
   }
 
   pointerDown(e: ToolPointerEvent): void {

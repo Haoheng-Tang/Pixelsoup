@@ -88,7 +88,7 @@ export function ContextMenu({ x, y, label, sections, onClose, swallowsPress }: C
     };
   }, []);
 
-  const items = new Map(sections.flat().map((item) => [item.command, item]));
+  const items = new Map(allItems(sections).map((item) => [item.command, item]));
   const choose = (entry: MenuEntry<string>) => {
     const item: ContextMenuItem | undefined = items.get(entry.command);
     onClose();
@@ -107,4 +107,11 @@ export function ContextMenu({ x, y, label, sections, onClose, swallowsPress }: C
       onLeave={onClose}
     />
   );
+}
+
+/** Every item, submenus' included. */
+function allItems(sections: ContextMenuSections): ContextMenuItem[] {
+  return sections
+    .flat()
+    .flatMap((item) => (item.submenu ? [item, ...allItems(item.submenu)] : [item]));
 }

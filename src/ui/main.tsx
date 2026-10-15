@@ -12,6 +12,8 @@ import { pngCodec } from './io/png-codec';
 import { AppController } from './session/app-controller';
 import { DocumentSession } from './session/document-session';
 import { createToolManager } from './tools/create-tools';
+import { FreeTransform } from './transform/free-transform';
+import { transformOptionsPanel } from './transform/TransformOptionsPanel';
 import { ViewOptions } from './viewport/view-options';
 import './styles.css';
 
@@ -35,6 +37,7 @@ const clipboard = new PixelClipboard({
 });
 const colors = new Colors();
 const tools = createToolManager(editor, colors);
+const freeTransform = new FreeTransform(editor, tools, { panel: transformOptionsPanel });
 const view = new ViewOptions();
 
 createRoot(container).render(
@@ -44,6 +47,7 @@ createRoot(container).render(
       controller={controller}
       clipboard={clipboard}
       tools={tools}
+      freeTransform={freeTransform}
       colors={colors}
       view={view}
     />

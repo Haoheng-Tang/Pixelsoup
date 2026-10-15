@@ -110,6 +110,23 @@ describe('AppController', () => {
     expect(store.openPickers).toHaveLength(1);
   });
 
+  it('applies an edit in progress first, so that it counts as an unsaved change', async () => {
+    const { controller, editor, makeDirty } = setup();
+    const calls: string[] = [];
+    editor.beginPending({
+      label: 'Free Transform',
+      apply: () => {
+        calls.push('apply');
+        makeDirty();
+      },
+      cancel: () => calls.push('cancel'),
+    });
+    controller.run('new');
+    await settle();
+    expect(calls).toEqual(['apply']);
+    expect(controller.modal).toEqual({ kind: 'confirm-discard', documentName: 'Untitled-1' });
+  });
+
   it('ignores commands while a dialog is open or an operation is running', async () => {
     const { controller, store } = setup();
     controller.run('export');
@@ -482,8 +499,9 @@ describe('AppController image dialogs', () => {
     clock.runFrame();
     expect(editor.floating).not.toBeNull();
     // A 2×3 block turned about its centre (1, 1.5) spans x −0.5…2.5, y 0.5…2.5, then shifts
-    // half a pixel each way onto pixel corners.
-    expect(editor.document.selection?.bounds()).toEqual({ x: 0, y: 1, width: 3, height: 2 });
+    // half a pixel each way away from its old top-left onto pixel corners: x −1…2, y 1…3,
+    // cut to the canvas.
+    expect(editor.document.selection?.bounds()).toEqual({ x: 0, y: 1, width: 2, height: 2 });
     controller.previewRotation(-90);
     clock.runFrame();
     expect(editor.document.layers).toHaveLength(2);

@@ -5,14 +5,19 @@ import { Editor } from '../editor';
 import type { RasterLayer } from '../layer';
 import { createRasterLayer } from '../layer';
 import type { Orientation } from '../orientation';
-import { orientPixels } from '../orientation';
+import { orientPixels, orientedSize } from '../orientation';
 import type { PixelBuffer } from '../pixel-buffer';
 import { clonePixelBuffer, createPixelBuffer, fillRect, getPixel } from '../pixel-buffer';
 import { IDENTITY, scaling, translation } from '../resample/affine';
 import { Selection } from '../selection';
 import { liftSelectionCommand } from './float-commands';
 import { MoveLayerCommand } from './move-commands';
-import { rotateLayerCommand, transformLayerCommand } from './transform-commands';
+import { ORIENTATION_LABELS } from './orientation-commands';
+import {
+  orientLayerCommand,
+  rotateLayerCommand,
+  transformLayerCommand,
+} from './transform-commands';
 
 /** A buffer whose pixel (x, y) is [40x, 40y, n, 255], n counting from 1 in reading order. */
 function numbered(width: number, height: number): PixelBuffer {
@@ -37,9 +42,9 @@ describe('rotateLayerCommand', () => {
   it('turns quarter turns exactly about the layer centre', () => {
     const turns: [number, Orientation, { x: number; y: number }][] = [
       // A 3 × 2 layer at (5, 4) has its centre at (6.5, 5). Turned a quarter, its corners
-      // reach (5.5, 3.5), so it's nudged half a pixel to (6, 4).
-      [90, 'rotate-cw', { x: 6, y: 4 }],
-      [-90, 'rotate-ccw', { x: 6, y: 4 }],
+      // reach (5.5, 3.5), so it moves on half a pixel away from (5, 4), to (6, 3).
+      [90, 'rotate-cw', { x: 6, y: 3 }],
+      [-90, 'rotate-ccw', { x: 6, y: 3 }],
       [180, 'rotate-180', { x: 5, y: 4 }],
     ];
     for (const [degrees, orientation, at] of turns) {
@@ -151,6 +156,100 @@ describe('TransformLayerCommand', () => {
   });
 });
 
+describe('OrientLayerCommand', () => {
+  const ALL: Orientation[] = [
+    'rotate-cw',
+    'rotate-ccw',
+    'rotate-180',
+    'flip-horizontal',
+    'flip-vertical',
+  ];
+
+  it('moves the pixels exactly, about the layer’s centre', () => {
+    // A 3 × 2 layer at (5, 4) has its centre at (6.5, 5). Turned a quarter either way, its
+    // corners reach (5.5, 3.5), so it moves on half a pixel away from (5, 4), to (6, 3).
+    const at: Record<Orientation, { x: number; y: number }> = {
+      'rotate-cw': { x: 6, y: 3 },
+      'rotate-ccw': { x: 6, y: 3 },
+      'rotate-180': { x: 5, y: 4 },
+      'flip-horizontal': { x: 5, y: 4 },
+      'flip-vertical': { x: 5, y: 4 },
+    };
+    for (const orientation of ALL) {
+      const doc = createDocument(12, 12);
+      const layer = addLayer(doc, 5, 4, numbered(3, 2));
+      const command = orientLayerCommand(doc, layer.id, orientation);
+      expect(command?.label).toBe(ORIENTATION_LABELS[orientation]);
+      if (command) new Editor(doc).history.execute(command);
+      expect({ ...placement(layer), data: layer.pixels.data }).toEqual({
+        ...at[orientation],
+        ...orientedSize(orientation, 3, 2),
+        data: orientPixels(orientation, numbered(3, 2).data, 3, 2, 4),
+      });
+    }
+  });
+
+  it('comes back to the same bytes and place', () => {
+    const sequences: Orientation[][] = [
+      ['flip-horizontal', 'flip-horizontal'],
+      ['flip-vertical', 'flip-vertical'],
+      ['rotate-180', 'rotate-180'],
+      ['rotate-cw', 'rotate-ccw'],
+      ['rotate-ccw', 'rotate-cw'],
+      ['rotate-cw', 'rotate-cw', 'rotate-cw', 'rotate-cw'],
+      ['rotate-ccw', 'rotate-ccw', 'rotate-180'],
+      ['flip-horizontal', 'flip-vertical', 'rotate-180'],
+    ];
+    for (const sequence of sequences) {
+      const doc = createDocument(12, 12);
+      // Its sides differ by an odd number, so quarter turns land half a pixel off the grid.
+      const layer = addLayer(doc, 5, 4, numbered(3, 2));
+      const editor = new Editor(doc);
+      for (const orientation of sequence) {
+        const command = orientLayerCommand(doc, layer.id, orientation);
+        if (command) editor.history.execute(command);
+      }
+      expect(placement(layer)).toEqual({ x: 5, y: 4, width: 3, height: 2 });
+      expect(layer.pixels.data).toEqual(numbered(3, 2).data);
+    }
+  });
+
+  it('reports both places and the layer’s pixels', () => {
+    const doc = createDocument(12, 12);
+    const layer = addLayer(doc, 5, 4, numbered(3, 2));
+    // From 3 × 2 at (5, 4) to 2 × 3 at (6, 3).
+    expect(orientLayerCommand(doc, layer.id, 'rotate-cw')?.apply(doc)).toEqual({
+      dirty: { x: 5, y: 3, width: 3, height: 3 },
+      layerPixels: [{ layerId: layer.id, rect: null }],
+    });
+  });
+
+  it('undoes to the very same buffer and place, and redoes without copying again', () => {
+    const doc = createDocument(12, 12);
+    const original = numbered(3, 2);
+    const layer = addLayer(doc, 5, 4, original);
+    const editor = new Editor(doc);
+    const command = orientLayerCommand(doc, layer.id, 'flip-horizontal');
+    if (!command) throw new Error('Nothing to flip');
+    editor.history.execute(command);
+    const flipped = layer.pixels;
+    expect(editor.history.undoLabel).toBe('Flip Horizontal');
+    editor.history.undo();
+    expect(layer.pixels).toBe(original);
+    expect([layer.x, layer.y]).toEqual([5, 4]);
+    editor.history.redo();
+    expect(layer.pixels).toBe(flipped);
+  });
+
+  it('refuses hidden layers and missing ones', () => {
+    const doc = createDocument(8, 8);
+    const layer = addLayer(doc, 0, 0, numbered(2, 2));
+    expect(orientLayerCommand(doc, 'nope', 'flip-vertical')).toBeNull();
+    layer.visible = false;
+    expect(orientLayerCommand(doc, layer.id, 'flip-vertical')).toBeNull();
+  });
+});
+
 describe('Transforming a floating selection', () => {
   /**
    * An opaque 24 × 20 layer with a soft-edged elliptical selection lifted out of it and
@@ -217,6 +316,19 @@ describe('Transforming a floating selection', () => {
     editor.history.redo();
     expect(editor.floating).toBe(after);
     expect(doc.selection).toBe(outline);
+  });
+
+  it('turns and flips the outline exactly with the pixels', () => {
+    for (const orientation of ['rotate-cw', 'flip-vertical'] as const) {
+      const { doc, editor, float } = floatingSetUp();
+      const command = orientLayerCommand(doc, float.id, orientation, editor.floating);
+      if (command) editor.history.execute(command);
+      const floating = editor.floating;
+      expect(floating?.edited).toBe(true);
+      expect(floating?.selection).toBe(doc.selection);
+      expect([floating?.x, floating?.y]).toEqual([float.x, float.y]);
+      expect(misaligned(doc, float)).toEqual([]);
+    }
   });
 
   it('moves the turned outline from where it was turned', () => {
