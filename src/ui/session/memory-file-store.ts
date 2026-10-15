@@ -1,4 +1,11 @@
-import type { FileRef, FileStore, FileType, OpenedFile, SaveRequest } from '../io/file-store';
+import type {
+  DroppedData,
+  FileRef,
+  FileStore,
+  FileType,
+  OpenedFile,
+  SaveRequest,
+} from '../io/file-store';
 
 /**
  * In-memory FileStore for tests. `pick` is what the next open picker returns, and
@@ -19,6 +26,15 @@ export class MemoryFileStore implements FileStore {
     this.openPickers.push(types);
     const file = this.pick;
     return Promise.resolve(file ? { file, ref: { name: file.name } } : null);
+  }
+
+  /** As the File System Access store: the first file, which Save can write back to. */
+  dropped(data: DroppedData): Promise<OpenedFile> | null {
+    const file = Array.from(data.items)
+      .find((item) => item.kind === 'file')
+      ?.getAsFile();
+    if (!file) return null;
+    return Promise.resolve({ file, ref: this.savesInPlace ? { name: file.name } : null });
   }
 
   async save(request: SaveRequest): Promise<FileRef | null> {

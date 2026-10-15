@@ -1,8 +1,8 @@
-# chore: Crop box on activation, toolbar tool groups and the `.soup` extension
+# chore: Crop box on activation, toolbar tool groups, the `.soup` extension and dropping files
 
 ## Summary
 
-Three small improvements to tools and files. No core pixel logic changes.
+Small improvements to tools and files. No core pixel logic changes.
 
 - **The Crop tool puts up a box straight away**: the selection's bounds, or else the whole
   canvas, with its handles, size readout and (unless it's the whole canvas) the dimming
@@ -20,6 +20,10 @@ Three small improvements to tools and files. No core pixel logic changes.
   pickers and the download fallback use `.soup`. The old `pixelsoup` extension is gone entirely:
   the open picker no longer offers it and nothing recognises it by name. The format itself is
   unchanged (same zip container, `formatVersion` 1, MIME type `application/x-pixelsoup`).
+- **Drop a file on the page to open it**: a `.soup` document or a PNG, JPEG or WebP image
+  dropped anywhere opens as File → Open would, asking first if there are unsaved changes.
+  While files are dragged over the page a "Drop to open" hint shows. In Chromium, Save writes
+  a dropped `.soup` back to the same file.
 
 No new dependencies.
 
@@ -69,6 +73,21 @@ Commits are meant to be reviewed one at a time:
    extra entry, the name check and their tests are gone, and the docs, README, CLAUDE.md and
    earlier PR write-ups say `.soup` throughout. A case-insensitive `git grep` for the old
    extension, dot included, comes back empty.
+6. **Open files dropped on the page** (`file-store.ts`, `document-session.ts`,
+   `app-controller.ts`, `use-file-drop.ts`, `App.tsx`, `styles.css`, `memory-file-store.ts`):
+   - `FileStore.dropped(data)` reads the first file of a drop. It must run during the drop
+     event, since the browser empties the `DataTransfer` afterwards. The File System Access
+     store also asks for the file's handle (`getAsFileSystemHandle`, Chromium), so Save
+     writes back to it; the download store opens it with no save target.
+   - `DocumentSession.openFile` is `open` without the picker, shared by both.
+     `AppController.openDropped` reads the drop at once, then asks before discarding unsaved
+     changes and opens it as one busy operation. It does nothing while a dialog is open or a
+     file operation runs.
+   - `useFileDrop` listens on the window for drags carrying files (`isFileDrag`), so dropping
+     never makes the browser navigate to the file, and returns whether to show the hint.
+     While blocked it refuses the drop (`dropEffect` none) and shows no hint. The hint takes
+     no pointer events, and goes on dragleave or a second after the last dragover, in case a
+     drag cancelled outside the window never sends dragleave.
 
 ## Design notes
 
@@ -84,13 +103,15 @@ Commits are meant to be reviewed one at a time:
   signature as a document, whatever its name (a renamed `art.zip` opens), as it did before.
   So an old file with the `pixelsoup` extension, chosen through "All files", still opens; it
   just isn't offered or recognised by its extension.
+- **Drops open rather than import**: a dropped image becomes a new document, as File → Open
+  makes it, not a layer in the current one. Import as Layer stays a menu command.
 
 ## How to verify
 
 ```sh
 npm ci
 npm run lint     # ESLint + Prettier check
-npm test         # 910 tests across 75 files (tool-groups.test.ts is new)
+npm test         # 916 tests across 76 files (tool-groups and use-file-drop tests are new)
 npm run build    # tsc -b for core/web/node projects, then vite build
 npm run dev      # http://localhost:1619
 ```
@@ -109,6 +130,10 @@ Unit tests cover:
   choosing from it. `ToolManager.groups` order and `lastUsed`.
 - **Files**: saves suggest and write `.soup`, and both open pickers accept `.soup` only;
   opening and saving back in place; a renamed document still recognised by its signature.
+- **Drops**: a dropped `.soup` opens and Save writes back to it; a dropped image opens as a
+  new document with no save target; unsaved changes ask first and Cancel keeps them; drops
+  without files, and drops while a dialog is open, do nothing; an unreadable file shows the
+  usual error. `isFileDrag` on its own.
 
 These checks were run with a script driving headless Microsoft Edge (1400 × 900 at 125 %)
 through the DevTools protocol, with real pointer and key events, against a local dev server,
@@ -135,6 +160,14 @@ not the Cloudflare preview, which needs the branch pushed. Everything passed:
   place without a picker. Both open picker entries listed `.soup` and not the old extension.
   Without the File System Access API, each Save downloaded `Untitled-1.soup`, and the file
   input accepted `application/x-pixelsoup,.soup,image/png,…`.
+- **Dropping files** (17 checks, real drags through `Input.dispatchDragEvent`): dragging a
+  file over the page showed "Drop to open"; dropping a saved `.soup` opened its layers,
+  removed the hint and didn't navigate, and Save had a handle to write back to. Leaving the
+  page hid the hint at once, and a drag that stopped hid it after a second. With unsaved
+  changes, dropping a PNG asked first: Escape kept the document, Discard opened the PNG as a
+  new document with no save target. With the Export dialog open there was no hint and the
+  drop was ignored. A `.txt` showed "Couldn't open". A dropped file with a writable handle
+  (an origin-private file) saved in place with Ctrl+S, no picker.
 
 In the browser (on the Cloudflare preview once pushed):
 
@@ -145,16 +178,18 @@ In the browser (on the Cloudflare preview once pushed):
 - [ ] Shift+M and Shift+L: the M and L buttons change icons. Right-click, long-press and the
       corner triangle open their flyouts; choose a tool from each.
 - [ ] Save a document: `Untitled-1.soup`. Reopen it and save again in place.
+- [ ] Drag that `.soup` from the file manager onto the page: "Drop to open", then it opens.
+      Change it and save: it's written in place. Drop a photo: it opens as a new document.
 
 ## Known limitations
 
 - **The initial box doesn't follow the selection**: changing the selection while the Crop
   tool is active leaves the box where it was; reselect the tool to start from the new bounds.
 - **Old files with the `pixelsoup` extension** aren't offered by the open picker. Rename them
-  to `.soup`, or
-  pick them through "All files", where their zip signature still opens them.
-- **Not tried here**: the Cloudflare preview, a Mac, Firefox and Safari, and long presses
-  with touch or a pen.
+  to `.soup`, or pick them through "All files", where their zip signature still opens them.
+- **One file per drop**: dropping several opens the first.
+- **Not tried here**: the Cloudflare preview, a Mac, Firefox and Safari, long presses with
+  touch or a pen, and drags from a real file manager (the checks used DevTools drags).
 
 ## Deliberately out of scope
 

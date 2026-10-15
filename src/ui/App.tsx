@@ -14,6 +14,7 @@ import { useBrushShortcuts } from './use-brush-shortcuts';
 import { useColorShortcuts } from './use-color-shortcuts';
 import { useDocumentWindow } from './use-document-window';
 import { useEditShortcuts } from './use-edit-shortcuts';
+import { useFileDrop } from './use-file-drop';
 import { useFileShortcuts } from './use-file-shortcuts';
 import { useHistoryShortcuts } from './use-history-shortcuts';
 import { useLayerShortcuts } from './use-layer-shortcuts';
@@ -55,6 +56,7 @@ export function App({ editor, controller, clipboard, tools, colors, view }: AppP
   useColorShortcuts(colors, controller);
   useBrushShortcuts(tools, controller);
   useFileShortcuts(controller);
+  const dropping = useFileDrop(controller);
   useDocumentWindow(controller.session);
 
   return (
@@ -94,6 +96,11 @@ export function App({ editor, controller, clipboard, tools, colors, view }: AppP
         />
       )}
       <ModalHost controller={controller} colors={colors} />
+      {dropping && (
+        <div className="drop-hint" aria-hidden="true">
+          <div className="drop-hint-label">Drop to open</div>
+        </div>
+      )}
     </div>
   );
 }

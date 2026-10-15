@@ -7,11 +7,13 @@ import {
   SetLayerVisibilityCommand,
   SetSelectionCommand,
   createBlankDocument,
+  createPixelBuffer,
   duplicateName,
   liftSelectionCommand,
 } from '../../core';
 import type { FillSettings } from '../edit-actions';
 import { DEFAULT_FILL_SETTINGS } from '../edit-actions';
+import type { DroppedData } from '../io/file-store';
 import { runLayerAction } from '../layer-actions';
 import { decodePng, encodePng } from '../io/png';
 import { FakeClock } from '../tools/fake-clock';
@@ -201,6 +203,100 @@ describe('AppController', () => {
     controller.run('export');
     controller.dismiss();
     expect(calls).toBe(2);
+  });
+});
+
+/** A drop's `DataTransfer`: a dragged link's text, then the files. */
+function drop(...files: File[]): DroppedData {
+  return {
+    items: [
+      { kind: 'string', getAsFile: () => null },
+      ...files.map((file) => ({ kind: 'file', getAsFile: () => file })),
+    ],
+  };
+}
+
+describe('AppController: dropped files', () => {
+  it('opens a dropped .soup document, which Save writes back to', async () => {
+    const { controller, session, store, editor, makeDirty } = setup();
+    store.saveName = 'art.soup';
+    await session.saveAs();
+    session.close();
+
+    expect(controller.openDropped(drop(store.file('art.soup'), new File(['x'], 'b.png')))).toBe(
+      true,
+    );
+    expect(controller.busy).toBe(true);
+    await settle();
+    expect(controller.busy).toBe(false);
+    expect(controller.modal).toBeNull();
+    expect(session.name).toBe('art');
+    expect(editor.document.width).toBe(4);
+    expect(store.openPickers).toHaveLength(0);
+
+    makeDirty();
+    await session.save();
+    expect(store.savePickers).toHaveLength(1);
+  });
+
+  it('opens a dropped image as a new document that Save does not overwrite', async () => {
+    const { controller, session, store, editor } = setup();
+    controller.openDropped(drop(new File([encodePng(createPixelBuffer(5, 2))], 'cat.png')));
+    await settle();
+    expect(session.name).toBe('cat');
+    expect(editor.document).toMatchObject({ width: 5, height: 2 });
+    expect(session.savesInPlace).toBe(false);
+    await session.save();
+    expect(store.savePickers.map((r) => r.suggestedName)).toEqual(['cat.soup']);
+  });
+
+  it('asks before discarding unsaved changes, and keeps them on Cancel', async () => {
+    const { controller, session, editor, makeDirty } = setup();
+    makeDirty();
+    const before = editor.document;
+    const png = new File([encodePng(createPixelBuffer(5, 2))], 'cat.png');
+
+    controller.openDropped(drop(png));
+    await settle();
+    expect(controller.modal).toEqual({ kind: 'confirm-discard', documentName: 'Untitled-1' });
+    controller.dismiss();
+    await settle();
+    expect(editor.document).toBe(before);
+    expect(session.isDirty).toBe(true);
+
+    controller.openDropped(drop(png));
+    await settle();
+    controller.answerDiscard(true);
+    await settle();
+    expect(session.name).toBe('cat');
+  });
+
+  it('ignores drops without files, and drops while a dialog is open', async () => {
+    const { controller, editor } = setup();
+    const before = editor.document;
+    expect(controller.openDropped(drop())).toBe(false);
+    expect(controller.busy).toBe(false);
+
+    controller.run('export');
+    const png = new File([encodePng(createPixelBuffer(5, 2))], 'cat.png');
+    expect(controller.openDropped(drop(png))).toBe(false);
+    await settle();
+    expect(controller.modal).toEqual({ kind: 'export' });
+    expect(editor.document).toBe(before);
+  });
+
+  it("shows a file it can't open in an error dialog", async () => {
+    const { controller, session } = setup();
+    const originalError = console.error;
+    console.error = () => undefined;
+    try {
+      controller.openDropped(drop(new File(['hello'], 'notes.txt')));
+      await settle();
+    } finally {
+      console.error = originalError;
+    }
+    expect(controller.modal).toMatchObject({ kind: 'error', title: "Couldn't open “notes.txt”" });
+    expect(session.name).toBe('Untitled-1');
   });
 });
 

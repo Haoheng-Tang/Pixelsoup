@@ -20,6 +20,7 @@ Photoshop.
 - Native layered `.soup` files (a zip of `document.json` plus one PNG per layer; see
   [docs/file-format.md](docs/file-format.md)) that keep every layer's pixels exactly
 - Open PNG, JPEG and WebP images as new documents, or import them as a centred new layer
+- Drop a `.soup` file or an image anywhere on the page to open it, as File → Open does
 - Export the visible layers, flattened, as PNG, JPEG (with a quality setting) or WebP
 - Unsaved-changes marker in the toolbar and window title, with a prompt before anything is
   discarded
@@ -229,9 +230,10 @@ They have no shortcuts. More on how they work: [docs/transform.md](docs/transfor
 ### Saving and browsers
 
 In Chromium-based browsers (Chrome, Edge, Opera), Open and Save use the system file dialogs and
-Save writes back to the same file. Other browsers (Firefox, Safari) open files with the
-browser's file chooser, and every Save downloads a new copy instead. Browsers usually keep
-Ctrl/Cmd+N for opening a new window, so in a normal tab use File → New instead.
+Save writes back to the same file, including a `.soup` file dropped on the page. Other browsers
+(Firefox, Safari) open files with the browser's file chooser, and every Save downloads a new
+copy instead. Browsers usually keep Ctrl/Cmd+N for opening a new window, so in a normal tab use
+File → New instead.
 
 ## Requirements
 

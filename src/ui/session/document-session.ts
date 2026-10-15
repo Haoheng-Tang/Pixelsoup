@@ -13,7 +13,7 @@ import {
   indexAbove,
   serializeDocument,
 } from '../../core';
-import type { FileRef, FileStore } from '../io/file-store';
+import type { DroppedData, FileRef, FileStore, OpenedFile } from '../io/file-store';
 import type { ExportOptions } from './file-types';
 import {
   EXPORT_FORMATS,
@@ -120,7 +120,23 @@ export class DocumentSession {
   async open(): Promise<boolean> {
     const opened = await this.deps.store.open(OPEN_FILE_TYPES);
     if (!opened) return false;
-    const { file, ref } = opened;
+    await this.openFile(opened);
+    return true;
+  }
+
+  /**
+   * Reads the first file of a drop, during the drop event, for `openFile`. Null if the
+   * drop carried no file.
+   */
+  dropped(data: DroppedData): Promise<OpenedFile> | null {
+    return this.deps.store.dropped(data);
+  }
+
+  /**
+   * Opens a file chosen or dropped in place of the current document, as `open` does: a
+   * .soup document, which Save then writes back to if the store can, or an image.
+   */
+  async openFile({ file, ref }: OpenedFile): Promise<void> {
     const name = baseName(file.name);
     let doc: ImageDocument;
     let saveTarget: FileRef | null = null;
@@ -140,7 +156,6 @@ export class DocumentSession {
       });
     }
     this.replace(doc, name, saveTarget);
-    return true;
   }
 
   /**

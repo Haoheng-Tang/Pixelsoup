@@ -71,9 +71,9 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
   with no layers); `Editor` fixes it up after each change. Layer commands, panel: @docs/layers.md
 - **Files**: core reads and writes `.soup` bytes through an injected `PngCodec`; decoding
   images lives in `src/ui/io`. **`FileStore`** (`src/ui/io/file-store.ts`) alone knows how files
-  are picked and written (File System Access API, else file input and downloads). Pickers need
-  user activation, so file commands start synchronously in the click or key press.
-  `DocumentSession` runs file operations; `AppController` runs File commands and dialogs.
+  are picked, dropped and written (File System Access API, else file input and downloads).
+  Pickers need user activation, so file commands start synchronously in the click or key press.
+  `DocumentSession` runs file operations; `AppController` runs File commands, drops and dialogs.
 - **Compositor**: `Compositor.composite(doc, dirtyRects?)` flattens visible layers (Normal blend
   × layer opacity) into its own output, touching only the dirty regions. `CpuCompositor` is the
   reference; on the UI side `CompositeRenderer` (a `CanvasImageSource`) is the GPU seam.

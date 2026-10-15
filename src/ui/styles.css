@@ -498,6 +498,30 @@ button.danger:hover:not(:disabled) {
   cursor: progress;
 }
 
+/* Shown while files are dragged over the page. It takes no pointer events, so the drag's
+   enter and leave events still come from the page beneath. */
+.drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: rgb(0 0 0 / 35%);
+  outline: 3px dashed var(--accent);
+  outline-offset: -12px;
+}
+
+.drop-hint-label {
+  padding: var(--space-5) var(--space-6);
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+
 /* File menu */
 
 .menu {
