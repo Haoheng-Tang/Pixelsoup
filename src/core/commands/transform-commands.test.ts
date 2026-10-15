@@ -8,16 +8,20 @@ import type { Orientation } from '../orientation';
 import { orientPixels, orientedSize } from '../orientation';
 import type { PixelBuffer } from '../pixel-buffer';
 import { clonePixelBuffer, createPixelBuffer, fillRect, getPixel } from '../pixel-buffer';
-import { IDENTITY, scaling, translation } from '../resample/affine';
+import type { Affine } from '../resample/affine';
+import {
+  IDENTITY,
+  aboutPivot,
+  alignToPixels,
+  rotation,
+  scaling,
+  translation,
+} from '../resample/affine';
 import { Selection } from '../selection';
 import { liftSelectionCommand } from './float-commands';
 import { MoveLayerCommand } from './move-commands';
 import { ORIENTATION_LABELS } from './orientation-commands';
-import {
-  orientLayerCommand,
-  rotateLayerCommand,
-  transformLayerCommand,
-} from './transform-commands';
+import { orientLayerCommand, transformLayerCommand } from './transform-commands';
 
 /** A buffer whose pixel (x, y) is [40x, 40y, n, 255], n counting from 1 in reading order. */
 function numbered(width: number, height: number): PixelBuffer {
@@ -38,8 +42,18 @@ function placement(layer: RasterLayer) {
   return { x: layer.x, y: layer.y, width: layer.pixels.width, height: layer.pixels.height };
 }
 
-describe('rotateLayerCommand', () => {
-  it('turns quarter turns exactly about the layer centre', () => {
+/**
+ * A turn of `degrees` clockwise about the layer's centre, shifted by less than a pixel so
+ * that its bounds start on a pixel corner (`alignToPixels`).
+ */
+function turn(layer: RasterLayer, degrees: number): Affine {
+  const area = placement(layer);
+  const centre = aboutPivot(rotation(degrees), area.x + area.width / 2, area.y + area.height / 2);
+  return alignToPixels(centre, area);
+}
+
+describe('TransformLayerCommand', () => {
+  it('turns exactly by aligned quarter turns, even with bilinear interpolation', () => {
     const turns: [number, Orientation, { x: number; y: number }][] = [
       // A 3 × 2 layer at (5, 4) has its centre at (6.5, 5). Turned a quarter, its corners
       // reach (5.5, 3.5), so it moves on half a pixel away from (5, 4), to (6, 3).
@@ -50,25 +64,22 @@ describe('rotateLayerCommand', () => {
     for (const [degrees, orientation, at] of turns) {
       const doc = createDocument(12, 12);
       const layer = addLayer(doc, 5, 4, numbered(3, 2));
-      const command = rotateLayerCommand(doc, layer.id, degrees, null);
-      expect(command?.label).toBe('Rotate Layer');
+      const command = transformLayerCommand(doc, layer.id, turn(layer, degrees), 'bilinear');
       if (command) new Editor(doc).history.execute(command);
-      const turned = orientPixels(orientation, numbered(3, 2).data, 3, 2, 4);
       expect({ ...placement(layer), data: layer.pixels.data }).toEqual({
         ...at,
-        width: degrees === 180 ? 3 : 2,
-        height: degrees === 180 ? 2 : 3,
-        data: turned,
+        ...orientedSize(orientation, 3, 2),
+        data: orientPixels(orientation, numbered(3, 2).data, 3, 2, 4),
       });
     }
   });
 
-  it('anti-aliases the edges of other angles and keeps the centre', () => {
+  it('anti-aliases the edges of other angles without darkening them', () => {
     const doc = createDocument(40, 40);
     const pixels = createPixelBuffer(20, 10);
     fillRect(pixels, { x: 0, y: 0, width: 20, height: 10 }, [255, 0, 0, 255]);
     const layer = addLayer(doc, 10, 15, pixels);
-    const command = rotateLayerCommand(doc, layer.id, 15, null);
+    const command = transformLayerCommand(doc, layer.id, turn(layer, 15), 'bilinear');
     if (command) new Editor(doc).history.execute(command);
     // The 20 × 10 rect turned 15° about its centre (20, 20) reaches 10 cos 15° + 5 sin 15°
     // ≈ 10.95 across and 10 sin 15° + 5 cos 15° ≈ 7.42 down from it: (9.05, 12.58) to
@@ -88,26 +99,13 @@ describe('rotateLayerCommand', () => {
     expect(darkened).toEqual([]);
   });
 
-  it('refuses whole turns, hidden layers and missing ones', () => {
-    const doc = createDocument(8, 8);
-    const layer = addLayer(doc, 0, 0, numbered(2, 2));
-    for (const degrees of [0, 360, -720, Number.NaN]) {
-      expect(rotateLayerCommand(doc, layer.id, degrees, null)).toBeNull();
-    }
-    expect(rotateLayerCommand(doc, 'nope', 10, null)).toBeNull();
-    layer.visible = false;
-    expect(rotateLayerCommand(doc, layer.id, 10, null)).toBeNull();
-  });
-});
-
-describe('TransformLayerCommand', () => {
   it('undoes to the very same pixels and position, and redoes without resampling again', () => {
     const doc = createDocument(10, 10);
     const original = numbered(3, 2);
     const copy = clonePixelBuffer(original);
     const layer = addLayer(doc, 2, 3, original);
     const editor = new Editor(doc);
-    const command = rotateLayerCommand(doc, layer.id, 30, null);
+    const command = transformLayerCommand(doc, layer.id, turn(layer, 30), 'bilinear');
     if (!command) throw new Error('Nothing to rotate');
     editor.history.execute(command);
     const rotated = layer.pixels;
@@ -134,12 +132,14 @@ describe('TransformLayerCommand', () => {
     expect(layer.pixels.data).toEqual(numbered(3, 2).data);
   });
 
-  it('refuses transforms that change nothing or flatten the layer', () => {
+  it('refuses transforms that change nothing or flatten the layer, and hidden or missing layers', () => {
     const doc = createDocument(8, 8);
     const layer = addLayer(doc, 0, 0, numbered(2, 2));
     expect(transformLayerCommand(doc, layer.id, IDENTITY, 'bilinear')).toBeNull();
     expect(transformLayerCommand(doc, layer.id, scaling(0, 1), 'bilinear')).toBeNull();
     expect(transformLayerCommand(doc, 'nope', scaling(2), 'bilinear')).toBeNull();
+    layer.visible = false;
+    expect(transformLayerCommand(doc, layer.id, scaling(2), 'bilinear')).toBeNull();
   });
 
   it('keeps only the canvas when a layer would grow past the maximum size', () => {
@@ -291,8 +291,9 @@ describe('Transforming a floating selection', () => {
     const { doc, editor, float } = floatingSetUp();
     // Lifted from opaque pixels, the floating layer's alpha is the selection's coverage.
     expect(misaligned(doc, float)).toEqual([]);
-    const command = rotateLayerCommand(doc, float.id, 30, editor.floating);
-    expect(command?.label).toBe('Rotate Selection');
+    const command = transformLayerCommand(doc, float.id, turn(float, 30), 'bilinear', {
+      floating: editor.floating,
+    });
     if (command) editor.history.execute(command);
     const floating = editor.floating;
     expect(floating?.edited).toBe(true);
@@ -305,7 +306,9 @@ describe('Transforming a floating selection', () => {
     const { doc, editor, float, moved } = floatingSetUp();
     const before = editor.floating;
     const pixels = float.pixels;
-    const command = rotateLayerCommand(doc, float.id, -40, before);
+    const command = transformLayerCommand(doc, float.id, turn(float, -40), 'bilinear', {
+      floating: before,
+    });
     if (command) editor.history.execute(command);
     const after = editor.floating;
     const outline = doc.selection;
@@ -333,7 +336,9 @@ describe('Transforming a floating selection', () => {
 
   it('moves the turned outline from where it was turned', () => {
     const { doc, editor, float } = floatingSetUp();
-    const command = rotateLayerCommand(doc, float.id, 30, editor.floating);
+    const command = transformLayerCommand(doc, float.id, turn(float, 30), 'bilinear', {
+      floating: editor.floating,
+    });
     if (command) editor.history.execute(command);
     const turned = doc.selection;
     const floating = editor.floating;

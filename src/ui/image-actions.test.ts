@@ -4,7 +4,6 @@ import {
   Editor,
   ORIENTATION_LABELS,
   Selection,
-  SetLayerVisibilityCommand,
   SetSelectionCommand,
   createDocument,
   createLayerId,
@@ -12,7 +11,7 @@ import {
   liftSelectionCommand,
 } from '../core';
 import type { ImageAction } from './image-actions';
-import { canRunImageAction, rotateLayerTarget, runImageAction } from './image-actions';
+import { canRunImageAction, runImageAction } from './image-actions';
 
 const ORIENTATIONS = Object.keys(ORIENTATION_LABELS) as (keyof typeof ORIENTATION_LABELS)[];
 
@@ -109,37 +108,5 @@ describe('runImageAction', () => {
     runImageAction(editor, 'flip-horizontal');
     expect(size(editor)).toEqual([4, 6]);
     expect(editor.history.undoLabel).toBe('Flip Horizontal');
-  });
-});
-
-describe('rotateLayerTarget', () => {
-  it('turns the active layer when nothing is selected', () => {
-    expect(rotateLayerTarget(setup())).toBe('layer');
-  });
-
-  it('turns the selected pixels when the selection covers some of the layer', () => {
-    const editor = setup();
-    select(editor, { x: 0, y: 0, width: 2, height: 2 });
-    expect(rotateLayerTarget(editor)).toBe('selection');
-  });
-
-  it('turns a floating selection', () => {
-    const editor = setup();
-    float(editor, { x: 2, y: 1, width: 2, height: 1 });
-    expect(rotateLayerTarget(editor)).toBe('selection');
-  });
-
-  it('has nothing to turn for a selection that misses the layer, or a hidden layer', () => {
-    const editor = setup();
-    select(editor, { x: 0, y: 0, width: 1, height: 4 });
-    expect(rotateLayerTarget(editor)).toBeNull();
-
-    const hidden = setup();
-    hidden.history.execute(new SetLayerVisibilityCommand('layer-1', false));
-    expect(rotateLayerTarget(hidden)).toBeNull();
-  });
-
-  it('has nothing to turn in a document with no layers', () => {
-    expect(rotateLayerTarget(new Editor(createDocument(4, 4)))).toBeNull();
   });
 });

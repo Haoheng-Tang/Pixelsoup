@@ -1,7 +1,7 @@
 import type { Editor, Orientation } from '../../core';
 import { ORIENTATION_LABELS } from '../../core';
 import type { ImageAction } from '../image-actions';
-import { canRunImageAction, rotateLayerTarget, runImageAction } from '../image-actions';
+import { canRunImageAction, runImageAction } from '../image-actions';
 import type { AppController, ImageDialog } from '../session/app-controller';
 import { useEditorRevision } from '../use-editor-revision';
 import type { MenuEntry } from './MenuButton';
@@ -36,20 +36,13 @@ export function ImageMenu({ editor, controller, blocked }: ImageMenuProps) {
     ],
     [orient('rotate-cw'), orient('rotate-ccw'), orient('rotate-180')],
     [orient('flip-horizontal'), orient('flip-vertical')],
-    [
-      {
-        command: 'rotate-layer',
-        label: 'Rotate Layer…',
-        disabled: blocked || rotateLayerTarget(editor) === null,
-      },
-    ],
   ];
   return (
     <MenuButton
       label="Image"
       sections={sections}
       onChoose={(command) => {
-        if (command === 'image-size' || command === 'canvas-size' || command === 'rotate-layer') {
+        if (command === 'image-size' || command === 'canvas-size') {
           controller.openDialog(command);
         } else {
           runImageAction(editor, command);

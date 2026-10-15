@@ -16,7 +16,6 @@ import { DEFAULT_FILL_SETTINGS } from '../edit-actions';
 import type { DroppedData } from '../io/file-store';
 import { runLayerAction } from '../layer-actions';
 import { decodePng, encodePng } from '../io/png';
-import { FakeClock } from '../tools/fake-clock';
 import { AppController } from './app-controller';
 import { DocumentSession } from './document-session';
 import { DEFAULT_EXPORT_OPTIONS } from './file-types';
@@ -35,13 +34,12 @@ function setup() {
     decodeImage: async (file) => decodePng(new Uint8Array(await file.arrayBuffer())),
     encodeImage: () => Promise.resolve(new Blob(['image'])),
   });
-  const clock = new FakeClock();
-  const controller = new AppController(session, clock);
+  const controller = new AppController(session);
   const makeDirty = () => {
     const layer = editor.document.layers[0];
     if (layer) editor.history.execute(new SetLayerVisibilityCommand(layer.id, !layer.visible));
   };
-  return { editor, store, session, controller, clock, makeDirty };
+  return { editor, store, session, controller, makeDirty };
 }
 
 /** Lets pending promise callbacks (the controller's async tasks) run. */
@@ -417,128 +415,10 @@ describe('AppController image dialogs', () => {
   it('ignores Image menu dialogs while another dialog is open', () => {
     const { controller } = setup();
     controller.run('export');
-    for (const dialog of ['image-size', 'canvas-size', 'rotate-layer'] as const) {
+    for (const dialog of ['image-size', 'canvas-size'] as const) {
       controller.openDialog(dialog);
       expect(controller.modal).toEqual({ kind: 'export' });
     }
-  });
-
-  it('previews Rotate Layer once a frame, from the original pixels each time', () => {
-    const { controller, editor, clock } = setup();
-    pattern(editor);
-    const before = snapshot(editor);
-    controller.openDialog('rotate-layer');
-    expect(controller.modal).toEqual({ kind: 'rotate-layer', target: 'layer' });
-
-    controller.previewRotation(10);
-    controller.previewRotation(90);
-    expect(clock.pendingFrames).toBe(1);
-    expect(editor.history.canUndo).toBe(false);
-    clock.runFrame();
-    expect(snapshot(editor)).toMatchObject({ width: 3, height: 4 });
-
-    controller.previewRotation(180);
-    clock.runFrame();
-    expect(snapshot(editor)).toMatchObject({ width: 4, height: 3 });
-    expect(editor.history.undoLabel).toBe('Rotate Layer');
-    controller.previewRotation(0);
-    clock.runFrame();
-    expect(snapshot(editor)).toEqual(before);
-    expect(editor.history.canUndo).toBe(false);
-  });
-
-  it('keeps the rotation on Rotate, as one step', () => {
-    const { controller, editor, clock } = setup();
-    pattern(editor);
-    const before = snapshot(editor);
-    controller.openDialog('rotate-layer');
-    controller.previewRotation(30);
-    clock.runFrame();
-    controller.rotateLayer(90);
-    expect(controller.modal).toBeNull();
-    expect(clock.pendingFrames).toBe(0);
-    expect(snapshot(editor)).toMatchObject({ width: 3, height: 4 });
-    editor.history.undo();
-    expect(snapshot(editor)).toEqual(before);
-    expect(editor.history.canUndo).toBe(false);
-  });
-
-  it('rotates on Rotate even before a preview frame', () => {
-    const { controller, editor } = setup();
-    pattern(editor);
-    controller.openDialog('rotate-layer');
-    controller.rotateLayer(-90);
-    expect(snapshot(editor)).toMatchObject({ width: 3, height: 4 });
-    expect(editor.history.undoLabel).toBe('Rotate Layer');
-  });
-
-  it('puts the layer back exactly on Cancel', () => {
-    const { controller, editor, clock } = setup();
-    pattern(editor);
-    const before = snapshot(editor);
-    controller.openDialog('rotate-layer');
-    controller.previewRotation(15);
-    clock.runFrame();
-    expect(snapshot(editor)).not.toEqual(before);
-    controller.previewRotation(20);
-    controller.dismiss();
-    expect(controller.modal).toBeNull();
-    expect(clock.pendingFrames).toBe(0);
-    expect(snapshot(editor)).toEqual(before);
-    expect(editor.history.canUndo).toBe(false);
-  });
-
-  it('lifts selected pixels into a floating selection and turns them', () => {
-    const { controller, editor, clock } = setup();
-    pattern(editor);
-    const before = snapshot(editor);
-    select(editor, { x: 0, y: 0, width: 2, height: 3 });
-    controller.openDialog('rotate-layer');
-    expect(controller.modal).toEqual({ kind: 'rotate-layer', target: 'selection' });
-    controller.previewRotation(90);
-    clock.runFrame();
-    expect(editor.floating).not.toBeNull();
-    // A 2×3 block turned about its centre (1, 1.5) spans x −0.5…2.5, y 0.5…2.5, then shifts
-    // half a pixel each way away from its old top-left onto pixel corners: x −1…2, y 1…3,
-    // cut to the canvas.
-    expect(editor.document.selection?.bounds()).toEqual({ x: 0, y: 1, width: 2, height: 2 });
-    controller.previewRotation(-90);
-    clock.runFrame();
-    expect(editor.document.layers).toHaveLength(2);
-    controller.rotateLayer(-90);
-    expect(editor.history.undoLabel).toBe('Rotate Selection');
-    editor.history.undo();
-    expect(editor.history.undoLabel).toBe('Lift Selection');
-    editor.history.undo();
-    expect(editor.floating).toBeNull();
-    expect(snapshot(editor)).toEqual(before);
-  });
-
-  it('leaves no lift behind on Cancel, or on Rotate at 0°', () => {
-    for (const close of ['cancel', 'zero'] as const) {
-      const { controller, editor, clock } = setup();
-      pattern(editor);
-      const before = snapshot(editor);
-      select(editor, { x: 0, y: 0, width: 2, height: 3 });
-      const state = editor.history.stateId;
-      controller.openDialog('rotate-layer');
-      controller.previewRotation(45);
-      clock.runFrame();
-      expect(editor.floating).not.toBeNull();
-      if (close === 'cancel') controller.dismiss();
-      else controller.rotateLayer(0);
-      expect(editor.floating).toBeNull();
-      expect(editor.history.stateId).toBe(state);
-      expect(editor.document.layers).toHaveLength(1);
-      expect(snapshot(editor)).toEqual(before);
-    }
-  });
-
-  it("doesn't open Rotate Layer with nothing to turn", () => {
-    const { controller, editor } = setup();
-    editor.history.execute(new SetLayerVisibilityCommand('layer-1', false));
-    controller.openDialog('rotate-layer');
-    expect(controller.modal).toBeNull();
   });
 });
 

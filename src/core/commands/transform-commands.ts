@@ -5,7 +5,7 @@ import type { Rect } from '../geometry';
 import { intersectRects, unionRects } from '../geometry';
 import type { Command, DocumentChange } from '../history/command';
 import type { LayerId, RasterLayer } from '../layer';
-import { assertNever, layerBounds, rasterBounds } from '../layer';
+import { assertNever, rasterBounds } from '../layer';
 import type { Orientation } from '../orientation';
 import { orientPixels } from '../orientation';
 import { createPixelBuffer } from '../pixel-buffer';
@@ -306,27 +306,4 @@ export function orientLayerCommand(
   const layer = findLayer(doc, layerId);
   if (!layer || !layer.visible) return null;
   return new OrientLayerCommand(layerId, orientation, floating);
-}
-
-/**
- * Rotate Layer: turns a layer `degrees` clockwise about its centre, with bilinear
- * interpolation, shifted by less than a pixel so that its new bounds start on a pixel
- * corner (which makes quarter turns exact). A floating selection's layer turns with its
- * outline, as "Rotate Selection". Null if there's no such layer, it's hidden, or the angle
- * is a whole number of turns.
- */
-export function rotateLayerCommand(
-  doc: ImageDocument,
-  layerId: LayerId,
-  degrees: number,
-  floating: FloatingSelection | null,
-): TransformLayerCommand | null {
-  const layer = findLayer(doc, layerId);
-  const bounds = layer && layerBounds(layer);
-  if (!bounds || !Number.isFinite(degrees) || degrees % 360 === 0) return null;
-  const centreX = bounds.x + bounds.width / 2;
-  const centreY = bounds.y + bounds.height / 2;
-  const affine = alignToPixels(aboutPivot(rotation(degrees), centreX, centreY), bounds);
-  const label = floating?.layerId === layerId ? 'Rotate Selection' : 'Rotate Layer';
-  return transformLayerCommand(doc, layerId, affine, 'bilinear', { label, floating });
 }
