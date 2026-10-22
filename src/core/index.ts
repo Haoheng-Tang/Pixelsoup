@@ -7,6 +7,7 @@ export * from './selection-outline';
 export * from './orientation';
 export * from './resample/affine';
 export * from './resample/kernels';
+export * from './resample/projective';
 export * from './resample/resize';
 export * from './resample/transform';
 export * from './document';
