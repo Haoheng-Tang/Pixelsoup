@@ -17,6 +17,9 @@ import {
   scaling,
   translation,
 } from '../resample/affine';
+import type { Projective, Quad } from '../resample/projective';
+import { compose, fromAffine, homographyFromQuad } from '../resample/projective';
+import { transformPixels } from '../resample/transform';
 import { Selection } from '../selection';
 import { liftSelectionCommand } from './float-commands';
 import { MoveLayerCommand } from './move-commands';
@@ -50,6 +53,17 @@ function turn(layer: RasterLayer, degrees: number): Affine {
   const area = placement(layer);
   const centre = aboutPivot(rotation(degrees), area.x + area.width / 2, area.y + area.height / 2);
   return alignToPixels(centre, area);
+}
+
+/**
+ * The homography taking the layer's corners to `quad` moved by the layer's position: `quad`
+ * is relative to its top-left corner.
+ */
+function distortion(layer: RasterLayer, quad: Quad): Projective {
+  const at = quad.map((p) => ({ x: p.x + layer.x, y: p.y + layer.y }));
+  const m = homographyFromQuad(placement(layer), [at[0], at[1], at[2], at[3]]);
+  if (!m) throw new Error('Not a convex quad');
+  return m;
 }
 
 describe('TransformLayerCommand', () => {
@@ -136,10 +150,58 @@ describe('TransformLayerCommand', () => {
     const doc = createDocument(8, 8);
     const layer = addLayer(doc, 0, 0, numbered(2, 2));
     expect(transformLayerCommand(doc, layer.id, IDENTITY, 'bilinear')).toBeNull();
+    expect(transformLayerCommand(doc, layer.id, fromAffine(IDENTITY), 'bilinear')).toBeNull();
     expect(transformLayerCommand(doc, layer.id, scaling(0, 1), 'bilinear')).toBeNull();
+    expect(
+      transformLayerCommand(doc, layer.id, [1, 0, 0, 0, 1, 0, 1, 1, 0], 'bilinear'),
+    ).toBeNull();
     expect(transformLayerCommand(doc, 'nope', scaling(2), 'bilinear')).toBeNull();
     layer.visible = false;
     expect(transformLayerCommand(doc, layer.id, scaling(2), 'bilinear')).toBeNull();
+  });
+
+  it('refuses a perspective that would take part of the layer past its horizon', () => {
+    const doc = createDocument(8, 8);
+    const layer = addLayer(doc, 0, 0, numbered(2, 2));
+    // w = 1 − x / 1.5 is 0 at x = 1.5, inside the 2 px wide layer.
+    const past: Projective = [1, 0, 0, 0, 1, 0, -1 / 1.5, 0, 1];
+    expect(transformLayerCommand(doc, layer.id, past, 'bilinear')).toBeNull();
+  });
+
+  it('maps a layer through a perspective, and undoes to the very same pixels', () => {
+    const doc = createDocument(40, 40);
+    const original = numbered(6, 4);
+    const copy = clonePixelBuffer(original);
+    const layer = addLayer(doc, 5, 6, original);
+    const m = distortion(layer, [
+      { x: 2, y: 0 },
+      { x: 10, y: -1 },
+      { x: 13, y: 6 },
+      { x: -1, y: 4 },
+    ]);
+    const editor = new Editor(doc);
+    const command = transformLayerCommand(doc, layer.id, m, 'bilinear', { label: 'Distort' });
+    if (!command) throw new Error('Nothing to distort');
+    expect(command.label).toBe('Distort');
+    expect(command.apply(doc)).toEqual({
+      // The old place, (5, 6) to (11, 10), and the new one, (4, 5) to (18, 12).
+      dirty: { x: 4, y: 5, width: 14, height: 7 },
+      layerPixels: [{ layerId: layer.id, rect: null }],
+    });
+    command.revert(doc);
+    editor.history.execute(command);
+    const expected = transformPixels(original, compose(m, translation(5, 6)), 'bilinear');
+    expect({ ...placement(layer), data: layer.pixels.data }).toEqual({
+      x: 4,
+      y: 5,
+      width: 14,
+      height: 7,
+      data: expected?.pixels.data,
+    });
+    editor.history.undo();
+    expect(layer.pixels).toBe(original);
+    expect(layer.pixels.data).toEqual(copy.data);
+    expect([layer.x, layer.y]).toEqual([5, 6]);
   });
 
   it('keeps only the canvas when a layer would grow past the maximum size', () => {
@@ -319,6 +381,27 @@ describe('Transforming a floating selection', () => {
     editor.history.redo();
     expect(editor.floating).toBe(after);
     expect(doc.selection).toBe(outline);
+  });
+
+  it('distorts the outline with the pixels through a perspective', () => {
+    for (const interpolation of ['nearest', 'bilinear'] as const) {
+      const { doc, editor, float } = floatingSetUp();
+      const { width, height } = float.pixels;
+      const m = distortion(float, [
+        { x: 2, y: -1 },
+        { x: width + 3, y: 1 },
+        { x: width - 1, y: height + 2 },
+        { x: -2, y: height },
+      ]);
+      const command = transformLayerCommand(doc, float.id, m, interpolation, {
+        floating: editor.floating,
+      });
+      if (command) editor.history.execute(command);
+      const floating = editor.floating;
+      expect(floating?.edited).toBe(true);
+      expect(floating?.selection).toBe(doc.selection);
+      expect(misaligned(doc, float)).toEqual([]);
+    }
   });
 
   it('turns and flips the outline exactly with the pixels', () => {

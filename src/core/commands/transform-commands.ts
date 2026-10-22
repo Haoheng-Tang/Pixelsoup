@@ -15,13 +15,20 @@ import {
   aboutPivot,
   alignToPixels,
   invert,
-  multiply,
   rotation,
   scaling,
   transformedBounds,
   translation,
 } from '../resample/affine';
 import type { Interpolation } from '../resample/kernels';
+import type { Projective } from '../resample/projective';
+import {
+  compose,
+  invertProjective,
+  isProjective,
+  mappedBounds,
+  toAffine,
+} from '../resample/projective';
 import { transformPixels } from '../resample/transform';
 import type { Selection } from '../selection';
 import type { Placement } from './layer-growth';
@@ -56,7 +63,7 @@ interface Transformed {
 interface Mapping {
   readonly after: Placement;
   /** Takes the outline's canvas coordinates (of pixel edges) to where they end up. */
-  readonly outline: Affine;
+  readonly outline: Affine | Projective;
   readonly interpolation: Interpolation;
 }
 
@@ -99,12 +106,12 @@ abstract class MapLayerCommand implements Command {
 
   private mapLayer(doc: ImageDocument, layer: RasterLayer): Transformed {
     const before = placementOf(layer);
-    const { after, outline: affine, interpolation } = this.map(doc, layer);
+    const { after, outline: matrix, interpolation } = this.map(doc, layer);
     const floating = this.floating;
     if (!floating || floating.layerId !== layer.id) return { before, after, float: null };
     // The outline as lifted, moved to where the layer is now and mapped with it.
     const outline = floating.selection.transform(
-      multiply(affine, translation(layer.x - floating.x, layer.y - floating.y)),
+      compose(matrix, translation(layer.x - floating.x, layer.y - floating.y)),
       interpolation,
     );
     const float: FloatChange = {
@@ -118,30 +125,31 @@ abstract class MapLayerCommand implements Command {
 }
 
 /**
- * Maps one raster layer through `affine`, which takes canvas coordinates (of pixel edges)
- * to canvas coordinates. The pixels are resampled into a new buffer covering their
- * transformed whole-pixel bounds; outside the old buffer counts as transparent, so the new
- * edges are anti-aliased. Should those bounds exceed the maximum image size, only the part
- * on the canvas is kept. A floating selection's outline is transformed with its layer.
+ * Maps one raster layer through `matrix`, affine or projective, which takes canvas
+ * coordinates (of pixel edges) to canvas coordinates. The pixels are resampled into a new
+ * buffer covering their transformed whole-pixel bounds; outside the old buffer counts as
+ * transparent, so the new edges are anti-aliased. Should those bounds exceed the maximum
+ * image size, only the part on the canvas is kept. A floating selection's outline is
+ * transformed with its layer, through the same matrix.
  */
 export class TransformLayerCommand extends MapLayerCommand {
   readonly label: string;
 
   constructor(
     layerId: LayerId,
-    readonly affine: Affine,
+    readonly matrix: Affine | Projective,
     readonly interpolation: Interpolation,
     options: TransformLayerOptions = {},
   ) {
     super(layerId, options.floating);
-    if (!invert(affine)) throw new RangeError('The transform would flatten the layer');
+    if (!isInvertible(matrix)) throw new RangeError('The transform would flatten the layer');
     this.label = options.label ?? 'Transform Layer';
   }
 
   protected map(doc: ImageDocument, layer: RasterLayer): Mapping {
-    const { affine, interpolation } = this;
-    const after = transformedPlacement(doc, layer, affine, interpolation);
-    return { after, outline: affine, interpolation };
+    const { matrix, interpolation } = this;
+    const after = transformedPlacement(doc, layer, matrix, interpolation);
+    return { after, outline: matrix, interpolation };
   }
 }
 
@@ -214,19 +222,19 @@ function rasterLayer(doc: ImageDocument, id: LayerId): RasterLayer {
 }
 
 /**
- * The layer's pixels mapped through `affine`: a transparent canvas-sized layer if none
+ * The layer's pixels mapped through `matrix`: a transparent canvas-sized layer if none
  * would be left on the canvas after cutting them to it for being too big.
  */
 function transformedPlacement(
   doc: ImageDocument,
   layer: RasterLayer,
-  affine: Affine,
+  matrix: Affine | Projective,
   interpolation: Interpolation,
 ): Placement {
   const { pixels } = layer;
-  const m = multiply(affine, translation(layer.x, layer.y));
-  const bounds = transformedBounds(m, { x: 0, y: 0, width: pixels.width, height: pixels.height });
-  const tooBig = bounds.width > MAX_IMAGE_SIZE || bounds.height > MAX_IMAGE_SIZE;
+  const m = compose(matrix, translation(layer.x, layer.y));
+  const bounds = mappedBounds(m, { x: 0, y: 0, width: pixels.width, height: pixels.height });
+  const tooBig = !bounds || bounds.width > MAX_IMAGE_SIZE || bounds.height > MAX_IMAGE_SIZE;
   const clip = tooBig ? documentBounds(doc) : undefined;
   return (
     transformPixels(pixels, m, interpolation, clip) ?? {
@@ -277,20 +285,35 @@ function boundsOf(placement: Placement): Rect {
 
 /**
  * Transforms a layer as `TransformLayerCommand` does, or returns null if there's no such
- * layer, it's hidden, or `affine` would leave it as it is or flatten it. Pass the editor's
- * floating selection, whose outline follows its layer.
+ * layer, it's hidden, or `matrix` would leave it as it is, flatten it or take part of it
+ * past its horizon. Pass the editor's floating selection, whose outline follows its layer.
  */
 export function transformLayerCommand(
   doc: ImageDocument,
   layerId: LayerId,
-  affine: Affine,
+  matrix: Affine | Projective,
   interpolation: Interpolation,
   options: TransformLayerOptions = {},
 ): TransformLayerCommand | null {
   const layer = findLayer(doc, layerId);
-  const identity = affine.every((value, i) => value === IDENTITY[i]);
-  if (!layer || !layer.visible || identity || !invert(affine)) return null;
-  return new TransformLayerCommand(layerId, affine, interpolation, options);
+  if (!layer || !layer.visible || isIdentity(matrix) || !isInvertible(matrix)) return null;
+  switch (layer.kind) {
+    case 'raster':
+      if (!mappedBounds(matrix, rasterBounds(layer))) return null;
+      break;
+    default:
+      return assertNever(layer.kind);
+  }
+  return new TransformLayerCommand(layerId, matrix, interpolation, options);
+}
+
+function isIdentity(m: Affine | Projective): boolean {
+  const affine = toAffine(m);
+  return affine !== null && affine.every((value, i) => value === IDENTITY[i]);
+}
+
+function isInvertible(m: Affine | Projective): boolean {
+  return (isProjective(m) ? invertProjective(m) : invert(m)) !== null;
 }
 
 /**
