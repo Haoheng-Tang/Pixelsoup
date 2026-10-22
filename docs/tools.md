@@ -149,8 +149,8 @@ Right-clicking the document opens the canvas's context menu (`CanvasMenu`, built
   `FreeTransform.start`), so they enable, commit a floating selection and name their undo
   steps alike. All are disabled while a dialog is open or a file operation runs. A tool can
   add sections of its own (`Tool.contextMenu`, e.g. Fill… later), which go first. While a
-  session runs, its own sections are the whole menu: for Free Transform, its turns and flips,
-  then Apply and Cancel.
+  session runs, its own sections are the whole menu: for Free Transform, its modes, turns and
+  flips, Reset to Original, then Apply and Cancel.
 - **Where**: the browser's own menu never shows over the viewport. The menu opens only over the
   document, not the void around it, and not during a tool's gesture, a pan, or while a dialog
   is open.
@@ -392,36 +392,65 @@ changing the tool.
 
 ## Free Transform
 
-Edit → Free Transform (Ctrl/Cmd+Alt+T), Edit → Transform → Scale or Rotate, or Free Transform
-in the canvas's context menu starts a session on the active layer, lifting the selected pixels
-first if there's a selection. It isn't a tool: it takes over the canvas's input from the
-active tool until it's applied or cancelled. How it previews, applies and cancels, and its
-frame times: [transform.md](transform.md#free-transform).
+Edit → Free Transform (Ctrl/Cmd+Alt+T), Edit → Transform → Scale, Rotate, Skew, Distort or
+Perspective, or Free Transform in the canvas's context menu starts a session on the active
+layer, lifting the selected pixels first if there's a selection. It isn't a tool: it takes
+over the canvas's input from the active tool until it's applied or cancelled. How it
+previews, applies and cancels, and its frame times: [transform.md](transform.md#free-transform).
 
 - **The box** outlines where the layer goes, with square handles at its corners and the
   middles of its edges, and a ring at the pivot, the layer's centre. Corners scale both axes
   and edges one, about the opposite corner or edge; dragging past it flips the layer, which
-  never gets thinner than a pixel. As with the crop box, a press within 6 CSS px of an edge
-  (`HANDLE_REACH`, at most a third of the box inwards) takes it, or near a corner both edges;
-  inside that, a drag moves the layer, by whole pixels. Free Transform turns the layer about
-  its pivot from up to 12 CSS px further out round a corner (`ROTATE_REACH`), where the cursor
-  becomes a curved double arrow. Scale has no such zone; Rotate turns from the handles and from
-  anywhere outside the box. A drag takes hold after 3 CSS px of travel.
+  never gets thinner than a pixel. A box in perspective stays in perspective as it scales,
+  and a handle stops just short of where the layer would reach its horizon, or the box fold
+  over. As with the crop box, a press within 6 CSS px of an edge (`HANDLE_REACH`, at most a
+  third of the box inwards) takes it, or near a corner both edges; inside that, a drag moves
+  the layer, by whole pixels. Free Transform turns the layer about its pivot from up to
+  12 CSS px further out round a corner (`ROTATE_REACH`), where the cursor becomes a curved
+  double arrow. Scale, Skew, Distort and Perspective have no such zone; Rotate turns from the
+  handles and from anywhere outside the box. A drag takes hold after 3 CSS px of travel.
 - **Modifiers**: Shift keeps the proportions on a corner drag (with the lock on, it frees
   them), snaps a turn to 15° steps and keeps a move to one axis. Alt scales about the pivot
   rather than the opposite handle. Pressing or releasing either mid-drag updates the box
   straight away.
+- **Distort, Skew and Perspective** take Photoshop's keys, held at the press, in any mode.
+  Ctrl/Cmd+drag a corner to distort: it moves on its own. Ctrl/Cmd+drag an edge to skew: the
+  edge slides along itself and the opposite edge stays put, or with Alt as well slides the
+  other way. Ctrl/Cmd+Alt+Shift+drag a corner for perspective: it slides along whichever of
+  its edges the drag goes further along, and that edge's other corner the same distance the
+  opposite way, so the edge grows or shrinks about its middle.
+- **The box stays convex**: a corner may come no closer than a document pixel to the line
+  through its two neighbours (no closer than it was, if it started closer), nor go round past
+  the lines through the edges beyond them. A distorted corner stops at the nearest point
+  that keeps to that, so it slides along the limit; a skew or a perspective stops short.
+- **Modes**: the context menu lists Free Transform, Scale, Rotate, Skew, Distort and
+  Perspective, the current one ticked, and Edit → Transform's items start or switch to them,
+  as in Photoshop. A mode changes what a plain drag on a handle does. Free Transform and Scale
+  scale, and Rotate turns. Skew slides an edge along itself, or a corner along whichever of its
+  edges the drag goes further along. Distort moves a corner anywhere, or an edge's two corners
+  together. Perspective puts a corner in perspective, and skews from an edge. Ctrl/Cmd
+  distorts and skews in every mode, and inside the box a drag always moves the layer.
+  Switching keeps the transform so far; the session and its undo step take the mode's name.
+- **Cursors**: the cursor shows what a press would do, and changes as Shift, Alt, Ctrl or Cmd
+  go down and up: resize arrows to scale, the curved double arrow to turn, and a white
+  arrowhead with a badge for the rest: a lopsided quadrilateral to distort, a trapezoid for
+  perspective, and a double arrow along the edge to skew. The status bar names Skew, Distort
+  or Perspective while a press would do that.
 - **Keys**: the arrows nudge the layer by 1 px, 10 with Shift. Enter, a double-click inside
   the box or ✓ applies; Escape or ✗ cancels. Escape mid-drag only puts the box back where it
   was at the press.
 - **Options bar**: X and Y (where the pivot goes, in pixels), W and H (in % or px; negative
-  values flip), a link that keeps the proportions, Angle (degrees clockwise), Interpolation
-  (Bilinear or Nearest neighbour), ✓ and ✗. The fields follow the handles, and typing in one
-  previews straight away. Values out of range (a size under 1 px or over 100000, a position
-  past ±100000) are refused, as in other number fields. The interpolation, the lock and the
-  unit are kept until the page is reloaded.
-- **The context menu** while it runs: Flip Horizontal and Vertical; Rotate 180°, 90°
-  Clockwise and 90° Anticlockwise, composed into the transform; Apply and Cancel.
+  values flip), a link that keeps the proportions, Angle (degrees clockwise), Skew H and V
+  (degrees the left and right edges, or the top and bottom ones, lean clockwise),
+  Interpolation (Bilinear or Nearest neighbour), ✓ and ✗. The fields follow the handles, and
+  typing in one previews straight away. Values out of range (a size under 1 px or over
+  100000, a position past ±100000, a skew of 90° or more or one that would fold the box) are
+  refused, as in other number fields. While the box isn't a parallelogram, W and H are its
+  bounding box's and scale that on the canvas's axes, and Angle and Skew are blank and
+  disabled. The interpolation, the lock and the unit are kept until the page is reloaded.
+- **The context menu** while it runs: the modes; Flip Horizontal and Vertical; Rotate 180°,
+  90° Clockwise and 90° Anticlockwise, composed into the transform; Reset to Original, which
+  puts the layer back as it was when the session began, keeping the mode; Apply and Cancel.
 - **What applies it first**: anything else that would change the document. That's every
   command (a menu item, a change in the Layer panel, a selection change, a tool's edit),
   making another layer active, choosing a tool, Save, Save As and Export (after the file

@@ -84,8 +84,8 @@ profiles, high bit depth or linear-light blending. Blend directly on sRGB-encode
   after its own pan and zoom. Tools edit only through commands; painting tools run the core
   stroke engine once per frame. Colours and the clipboard are session state. More: @docs/tools.md
 - **Transforms**: Crop, Canvas Size, turns and flips (lossless), Image Size and layer transforms
-  are core commands; resampling interpolates premultiplied alpha. Free Transform previews on the
-  overlay as the editor's pending edit, which any other edit applies first. @docs/transform.md
+  (affine or projective) are core commands; resampling is premultiplied. Free Transform edits a
+  quad, previewed (a mesh if distorted) as the pending edit others apply first. @docs/transform.md
 
 ## Folder layout
 
@@ -106,7 +106,7 @@ src/
     commands/            layers, merge, selection, move, float, copy, stroke, fill, canvas, transforms
     compositor/          Compositor interface, CpuCompositor, compositeLayers (merge math)
     paint/               dab placement, stroke masks, paint math, colour sampling, flood regions
-    resample/            kernels, resizing, affine transforms (premultiplied interpolation)
+    resample/            kernels, resizing, affine and projective transforms (premultiplied)
     serialization/       .soup read/write, PngCodec interface
   ui/
     main.tsx, App.tsx    bootstrap (wires editor, file store, codecs, tools) and layout
@@ -117,7 +117,7 @@ src/
     color/, clipboard/   Colors, HSV picker, colour math; PixelClipboard and system clipboard
     tools/               ToolManager; marquee, lasso, wand, move, brush, bucket, eyedropper, crop
     transform/           Free Transform: its session, handle math, options and options bar
-    viewport/, render/   ViewportController, ants overlay, readouts; CompositeRenderer (GPU seam)
+    viewport/, render/   ViewportController, ants, readouts; CompositeRenderer (GPU seam), meshes
     panels/              Toolbar, menus and ContextMenu, ToolPicker, ToolOptionsBar, LayerPanel
 ```
 
@@ -168,7 +168,7 @@ src/
 9. Adjustments
 10. Lasso + magic wand (done: lassos, Magic Wand, Paint Bucket, Edit menu with Fill and Clear)
 11. Text
-12. Transform (done: Free Transform, Edit → Transform), filters, layer masks
+12. Transform (done: Free Transform with skew, distort, perspective), filters, layer masks
 
 ## Decisions
 

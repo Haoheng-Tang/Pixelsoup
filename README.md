@@ -12,8 +12,8 @@ Photoshop.
 > layers (add, duplicate, reorder, rename, merge, flatten, show, hide and fade them), select
 > with marquees, lassos and a magic wand, move layers and selected pixels, paint and erase with
 > soft or hard brushes, fill and clear selections or fill with a paint bucket, crop, resize,
-> rotate and flip images, and move, scale and turn layers or selected pixels with Free
-> Transform. Adjustments and other tools are on the roadmap.
+> rotate and flip images, and transform layers or selected pixels with Free Transform (move,
+> scale, turn, skew, distort and perspective). Adjustments and other tools are on the roadmap.
 
 ## Features so far
 
@@ -71,15 +71,17 @@ Photoshop.
   background colour, black, white, 50% grey or any colour, at any opacity, optionally
   preserving transparency) and Clear, with Photoshop's shortcuts. All respect the
   selection's soft edges. Copies go on the system clipboard as PNG too, and images copied in
-  other apps paste as new layers. Then Free Transform, and Transform: Scale, Rotate, and
-  exact flips and quarter turns of the active layer
-- Free Transform: move, scale and turn the active layer, or the selected pixels, with handles
-  on the canvas or exact values in the options bar (position, size in pixels or percent,
-  angle, interpolation). The preview keeps up with the pointer even on large images, and
-  applying is one undo step with smooth, anti-aliased edges
+  other apps paste as new layers. Then Free Transform, and Transform: Scale, Rotate, Skew,
+  Distort, Perspective, and exact flips and quarter turns of the active layer
+- Free Transform: move, scale, turn, skew and distort the active layer, or the selected
+  pixels, or put them in perspective, with handles on the canvas (Photoshop's Ctrl/Cmd keys
+  included) or exact values in the options bar (position, size in pixels or percent, angle,
+  skew, interpolation). The preview keeps up with the pointer even on large images, distorted
+  ones included, and applying is one undo step with smooth, anti-aliased edges
 - Right-click menu on the canvas: Deselect, Select Inverse, Layer via Copy and Layer via Cut
   with a selection; Duplicate Layer… (name the copy) and Delete Layer (with a confirmation)
-  without one; and Free Transform. During a transform it offers flips, turns, Apply and Cancel
+  without one; and Free Transform. During a transform it offers its modes (Scale, Rotate,
+  Skew, Distort, Perspective), flips, turns, Reset to Original, Apply and Cancel
 - Crop tool: a box appears straight away, around the selection or the whole canvas. Resize it
   with eight handles, draw a new one, or move it once you've adjusted it, freely or at a fixed
   ratio (the original's, 1:1, 4:3, 3:2, 16:9 or custom), with a rule-of-thirds grid while
@@ -173,24 +175,28 @@ floats the pixels again.
 
 ### Free Transform shortcuts
 
-| Keys                          | Action                                                |
-| ----------------------------- | ----------------------------------------------------- |
-| Ctrl/Cmd+Alt+T                | Free Transform (Edit → Free Transform)                |
-| Drag a corner or an edge      | scale both ways, or one way                           |
-| Shift on a corner             | keep the proportions                                  |
-| Alt during a drag             | scale about the centre                                |
-| Drag just outside a corner    | rotate (Shift: in 15° steps)                          |
-| Drag inside the box           | move (Shift: along one axis)                          |
-| Arrow keys                    | nudge by 1 pixel (Shift: 10)                          |
-| Enter, or double-click inside | apply                                                 |
-| Esc                           | cancel (during a drag: put the box back where it was) |
+| Keys                             | Action                                                 |
+| -------------------------------- | ------------------------------------------------------ |
+| Ctrl/Cmd+Alt+T                   | Free Transform (Edit → Free Transform)                 |
+| Drag a corner or an edge         | scale both ways, or one way                            |
+| Shift on a corner                | keep the proportions                                   |
+| Alt during a drag                | scale about the centre                                 |
+| Drag just outside a corner       | rotate (Shift: in 15° steps)                           |
+| Drag inside the box              | move (Shift: along one axis)                           |
+| Ctrl/Cmd+drag a corner           | distort: move that corner on its own                   |
+| Ctrl/Cmd+drag an edge            | skew (with Alt: the opposite edge the other way)       |
+| Ctrl/Cmd+Alt+Shift+drag a corner | perspective: it and its neighbour move apart or closer |
+| Arrow keys                       | nudge by 1 pixel (Shift: 10)                           |
+| Enter, or double-click inside    | apply                                                  |
+| Esc                              | cancel (during a drag: put the box back where it was)  |
 
 Free Transform acts on the active layer, or lifts the selected pixels first. Anything else
 that changes the document (another tool, a menu command, saving) applies it first, and Undo
 cancels it. Browsers keep Ctrl/Cmd+T for a new tab, so Pixelsoup uses Ctrl/Cmd+Alt+T, as
 Photopea does. On Ubuntu, which opens a terminal on Ctrl+Alt+T, use the Edit menu. Edit →
-Transform → Scale and Rotate only scale or only turn, and its flips and quarter turns turn the
-active layer exactly, or the transform in progress.
+Transform → Scale, Rotate, Skew, Distort and Perspective (also in the right-click menu during
+a transform) make a plain drag on a handle do just that, and its flips and quarter turns turn
+the active layer exactly, or the transform in progress. The box always stays convex.
 
 ### Painting shortcuts
 
