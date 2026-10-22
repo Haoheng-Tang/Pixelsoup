@@ -1,6 +1,16 @@
 import type { PixelBuffer, Point, Selection } from '../../core';
-import { toAffine } from '../../core';
+import {
+  compose,
+  fromAffine,
+  isProjective,
+  mapCorners,
+  multiplyProjective,
+  toAffine,
+  translation,
+} from '../../core';
+import type { PyramidLevel } from '../render/canvas-pyramid';
 import { CanvasPyramid, drawScale } from '../render/canvas-pyramid';
+import { meshCells, PreviewMesh, visibleArea } from '../render/projective-mesh';
 import type {
   BrushOverlay,
   CropOverlay,
@@ -74,6 +84,16 @@ interface AntPaths {
   readonly staticCount: number;
   readonly still: Path2D | null;
   readonly moving: Path2D | null;
+}
+
+/**
+ * The pixels of a layer under Free Transform, on a canvas to draw them from, with its
+ * pyramid and, for the mesh, a pattern of each level of it drawn so far.
+ */
+interface TransformImage {
+  readonly pixels: PixelBuffer;
+  readonly pyramid: CanvasPyramid;
+  readonly patterns: Map<CanvasImageSource, CanvasPattern | null>;
 }
 
 /** A path in canvas coordinates through `loops[from]` to `loops[to - 1]`; null if none. */
@@ -196,7 +216,16 @@ export class SelectionOverlay {
   private checker: CanvasPattern | string | null = null;
   private checkerDpr = 0;
   /** The pixels of a layer under Free Transform, on a canvas to draw them from. */
-  private transformSource: { pixels: PixelBuffer; pyramid: CanvasPyramid } | null = null;
+  private transformSource: TransformImage | null = null;
+  /** The triangles a projective transform's preview is drawn with, rebuilt each frame. */
+  private readonly mesh = new PreviewMesh();
+  /**
+   * Where the mesh is drawn first when the layer is translucent, so that the triangles'
+   * overlaps don't show; made when first needed and dropped with the transform.
+   */
+  private meshCanvas: HTMLCanvasElement | null = null;
+  /** Each triangle's pattern transform, reused. */
+  private readonly patternMatrix = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
   constructor(private readonly container: HTMLElement) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewport-overlay';
@@ -238,7 +267,10 @@ export class SelectionOverlay {
     const shape = preview?.shape === 'rect' || preview?.shape === 'ellipse' ? preview : null;
     const lasso = preview?.shape === 'lasso' ? preview : null;
     const transform = preview?.shape === 'transform' ? preview : null;
-    if (!transform) this.transformSource = null;
+    if (!transform) {
+      this.transformSource = null;
+      this.meshCanvas = null;
+    }
     // A transform's box shows instead of the selection.
     const hidesSelection = shape?.hidesSelection ?? lasso?.hidesSelection ?? transform !== null;
     const ants = frame.showSelection && !hidesSelection && placement ? selection : null;
@@ -588,6 +620,8 @@ export class SelectionOverlay {
    * out with it. Only what lands on the canvas shows, as in the composite. Shrunk, both
    * are drawn from their pyramids (see `CanvasPyramid`): mipmapped smoothing, as the
    * composite is drawn with, would cost tens of milliseconds a frame for large layers.
+   * Canvas 2D draws images only through affine transforms, so a projective one (a distorted
+   * quad) is drawn as a mesh of triangles (`drawMesh`).
    */
   private drawTransformed(
     transform: TransformOverlay,
@@ -610,13 +644,21 @@ export class SelectionOverlay {
     ctx.imageSmoothingEnabled = smooth;
     ctx.imageSmoothingQuality = 'low';
     const { pixels } = transform;
-    const source = this.transformPyramid(pixels);
+    const source = this.transformImage(pixels);
     const affine = toAffine(transform.matrix);
     if (affine) {
       const [a, b, c, d, e, f] = affine;
       ctx.transform(a, b, c, d, e, f);
       const scale = smooth ? drawScale(scaleX * a, scaleY * b, scaleX * c, scaleY * d) : 1;
-      ctx.drawImage(source.at(scale), transform.x, transform.y, pixels.width, pixels.height);
+      ctx.drawImage(
+        source.pyramid.at(scale),
+        transform.x,
+        transform.y,
+        pixels.width,
+        pixels.height,
+      );
+    } else {
+      this.drawMesh(transform, source, placement, smooth);
     }
     if (above) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -628,9 +670,131 @@ export class SelectionOverlay {
     ctx.restore();
   }
 
+  /**
+   * The layer under Free Transform drawn through a projective transform as a mesh of
+   * triangles (`PreviewMesh`) over the part of it in view, each a pattern fill of the
+   * pyramid level for its own scale through its own affine transform. Triangles overlap
+   * their neighbours by about half a device pixel, so a translucent layer's triangles are
+   * drawn opaque on a canvas of their own and put on the overlay at the layer's opacity, or
+   * the overlaps would show as lines. Called from `drawTransformed`, with the canvas
+   * clipped and the layer's opacity and smoothing set.
+   */
+  private drawMesh(
+    transform: TransformOverlay,
+    source: TransformImage,
+    placement: DocumentPlacement,
+    smooth: boolean,
+  ): void {
+    const { width, height } = transform.pixels;
+    const canvas = this.canvas;
+    const left = Math.max(0, placement.x);
+    const top = Math.max(0, placement.y);
+    const right = Math.min(canvas.width, placement.x + placement.width);
+    const bottom = Math.min(canvas.height, placement.y + placement.height);
+    if (right <= left || bottom <= top) return;
+    // From the layer's pixels to device pixels: to the canvas, through the transform, then
+    // through the view.
+    const layer = compose(transform.matrix, translation(transform.x, transform.y));
+    const device = multiplyProjective(
+      fromAffine([placement.scaleX, 0, 0, placement.scaleY, placement.x, placement.y]),
+      isProjective(layer) ? layer : fromAffine(layer),
+    );
+    const mesh = this.mesh;
+    const visible = { x: left, y: top, width: right - left, height: bottom - top };
+    // Only the part in view, so that zoomed in the cells are smaller and keep closer to the
+    // exact transform.
+    const area = visibleArea(device, width, height, visible);
+    if (!area) return;
+    mesh.build(device, area, meshCells(mapCorners(device, area)), visible);
+    if (mesh.count === 0) return;
+    const translucent = transform.opacity < 1;
+    const ctx = translucent ? this.meshContext(smooth) : this.context;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const { corners, affines } = mesh;
+    const matrix = this.patternMatrix;
+    for (let t = 0; t < mesh.count; t++) {
+      const k = 6 * t;
+      const a = affines[k];
+      const b = affines[k + 1];
+      const c = affines[k + 2];
+      const d = affines[k + 3];
+      const level = source.pyramid.level(smooth ? drawScale(a, b, c, d) : 1);
+      const pattern = this.levelPattern(source, level);
+      if (!pattern) continue;
+      // The pattern is the level's own pixels: stretch them over the layer's.
+      const sx = width / level.width;
+      const sy = height / level.height;
+      matrix.a = a * sx;
+      matrix.b = b * sx;
+      matrix.c = c * sy;
+      matrix.d = d * sy;
+      matrix.e = affines[k + 4];
+      matrix.f = affines[k + 5];
+      pattern.setTransform(matrix);
+      // Assigned again after each change, so that the context sees the new transform.
+      ctx.fillStyle = pattern;
+      ctx.beginPath();
+      ctx.moveTo(corners[k], corners[k + 1]);
+      ctx.lineTo(corners[k + 2], corners[k + 3]);
+      ctx.lineTo(corners[k + 4], corners[k + 5]);
+      ctx.fill();
+    }
+    if (translucent && this.meshCanvas) {
+      const overlay = this.context;
+      overlay.setTransform(1, 0, 0, 1, 0, 0);
+      overlay.imageSmoothingEnabled = false;
+      overlay.drawImage(
+        this.meshCanvas,
+        left,
+        top,
+        right - left,
+        bottom - top,
+        left,
+        top,
+        right - left,
+        bottom - top,
+      );
+    }
+  }
+
+  /**
+   * The context of the canvas a translucent layer's mesh is drawn on first: the overlay's
+   * size, cleared, opaque and smoothed as the layer is drawn.
+   */
+  private meshContext(smooth: boolean): CanvasRenderingContext2D {
+    const { width, height } = this.canvas;
+    let canvas = this.meshCanvas;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      this.meshCanvas = canvas;
+    }
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D is not available');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = smooth;
+    ctx.imageSmoothingQuality = 'low';
+    return ctx;
+  }
+
+  /** A pattern of one of the transformed layer's pyramid levels, made once per level. */
+  private levelPattern(source: TransformImage, level: PyramidLevel): CanvasPattern | null {
+    let pattern = source.patterns.get(level.image);
+    if (pattern === undefined) {
+      pattern = this.context.createPattern(level.image, 'no-repeat');
+      source.patterns.set(level.image, pattern);
+    }
+    return pattern;
+  }
+
   /** `pixels` on a canvas, with its pyramid, kept while the same pixels are transformed. */
-  private transformPyramid(pixels: PixelBuffer): CanvasPyramid {
-    if (this.transformSource?.pixels === pixels) return this.transformSource.pyramid;
+  private transformImage(pixels: PixelBuffer): TransformImage {
+    if (this.transformSource?.pixels === pixels) return this.transformSource;
     const canvas = document.createElement('canvas');
     canvas.width = pixels.width;
     canvas.height = pixels.height;
@@ -638,8 +802,8 @@ export class SelectionOverlay {
     if (!ctx) throw new Error('Canvas 2D is not available');
     ctx.putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0);
     const pyramid = new CanvasPyramid(canvas, pixels.width, pixels.height);
-    this.transformSource = { pixels, pyramid };
-    return pyramid;
+    this.transformSource = { pixels, pyramid, patterns: new Map() };
+    return this.transformSource;
   }
 
   /**
