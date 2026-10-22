@@ -448,6 +448,8 @@ previews, applies and cancels, and its frame times: [transform.md](transform.md#
   refused, as in other number fields. While the box isn't a parallelogram, W and H are its
   bounding box's and scale that on the canvas's axes, and Angle and Skew are blank and
   disabled. The interpolation, the lock and the unit are kept until the page is reloaded.
+  Below 1400 px wide the fields close up and the Interpolation label is left out, so ✓ and ✗
+  stay in view down to about 1260 px.
 - **The context menu** while it runs: the modes; Flip Horizontal and Vertical; Rotate 180°,
   90° Clockwise and 90° Anticlockwise, composed into the transform; Reset to Original, which
   puts the layer back as it was when the session began, keeping the mode; Apply and Cancel.

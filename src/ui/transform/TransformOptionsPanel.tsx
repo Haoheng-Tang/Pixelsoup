@@ -71,127 +71,131 @@ function SessionOptions({ session, options }: SessionOptionsProps) {
   const set = (field: TransformField) => (value: number) => session.setField(field, value);
   return (
     <>
-      <TransformNumber
-        label="X"
-        name="Pivot X"
-        unit="px"
-        hint="Where the layer’s centre goes, across"
-        value={fields.x}
-        onChange={set('x')}
-      />
-      <TransformNumber
-        label="Y"
-        name="Pivot Y"
-        unit="px"
-        hint="Where the layer’s centre goes, down"
-        value={fields.y}
-        onChange={set('y')}
-      />
-      <div className="options-field">
+      <div className="transform-fields">
         <TransformNumber
-          label="W"
-          name="Width"
-          unit={sizeUnit}
-          hint="Width; a negative width flips the layer"
-          value={fields.width}
-          onChange={set('width')}
+          label="X"
+          name="Pivot X"
+          unit="px"
+          hint="Where the layer’s centre goes, across"
+          value={fields.x}
+          onChange={set('x')}
         />
-        <button
-          type="button"
-          className="options-icon-button options-toggle"
-          aria-label="Keep proportions"
-          aria-pressed={settings.lockAspect}
-          title="Keep proportions: the width and height change together"
-          onClick={() => options.set({ lockAspect: !settings.lockAspect })}
-        >
-          <OptionsIcon d={LINK_ICON} />
-        </button>
         <TransformNumber
-          label="H"
-          name="Height"
-          unit={sizeUnit}
-          hint="Height; a negative height flips the layer"
-          value={fields.height}
-          onChange={set('height')}
+          label="Y"
+          name="Pivot Y"
+          unit="px"
+          hint="Where the layer’s centre goes, down"
+          value={fields.y}
+          onChange={set('y')}
         />
-        <div className="toolbar-group segmented" role="group" aria-label="Size unit">
-          {UNITS.map(({ unit, label, hint }) => (
-            <button
-              key={unit}
-              type="button"
-              aria-pressed={unit === settings.unit}
-              title={hint}
-              onClick={() => options.set({ unit })}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="options-field">
+          <TransformNumber
+            label="W"
+            name="Width"
+            unit={sizeUnit}
+            hint="Width; a negative width flips the layer"
+            value={fields.width}
+            onChange={set('width')}
+          />
+          <button
+            type="button"
+            className="options-icon-button options-toggle"
+            aria-label="Keep proportions"
+            aria-pressed={settings.lockAspect}
+            title="Keep proportions: the width and height change together"
+            onClick={() => options.set({ lockAspect: !settings.lockAspect })}
+          >
+            <OptionsIcon d={LINK_ICON} />
+          </button>
+          <TransformNumber
+            label="H"
+            name="Height"
+            unit={sizeUnit}
+            hint="Height; a negative height flips the layer"
+            value={fields.height}
+            onChange={set('height')}
+          />
+          <div className="toolbar-group segmented" role="group" aria-label="Size unit">
+            {UNITS.map(({ unit, label, hint }) => (
+              <button
+                key={unit}
+                type="button"
+                aria-pressed={unit === settings.unit}
+                title={hint}
+                onClick={() => options.set({ unit })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      <TransformNumber
-        label="Angle"
-        name="Angle"
-        unit="°"
-        hint="Degrees clockwise"
-        value={fields.angle}
-        onChange={set('angle')}
-      />
-      <div className="options-field" role="group" aria-label="Skew">
-        <span className="options-label" aria-hidden="true">
-          Skew
-        </span>
         <TransformNumber
-          label="H"
-          name="Horizontal skew"
+          label="Angle"
+          name="Angle"
           unit="°"
-          hint="Horizontal skew: degrees the left and right edges lean clockwise"
-          value={fields.skewX}
-          onChange={set('skewX')}
+          hint="Degrees clockwise"
+          value={fields.angle}
+          onChange={set('angle')}
         />
-        <TransformNumber
-          label="V"
-          name="Vertical skew"
-          unit="°"
-          hint="Vertical skew: degrees the top and bottom edges lean clockwise"
-          value={fields.skewY}
-          onChange={set('skewY')}
-        />
-      </div>
-      <label className="options-field">
-        <span className="options-label">Interpolation</span>
-        <select
-          className="options-select"
-          value={settings.interpolation}
-          onChange={(e) => {
-            if (isInterpolation(e.target.value)) options.set({ interpolation: e.target.value });
-          }}
-        >
-          {Object.entries(INTERPOLATIONS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="toolbar-group">
-        <button
-          type="button"
-          className="options-icon-button"
-          aria-label="Apply transform"
-          title="Apply transform (Enter)"
-          onClick={() => session.apply()}
-        >
-          <OptionsIcon d={COMMIT_ICON} />
-        </button>
-        <button
-          type="button"
-          className="options-icon-button"
-          aria-label="Cancel transform"
-          title="Cancel transform (Esc)"
-          onClick={() => session.discard()}
-        >
-          <OptionsIcon d={CANCEL_ICON} />
-        </button>
+        <div className="options-field" role="group" aria-label="Skew">
+          <span className="options-label" aria-hidden="true">
+            Skew
+          </span>
+          <TransformNumber
+            label="H"
+            name="Horizontal skew"
+            unit="°"
+            hint="Horizontal skew: degrees the left and right edges lean clockwise"
+            value={fields.skewX}
+            onChange={set('skewX')}
+          />
+          <TransformNumber
+            label="V"
+            name="Vertical skew"
+            unit="°"
+            hint="Vertical skew: degrees the top and bottom edges lean clockwise"
+            value={fields.skewY}
+            onChange={set('skewY')}
+          />
+        </div>
+        <label className="options-field">
+          <span className="options-label options-label-optional">Interpolation</span>
+          <select
+            className="options-select"
+            aria-label="Interpolation"
+            title="Interpolation"
+            value={settings.interpolation}
+            onChange={(e) => {
+              if (isInterpolation(e.target.value)) options.set({ interpolation: e.target.value });
+            }}
+          >
+            {Object.entries(INTERPOLATIONS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="toolbar-group">
+          <button
+            type="button"
+            className="options-icon-button"
+            aria-label="Apply transform"
+            title="Apply transform (Enter)"
+            onClick={() => session.apply()}
+          >
+            <OptionsIcon d={COMMIT_ICON} />
+          </button>
+          <button
+            type="button"
+            className="options-icon-button"
+            aria-label="Cancel transform"
+            title="Cancel transform (Esc)"
+            onClick={() => session.discard()}
+          >
+            <OptionsIcon d={CANCEL_ICON} />
+          </button>
+        </div>
       </div>
       <p className="tool-options-hint" title={HINT}>
         {HINT}
