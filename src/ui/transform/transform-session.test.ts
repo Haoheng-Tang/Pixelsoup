@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer, Orientation, PixelBuffer, Rect } from '../../core';
 import {
+  compose,
   createDocument,
   createLayerId,
   createRasterLayer,
   Editor,
   liftSelectionCommand,
-  multiply,
   orientedSize,
   orientPixels,
   Selection,
@@ -124,7 +124,7 @@ describe('Free Transform sessions', () => {
       pixels: photo.pixels,
       x: 5,
       y: 4,
-      affine: [1, 0, 0, 1, 0, 0],
+      matrix: [1, 0, 0, 1, 0, 0],
       corners: [
         { x: 5, y: 4 },
         { x: 15, y: 4 },
@@ -145,13 +145,13 @@ describe('Free Transform sessions', () => {
     // The right edge's handle, dragged 10 px right: twice as wide, the left edge staying put.
     view.drag(15, 8, 25, 8);
     expect(session.params).toMatchObject({ x: 15, y: 8, scaleX: 2, scaleY: 1, angle: 0 });
-    const m = session.affine;
+    const m = session.matrix;
     expect(view.keyDown('Enter')).toBe(true);
     expect(undoLabels(editor)).toEqual(['Free Transform']);
     expect(tools.session).toBeNull();
     expect(editor.pending).toBeNull();
     expect(session.active).toBe(false);
-    const expected = transformPixels(original, multiply(m, translation(5, 4)), 'bilinear');
+    const expected = transformPixels(original, compose(m, translation(5, 4)), 'bilinear');
     expect(boundsOf(photo)).toEqual({ x: 5, y: 4, width: 20, height: 8 });
     expect(photo.pixels).toEqual(expected?.pixels);
     editor.history.undo();
@@ -209,8 +209,8 @@ describe('Free Transform sessions', () => {
     // The bottom-right corner, dragged by (10, 2) with Shift: projected onto the diagonal.
     view.drag(15, 12, 25, 14, { shiftKey: true });
     const k = (20 * 10 + 10 * 8) / (10 * 10 + 8 * 8);
-    expect(session.params.scaleX).toBeCloseTo(k, 12);
-    expect(session.params.scaleY).toBeCloseTo(k, 12);
+    expect(session.params?.scaleX).toBeCloseTo(k, 12);
+    expect(session.params?.scaleY).toBeCloseTo(k, 12);
     expect(session.overlay.corners[0].x).toBeCloseTo(5, 12);
     expect(session.overlay.corners[0].y).toBeCloseTo(4, 12);
     session.discard();
@@ -230,7 +230,7 @@ describe('Free Transform sessions', () => {
     view.move(25, 14);
     expect(session.params).toMatchObject({ scaleX: 2, scaleY: 1.25 });
     view.keyDown('Shift');
-    expect(session.params.scaleX).toBeCloseTo(session.params.scaleY, 12);
+    expect(session.params?.scaleX).toBeCloseTo(session.params?.scaleY ?? NaN, 12);
     view.keyUp('Shift');
     view.keyDown('Alt');
     expect(session.params).toMatchObject({ x: 10, y: 8, scaleX: 3, scaleY: 1.5 });
@@ -268,11 +268,11 @@ describe('Free Transform sessions', () => {
     };
     view.down(22, 19);
     view.move(...at(20));
-    expect(session.params.angle).toBeCloseTo(20, 9);
+    expect(session.params?.angle).toBeCloseTo(20, 9);
     view.move(...at(20), { shiftKey: true });
-    expect(session.params.angle).toBe(15);
+    expect(session.params?.angle).toBe(15);
     view.move(...at(-37));
-    expect(session.params.angle).toBe(-30);
+    expect(session.params?.angle).toBe(-30);
     view.up(...at(-37));
   });
 
@@ -281,11 +281,11 @@ describe('Free Transform sessions', () => {
     const session = start();
     view.down(10, 8);
     view.move(16, 8);
-    expect(session.params.x).toBe(16);
+    expect(session.params?.x).toBe(16);
     expect(view.keyDown('Escape')).toBe(true);
-    expect(session.params.x).toBe(10);
+    expect(session.params?.x).toBe(10);
     view.up(16, 8);
-    expect(session.params.x).toBe(10);
+    expect(session.params?.x).toBe(10);
     expect(tools.session).toBe(session);
     view.keyDown('Escape');
     expect(tools.session).toBeNull();
@@ -455,9 +455,9 @@ describe('Free Transform sessions', () => {
     const session = start();
     expect(session.overlay.interpolation).toBe('nearest');
     session.setField('angle', 30);
-    const m = session.affine;
+    const m = session.matrix;
     view.keyDown('Enter');
-    const expected = transformPixels(original, multiply(m, translation(5, 4)), 'nearest');
+    const expected = transformPixels(original, compose(m, translation(5, 4)), 'nearest');
     expect(photo.pixels).toEqual(expected?.pixels);
   });
 
@@ -468,7 +468,7 @@ describe('Free Transform sessions', () => {
     expect(editor.pending?.label).toBe('Scale');
     // No rotate zone round the corners.
     view.drag(22, 19, -1, 20);
-    expect(session.params.angle).toBe(0);
+    expect(session.params?.angle).toBe(0);
     expect(start('rotate')).toBe(session);
     expect(session.name).toBe('Rotate');
     // The handles rotate: the right edge's, dragged a quarter turn round the pivot.

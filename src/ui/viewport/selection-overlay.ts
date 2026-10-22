@@ -1,4 +1,5 @@
 import type { PixelBuffer, Point, Selection } from '../../core';
+import { toAffine } from '../../core';
 import { CanvasPyramid, drawScale } from '../render/canvas-pyramid';
 import type {
   BrushOverlay,
@@ -602,8 +603,6 @@ export class SelectionOverlay {
     ctx.clip();
     const { scaleX, scaleY } = placement;
     ctx.setTransform(scaleX, 0, 0, scaleY, placement.x, placement.y);
-    const [a, b, c, d, e, f] = transform.affine;
-    ctx.transform(a, b, c, d, e, f);
     ctx.globalAlpha = transform.opacity;
     // Nearest neighbour shows hard pixels, except zoomed out, where the composite is
     // smoothed too.
@@ -612,8 +611,13 @@ export class SelectionOverlay {
     ctx.imageSmoothingQuality = 'low';
     const { pixels } = transform;
     const source = this.transformPyramid(pixels);
-    const scale = smooth ? drawScale(scaleX * a, scaleY * b, scaleX * c, scaleY * d) : 1;
-    ctx.drawImage(source.at(scale), transform.x, transform.y, pixels.width, pixels.height);
+    const affine = toAffine(transform.matrix);
+    if (affine) {
+      const [a, b, c, d, e, f] = affine;
+      ctx.transform(a, b, c, d, e, f);
+      const scale = smooth ? drawScale(scaleX * a, scaleY * b, scaleX * c, scaleY * d) : 1;
+      ctx.drawImage(source.at(scale), transform.x, transform.y, pixels.width, pixels.height);
+    }
     if (above) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;

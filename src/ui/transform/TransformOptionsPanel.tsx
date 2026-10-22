@@ -56,9 +56,9 @@ interface SessionOptionsProps {
  */
 function SessionOptions({ session, options }: SessionOptionsProps) {
   const subscribe = useCallback((notify: () => void) => session.subscribe(notify), [session]);
-  const params = useSyncExternalStore(subscribe, () => session.params);
+  const state = useSyncExternalStore(subscribe, () => session.state);
   const settings = useSyncExternalStore(options.subscribe, () => options.settings);
-  const fields = transformFields(session.source.rect, params, settings.unit);
+  const fields = transformFields(session.source.rect, state, settings.unit);
   const sizeUnit = settings.unit === 'px' ? 'px' : '%';
   const set = (field: TransformField) => (value: number) => session.setField(field, value);
   return (

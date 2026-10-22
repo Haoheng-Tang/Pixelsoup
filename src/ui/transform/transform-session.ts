@@ -8,15 +8,17 @@ import type {
   PendingEdit,
   PixelBuffer,
   Point,
+  Projective,
   Rect,
 } from '../../core';
 import {
   MAX_IMAGE_SIZE,
   ORIENTATION_LABELS,
   findLayer,
+  mapCorners,
+  mapPoint,
+  mappedBounds,
   transformLayerCommand,
-  transformPoint,
-  transformedBounds,
 } from '../../core';
 import type { ContextMenuItem, ContextMenuSections } from '../panels/menu-logic';
 import { nudgeOffset } from '../tools/nudge';
@@ -34,19 +36,22 @@ import type {
   TransformHit,
   TransformMode,
   TransformParams,
+  TransformState,
 } from './transform-math';
 import {
   hitTransform,
-  identityParams,
+  identityState,
   isIdentity,
-  moveParams,
-  orientParams,
-  rotateParams,
-  scaleParams,
+  moveState,
+  orientState,
+  rotateState,
+  sameState,
+  scaleState,
   sourceCentre,
-  transformAffine,
-  transformCorners,
+  stateMatrix,
+  stateParams,
   transformCursor,
+  translateState,
   withField,
 } from './transform-math';
 import type { TransformOptions } from './transform-options';
@@ -86,7 +91,7 @@ export interface TransformSessionInit {
 interface TransformDrag {
   readonly hit: TransformHit;
   readonly press: Point;
-  readonly start: TransformParams;
+  readonly start: TransformState;
   point: Point;
   shiftKey: boolean;
   altKey: boolean;
@@ -117,8 +122,9 @@ export class TransformSession implements ToolSession {
   private readonly onEnd: (() => void) | undefined;
   private context: ToolContext | null = null;
   private currentMode: TransformMode;
-  private currentParams: TransformParams;
-  private currentAffine: Affine;
+  private currentState: TransformState;
+  private currentMatrix: Affine | Projective;
+  private currentParams: TransformParams | null;
   private currentOverlay: TransformOverlay;
   private currentCursor = 'default';
   private drag: TransformDrag | null = null;
@@ -135,8 +141,9 @@ export class TransformSession implements ToolSession {
     this.OptionsPanel = init.OptionsPanel;
     this.onEnd = init.onEnd;
     this.currentMode = init.mode;
-    this.currentParams = identityParams(init.source.rect);
-    this.currentAffine = transformAffine(init.source.rect, this.currentParams);
+    this.currentState = identityState(init.source.rect);
+    this.currentMatrix = stateMatrix(init.source.rect, this.currentState);
+    this.currentParams = stateParams(init.source.rect, this.currentState);
     this.currentOverlay = this.buildOverlay();
     const name = () => this.name;
     this.edit = {
@@ -157,13 +164,19 @@ export class TransformSession implements ToolSession {
     return this.currentMode;
   }
 
-  get params(): TransformParams {
+  /** Where the box's corners and pivot are: what every change works on. */
+  get state(): TransformState {
+    return this.currentState;
+  }
+
+  /** The state as the options bar reads it, or null while the box isn't a parallelogram. */
+  get params(): TransformParams | null {
     return this.currentParams;
   }
 
   /** The transform as `TransformLayerCommand` takes it, canvas to canvas. */
-  get affine(): Affine {
-    return this.currentAffine;
+  get matrix(): Affine | Projective {
+    return this.currentMatrix;
   }
 
   /** False once it has been applied, cancelled or abandoned. */
@@ -207,7 +220,7 @@ export class TransformSession implements ToolSession {
   orient(orientation: Orientation): void {
     if (this.ended) return;
     this.cancel();
-    this.setParams(orientParams(this.currentParams, orientation));
+    this.setState(orientState(this.currentState, orientation));
   }
 
   /**
@@ -217,10 +230,10 @@ export class TransformSession implements ToolSession {
   setField(field: TransformField, value: number): boolean {
     if (this.ended) return false;
     const { unit, lockAspect } = this.options.settings;
-    const params = withField(this.source.rect, this.currentParams, field, value, unit, lockAspect);
-    if (!params) return false;
+    const state = withField(this.source.rect, this.currentState, field, value, unit, lockAspect);
+    if (!state) return false;
     this.cancel();
-    this.setParams(params);
+    this.setState(state);
     return true;
   }
 
@@ -283,19 +296,20 @@ export class TransformSession implements ToolSession {
 
   pointerDown(e: ToolPointerEvent): void {
     if (this.ended || this.drag) return;
-    const hit = hitTransform(this.source.rect, this.currentAffine, e, e.zoom, this.currentMode);
+    const { corners } = this.currentOverlay;
+    const hit = hitTransform(corners, e, e.zoom, this.currentMode);
     if (!hit) return;
     this.drag = {
       hit,
       press: { x: e.x, y: e.y },
-      start: this.currentParams,
+      start: this.currentState,
       point: { x: e.x, y: e.y },
       shiftKey: e.shiftKey,
       altKey: e.altKey,
       zoom: e.zoom,
       active: false,
     };
-    this.setCursor(transformCursor(this.source.rect, this.currentAffine, hit));
+    this.setCursor(transformCursor(corners, hit));
   }
 
   pointerMove(e: ToolPointerEvent): void {
@@ -320,7 +334,7 @@ export class TransformSession implements ToolSession {
 
   doubleClick(e: ToolPointerEvent): void {
     if (this.ended) return;
-    const hit = hitTransform(this.source.rect, this.currentAffine, e, e.zoom, this.currentMode);
+    const hit = hitTransform(this.currentOverlay.corners, e, e.zoom, this.currentMode);
     if (hit?.kind === 'move') this.apply();
   }
 
@@ -329,7 +343,7 @@ export class TransformSession implements ToolSession {
     const drag = this.drag;
     if (!drag) return;
     this.drag = null;
-    if (drag.active) this.setParams(drag.start);
+    if (drag.active) this.setState(drag.start);
   }
 
   keyDown(e: ToolKeyEvent): boolean {
@@ -346,10 +360,7 @@ export class TransformSession implements ToolSession {
       default: {
         const offset = nudgeOffset(e.key, e.shiftKey);
         if (!offset) return false;
-        if (!this.drag) {
-          const { x, y } = this.currentParams;
-          this.setParams({ ...this.currentParams, x: x + offset.dx, y: y + offset.dy });
-        }
+        if (!this.drag) this.setState(translateState(this.currentState, offset.dx, offset.dy));
         return true;
       }
     }
@@ -380,8 +391,8 @@ export class TransformSession implements ToolSession {
 
   private hover(e: ToolPointerEvent): void {
     if (this.ended) return;
-    const hit = hitTransform(this.source.rect, this.currentAffine, e, e.zoom, this.currentMode);
-    this.setCursor(transformCursor(this.source.rect, this.currentAffine, hit));
+    const { corners } = this.currentOverlay;
+    this.setCursor(transformCursor(corners, hitTransform(corners, e, e.zoom, this.currentMode)));
   }
 
   /** Moves, scales or turns the box to follow the drag, once it has taken hold. */
@@ -392,41 +403,34 @@ export class TransformSession implements ToolSession {
       drag.active = true;
     }
     const { hit, start, press, point } = drag;
-    let params: TransformParams;
+    let state: TransformState;
     switch (hit.kind) {
       case 'move':
-        params = moveParams(start, press, point, drag.shiftKey);
+        state = moveState(start, press, point, drag.shiftKey);
         break;
       case 'rotate':
-        params = rotateParams(start, press, point, drag.shiftKey);
+        state = rotateState(start, press, point, drag.shiftKey);
         break;
       case 'scale': {
         const corner = hit.handle.length === 2;
         const { lockAspect } = this.options.settings;
-        params = scaleParams(this.source.rect, start, hit.handle, press, point, {
+        state = scaleState(this.source.rect, start, hit.handle, press, point, {
           proportional: corner ? lockAspect !== drag.shiftKey : lockAspect,
           fromPivot: drag.altKey,
         });
         break;
       }
     }
-    this.setParams(params);
-    this.setCursor(transformCursor(this.source.rect, this.currentAffine, hit));
+    this.setState(state);
+    this.setCursor(transformCursor(this.currentOverlay.corners, hit));
   }
 
-  private setParams(params: TransformParams): void {
-    const prev = this.currentParams;
-    if (
-      params.x === prev.x &&
-      params.y === prev.y &&
-      params.scaleX === prev.scaleX &&
-      params.scaleY === prev.scaleY &&
-      params.angle === prev.angle
-    ) {
-      return;
-    }
-    this.currentParams = params;
-    this.currentAffine = transformAffine(this.source.rect, params);
+  private setState(state: TransformState): void {
+    if (sameState(state, this.currentState)) return;
+    const { rect } = this.source;
+    this.currentState = state;
+    this.currentMatrix = stateMatrix(rect, state);
+    this.currentParams = stateParams(rect, state);
     this.update();
   }
 
@@ -449,28 +453,28 @@ export class TransformSession implements ToolSession {
 
   private buildOverlay(): TransformOverlay {
     const { source } = this;
-    const m = this.currentAffine;
+    const m = this.currentMatrix;
     const centre = sourceCentre(source.rect);
-    const [pivotX, pivotY] = transformPoint(m, centre.x, centre.y);
+    const [pivotX, pivotY] = mapPoint(m, centre.x, centre.y);
     return {
       shape: 'transform',
       layerId: source.layerId,
       pixels: source.pixels,
       x: source.rect.x,
       y: source.rect.y,
-      affine: m,
+      matrix: m,
       interpolation: this.options.settings.interpolation,
       opacity: source.opacity,
-      corners: transformCorners(source.rect, m),
+      corners: mapCorners(m, source.rect),
       pivot: { x: pivotX, y: pivotY },
     };
   }
 
   /** True if the transformed layer would be bigger than a layer may be. */
   private tooBig(): boolean {
-    if (isIdentity(this.currentAffine)) return false;
-    const { width, height } = transformedBounds(this.currentAffine, this.source.rect);
-    return width > MAX_IMAGE_SIZE || height > MAX_IMAGE_SIZE;
+    if (isIdentity(this.currentMatrix)) return false;
+    const bounds = mappedBounds(this.currentMatrix, this.source.rect);
+    return !bounds || bounds.width > MAX_IMAGE_SIZE || bounds.height > MAX_IMAGE_SIZE;
   }
 
   /** Ends the session if the document changed under it. */
@@ -499,12 +503,12 @@ export class TransformSession implements ToolSession {
     this.end();
     const { editor } = this;
     const doc = editor.document;
-    const command = isIdentity(this.currentAffine)
+    const command = isIdentity(this.currentMatrix)
       ? null
       : transformLayerCommand(
           doc,
           this.source.layerId,
-          this.currentAffine,
+          this.currentMatrix,
           this.options.settings.interpolation,
           { label: this.name, floating: editor.floating },
         );

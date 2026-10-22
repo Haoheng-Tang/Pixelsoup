@@ -1,15 +1,24 @@
-import type { Affine, Orientation, Point, Rect } from '../../core';
+import type { Affine, Orientation, Point, Projective, Quad, Rect } from '../../core';
 import {
+  aboutPivot,
   alignToPixels,
   assertNever,
+  compose,
+  homographyFromQuad,
+  invert,
+  invertProjective,
+  isProjective,
+  mapCorners,
+  mapPoint,
   multiply,
   rotation,
   scaling,
+  toAffine,
   transformPoint,
   translation,
 } from '../../core';
 import type { CropHandle } from '../tools/crop-geometry';
-import { HANDLE_GRID, HANDLE_REACH, HANDLE_SIDES, sideOf } from '../tools/crop-geometry';
+import { HANDLE_GRID, HANDLE_REACH, HANDLE_SIDES } from '../tools/crop-geometry';
 
 /**
  * Free Transform itself, or Edit → Transform → Scale or Rotate, which only scale (no
@@ -18,10 +27,26 @@ import { HANDLE_GRID, HANDLE_REACH, HANDLE_SIDES, sideOf } from '../tools/crop-g
 export type TransformMode = 'free' | 'scale' | 'rotate';
 
 /**
- * What a Free Transform session does to its layer. The layer is scaled by `scaleX` and
- * `scaleY` along its own axes (negative flips it), turned `angle` degrees clockwise, both
- * about its centre, and that centre (the pivot) is put at `x`, `y` in document
- * coordinates. Sessions rebuild their transform from these each time, so nothing drifts.
+ * What a Free Transform session does to its layer: where the corners of the layer's bounds
+ * go (`corners`: its top-left, top-right, bottom-right and bottom-left as they are on the
+ * layer, in document coordinates) and where its centre goes (`pivot`). Every change is an
+ * operation on the corners, which the box shows and the transform is fitted to.
+ *
+ * `angle`, in degrees clockwise in (−180, 180], is the turn the options bar reads the size
+ * after: it tells a layer flipped left to right from one flipped upside down and turned
+ * half round, whose corners are the same.
+ */
+export interface TransformState {
+  readonly corners: Quad;
+  readonly pivot: Point;
+  readonly angle: number;
+}
+
+/**
+ * How the options bar reads a box that's a parallelogram: the layer scaled by `scaleX`
+ * and `scaleY` along its own axes (negative flips it), turned `angle` degrees clockwise,
+ * both about its centre, and that centre (the pivot) put at `x`, `y` in document
+ * coordinates.
  */
 export interface TransformParams {
   readonly x: number;
@@ -53,6 +78,12 @@ export const ROTATE_SNAP = 15;
 /** The largest size, in pixels, and the furthest position the options bar accepts. */
 export const MAX_FIELD_VALUE = 100000;
 
+/** How far, in document pixels, corners may be from a parallelogram's and still make one. */
+const PARALLELOGRAM_EPSILON = 1e-6;
+
+/** How near to 0 or ±1 a linear part's entries must be to make a whole turn or flip. */
+const WHOLE_TURN_EPSILON = 1e-9;
+
 /** The layer's centre, which its transform turns and scales about. */
 export function sourceCentre(source: Rect): Point {
   return { x: source.x + source.width / 2, y: source.y + source.height / 2 };
@@ -64,6 +95,22 @@ export function identityParams(source: Rect): TransformParams {
   return { x, y, scaleX: 1, scaleY: 1, angle: 0 };
 }
 
+/** The state that leaves the layer `source` covers where it is. */
+export function identityState(source: Rect): TransformState {
+  const right = source.x + source.width;
+  const bottom = source.y + source.height;
+  return {
+    corners: [
+      { x: source.x, y: source.y },
+      { x: right, y: source.y },
+      { x: right, y: bottom },
+      { x: source.x, y: bottom },
+    ],
+    pivot: sourceCentre(source),
+    angle: 0,
+  };
+}
+
 /** An angle in degrees, brought into (−180, 180]. */
 export function normalizeAngle(degrees: number): number {
   let angle = degrees % 360;
@@ -72,17 +119,11 @@ export function normalizeAngle(degrees: number): number {
   return angle || 0;
 }
 
-/** True for whole turns and flips at the layer's size, which move pixels without resampling. */
-export function isLossless(params: TransformParams): boolean {
-  return params.angle % 90 === 0 && Math.abs(params.scaleX) === 1 && Math.abs(params.scaleY) === 1;
-}
-
 /**
- * The transform `params` describe for the layer covering `source`, mapping canvas
- * coordinates to canvas coordinates as `TransformLayerCommand` takes them. Lossless ones
- * are shifted by at most half a pixel onto the pixel grid, so they copy pixels exactly.
+ * The state `params` describe for the layer covering `source`: its bounds scaled and
+ * turned about its centre, and moved to put the centre at the pivot.
  */
-export function transformAffine(source: Rect, params: TransformParams): Affine {
+export function stateFromParams(source: Rect, params: TransformParams): TransformState {
   const centre = sourceCentre(source);
   const m = multiply(
     translation(params.x, params.y),
@@ -91,121 +132,255 @@ export function transformAffine(source: Rect, params: TransformParams): Affine {
       multiply(scaling(params.scaleX, params.scaleY), translation(-centre.x, -centre.y)),
     ),
   );
-  return isLossless(params) ? alignToPixels(m, source) : m;
-}
-
-/** True when `m` leaves everything where it is, give or take rounding noise. */
-export function isIdentity(m: Affine): boolean {
-  const [a, b, c, d, e, f] = m;
-  const near = (value: number, target: number) => Math.abs(value - target) < 1e-9;
-  return near(a, 1) && near(b, 0) && near(c, 0) && near(d, 1) && near(e, 0) && near(f, 0);
-}
-
-/** Where the layer's top-left, top-right, bottom-right and bottom-left corners go. */
-export function transformCorners(source: Rect, m: Affine): [Point, Point, Point, Point] {
-  const right = source.x + source.width;
-  const bottom = source.y + source.height;
-  const corner = (x: number, y: number): Point => {
-    const [px, py] = transformPoint(m, x, y);
-    return { x: px, y: py };
+  return {
+    corners: mapCorners(m, source),
+    pivot: { x: params.x, y: params.y },
+    angle: normalizeAngle(params.angle),
   };
+}
+
+/** True if `a` and `b` are exactly the same state. */
+export function sameState(a: TransformState, b: TransformState): boolean {
+  const same = (p: Point, q: Point) => p.x === q.x && p.y === q.y;
+  const [a0, a1, a2, a3] = a.corners;
+  const [b0, b1, b2, b3] = b.corners;
+  return (
+    a === b ||
+    (a.angle === b.angle &&
+      same(a.pivot, b.pivot) &&
+      same(a0, b0) &&
+      same(a1, b1) &&
+      same(a2, b2) &&
+      same(a3, b3))
+  );
+}
+
+/** True if the corners make a parallelogram, give or take rounding noise. */
+function isParallelogram([topLeft, topRight, bottomRight, bottomLeft]: Quad): boolean {
+  return (
+    Math.abs(topLeft.x + bottomRight.x - topRight.x - bottomLeft.x) <= PARALLELOGRAM_EPSILON &&
+    Math.abs(topLeft.y + bottomRight.y - topRight.y - bottomLeft.y) <= PARALLELOGRAM_EPSILON
+  );
+}
+
+/**
+ * The affine transform taking the layer's top-left, top-right and bottom-left corners to
+ * `state`'s, and its centre to the pivot (which operations keep exact); while the corners
+ * make a parallelogram it takes the bottom-right one there too.
+ */
+function stateAffine(source: Rect, state: TransformState): Affine {
+  const [topLeft, topRight, , bottomLeft] = state.corners;
+  const a = (topRight.x - topLeft.x) / source.width;
+  const b = (topRight.y - topLeft.y) / source.width;
+  const c = (bottomLeft.x - topLeft.x) / source.height;
+  const d = (bottomLeft.y - topLeft.y) / source.height;
+  const centre = sourceCentre(source);
+  const { pivot } = state;
   return [
-    corner(source.x, source.y),
-    corner(right, source.y),
-    corner(right, bottom),
-    corner(source.x, bottom),
+    a,
+    b,
+    c,
+    d,
+    pivot.x - (a * centre.x + c * centre.y),
+    pivot.y - (b * centre.x + d * centre.y),
   ];
 }
 
 /**
- * The transformed box's frame: its top-left corner, unit vectors along the layer's own x
- * and y axes as transformed, and its length along each. The box never shears, so the axes
- * stay perpendicular.
+ * The transform taking the layer's bounds to `state`'s box as it is: affine for a
+ * parallelogram, else projective. Operations on the box work through it.
  */
-function boxFrame(source: Rect, m: Affine) {
-  const [topLeft, topRight, , bottomLeft] = transformCorners(source, m);
-  const lengthX = Math.hypot(topRight.x - topLeft.x, topRight.y - topLeft.y);
-  const lengthY = Math.hypot(bottomLeft.x - topLeft.x, bottomLeft.y - topLeft.y);
-  return {
-    origin: topLeft,
-    axisX: { x: (topRight.x - topLeft.x) / lengthX, y: (topRight.y - topLeft.y) / lengthX },
-    axisY: { x: (bottomLeft.x - topLeft.x) / lengthY, y: (bottomLeft.y - topLeft.y) / lengthY },
-    lengthX,
-    lengthY,
-  };
+function boxTransform(source: Rect, state: TransformState): Affine | Projective {
+  if (isParallelogram(state.corners)) return stateAffine(source, state);
+  return homographyFromQuad(source, state.corners) ?? stateAffine(source, state);
 }
 
 /**
- * What a press at `point` does to the box of the layer covering `source` transformed by
- * `m`, or null if nothing. Edges reach `HANDLE_REACH` CSS pixels outwards, but at most a
- * third of the box inwards, as the crop box's do; in Free Transform a press up to
+ * The linear part of a whole turn or flip, made exact, if `m`'s is one give or take
+ * rounding noise (turns of 15° that add up to 90°, say); else null.
+ */
+function wholeTurn([a, b, c, d]: Affine): [number, number, number, number] | null {
+  const unit = (value: number) => Math.abs(Math.abs(value) - 1) <= WHOLE_TURN_EPSILON;
+  const zero = (value: number) => Math.abs(value) <= WHOLE_TURN_EPSILON;
+  if (unit(a) && zero(b) && zero(c) && unit(d)) return [Math.sign(a), 0, 0, Math.sign(d)];
+  if (zero(a) && unit(b) && unit(c) && zero(d)) return [0, Math.sign(b), Math.sign(c), 0];
+  return null;
+}
+
+/**
+ * The transform `state` describes for the layer covering `source`, mapping canvas
+ * coordinates to canvas coordinates as `TransformLayerCommand` takes them: affine while the
+ * box is a parallelogram, else projective (`homographyFromQuad`). Whole turns and flips at
+ * the layer's size are made exact and shifted by at most half a pixel onto the pixel grid,
+ * so they copy pixels exactly.
+ */
+export function stateMatrix(source: Rect, state: TransformState): Affine | Projective {
+  const m = boxTransform(source, state);
+  if (isProjective(m)) return m;
+  const exact = wholeTurn(m);
+  if (!exact) return m;
+  const [a, b, c, d] = exact;
+  const centre = sourceCentre(source);
+  const { pivot } = state;
+  const e = pivot.x - (a * centre.x + c * centre.y);
+  const f = pivot.y - (b * centre.x + d * centre.y);
+  return alignToPixels([a, b, c, d, e, f], source);
+}
+
+/**
+ * `value`, or the nearest millionth if it's within rounding noise of it, so that corners
+ * worked out from a scale of 1.5 read back as 1.5 rather than 1.4999999999999998.
+ */
+function tidy(value: number): number {
+  const rounded = Math.round(value * 1e6) / 1e6;
+  return Math.abs(value - rounded) <= 1e-9 * Math.max(1, Math.abs(value)) ? rounded + 0 : value;
+}
+
+/**
+ * How the options bar reads `state`: its size along the layer's own axes, turned by its
+ * angle, or null if the box isn't a parallelogram.
+ */
+export function stateParams(source: Rect, state: TransformState): TransformParams | null {
+  if (!isParallelogram(state.corners)) return null;
+  const [scaleX, , , scaleY] = multiply(rotation(-state.angle), stateAffine(source, state));
+  return {
+    x: tidy(state.pivot.x),
+    y: tidy(state.pivot.y),
+    scaleX: tidy(scaleX),
+    scaleY: tidy(scaleY),
+    angle: state.angle,
+  };
+}
+
+/** True when `m` leaves everything where it is, give or take rounding noise. */
+export function isIdentity(m: Affine | Projective): boolean {
+  const affine = toAffine(m);
+  if (!affine) return false;
+  const [a, b, c, d, e, f] = affine;
+  const near = (value: number, target: number) => Math.abs(value - target) < 1e-9;
+  return near(a, 1) && near(b, 0) && near(c, 0) && near(d, 1) && near(e, 0) && near(f, 0);
+}
+
+/**
+ * The distances from `point` to the lines through the box's top, right, bottom and left
+ * edges (as they are on the layer), positive inside the box; null for a box with no area.
+ */
+function edgeDistances(corners: Quad, point: Point): [number, number, number, number] | null {
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const p = corners[i];
+    const q = corners[(i + 1) % 4];
+    if (p && q) area += p.x * q.y - q.x * p.y;
+  }
+  if (!(Math.abs(area) > 0)) return null;
+  // Clockwise on screen (y points down) the inside is on each edge's right.
+  const inside = Math.sign(area);
+  const distance = (p: Point, q: Point) => {
+    const ex = q.x - p.x;
+    const ey = q.y - p.y;
+    return (inside * (ex * (point.y - p.y) - ey * (point.x - p.x))) / Math.hypot(ex, ey);
+  };
+  const [topLeft, topRight, bottomRight, bottomLeft] = corners;
+  return [
+    distance(topLeft, topRight),
+    distance(topRight, bottomRight),
+    distance(bottomRight, bottomLeft),
+    distance(bottomLeft, topLeft),
+  ];
+}
+
+/**
+ * Which side of the box a point is on along one axis, from its distances inside the box's
+ * two edges across that axis: −1 within `reach` of the first, 1 of the second (but at
+ * most a third of the way across), 0 between them, or null beyond either edge's reach.
+ */
+function sideFrom(start: number, end: number, reach: number): -1 | 0 | 1 | null {
+  if (start < -reach || end < -reach) return null;
+  const inward = Math.min(reach, (start + end) / 3);
+  if (start <= inward) return -1;
+  if (end <= inward) return 1;
+  return 0;
+}
+
+/**
+ * What a press at `point` does to the transform box with `corners` (as `TransformOverlay`
+ * has them), or null if nothing. Edges reach `HANDLE_REACH` CSS pixels outwards, but at
+ * most a third of the box inwards, as the crop box's do; in Free Transform a press up to
  * `ROTATE_REACH` further out round a corner rotates. In 'rotate' mode the handles and
  * everything outside rotate, and in 'scale' mode nothing outside the handles does.
  */
 export function hitTransform(
-  source: Rect,
-  m: Affine,
+  corners: Quad,
   point: Point,
   zoom: number,
   mode: TransformMode,
 ): TransformHit | null {
-  const frame = boxFrame(source, m);
-  const dx = point.x - frame.origin.x;
-  const dy = point.y - frame.origin.y;
-  // The point's distance along each axis of the box, in document pixels.
-  const along = dx * frame.axisX.x + dy * frame.axisX.y;
-  const across = dx * frame.axisY.x + dy * frame.axisY.y;
+  const distances = edgeDistances(corners, point);
+  if (!distances) return null;
+  const [top, right, bottom, left] = distances;
   const reach = HANDLE_REACH / zoom;
-  const sideX = sideOf(along, 0, frame.lengthX, reach);
-  const sideY = sideOf(across, 0, frame.lengthY, reach);
+  const sideX = sideFrom(left, right, reach);
+  const sideY = sideFrom(top, bottom, reach);
   if (sideX !== null && sideY !== null) {
     const handle = HANDLE_GRID[sideY + 1]?.[sideX + 1] ?? null;
     if (!handle) return { kind: 'move' };
     return { kind: mode === 'rotate' ? 'rotate' : 'scale', handle };
   }
   if (mode === 'scale') return null;
-  // Outside the handles: the nearest point of the box tells which handle it's beyond.
-  const nearX = along <= 0 ? -1 : along >= frame.lengthX ? 1 : 0;
-  const nearY = across <= 0 ? -1 : across >= frame.lengthY ? 1 : 0;
+  // Outside the handles: the edges it's beyond tell which handle it's beyond.
+  const nearX = left <= 0 ? -1 : right <= 0 ? 1 : 0;
+  const nearY = top <= 0 ? -1 : bottom <= 0 ? 1 : 0;
   const handle = HANDLE_GRID[nearY + 1]?.[nearX + 1] ?? null;
   if (!handle) return null;
   if (mode === 'rotate') return { kind: 'rotate', handle };
   if (nearX === 0 || nearY === 0) return null;
-  const cornerX = nearX < 0 ? 0 : frame.lengthX;
-  const cornerY = nearY < 0 ? 0 : frame.lengthY;
-  const distance = Math.hypot(along - cornerX, across - cornerY);
+  const corner = corners[nearY < 0 ? (nearX < 0 ? 0 : 1) : nearX > 0 ? 2 : 3];
+  const distance = Math.hypot(point.x - corner.x, point.y - corner.y);
   return distance <= (HANDLE_REACH + ROTATE_REACH) / zoom ? { kind: 'rotate', handle } : null;
 }
 
 /** Resize cursors by the direction of a handle on screen, in steps of 45° from east. */
 const RESIZE_CURSORS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'] as const;
 
+/** The direction from `p` to `q`, a unit vector, or (0, 0) if they're the same point. */
+function unit(p: Point, q: Point): Point {
+  const length = Math.hypot(q.x - p.x, q.y - p.y);
+  return length > 0 ? { x: (q.x - p.x) / length, y: (q.y - p.y) / length } : { x: 0, y: 0 };
+}
+
 /**
- * The direction `handle` points in from the box's centre on screen, in degrees clockwise
- * from east: along the transformed axes, so corners point along the diagonal of the
- * axes whatever the box's shape.
+ * The direction `handle` points in on screen, in degrees clockwise from east: out across
+ * its edge, along the box's edges, so corners point along the diagonal of the edges they
+ * join whatever the box's shape.
  */
-function handleDirection(source: Rect, m: Affine, handle: TransformHandle): number {
-  const { axisX, axisY } = boxFrame(source, m);
+function handleDirection(corners: Quad, handle: TransformHandle): number {
+  const [topLeft, topRight, bottomRight, bottomLeft] = corners;
   const [sideX, sideY] = HANDLE_SIDES[handle];
+  const top = unit(topLeft, topRight);
+  const bottom = unit(bottomLeft, bottomRight);
+  const left = unit(topLeft, bottomLeft);
+  const right = unit(topRight, bottomRight);
+  // The layer's x axis along the edge the handle is on, or between the two for a side edge.
+  const axisX = sideY < 0 ? top : sideY > 0 ? bottom : { x: top.x + bottom.x, y: top.y + bottom.y };
+  const axisY = sideX < 0 ? left : sideX > 0 ? right : { x: left.x + right.x, y: left.y + right.y };
   const x = sideX * axisX.x + sideY * axisY.x;
   const y = sideX * axisX.y + sideY * axisY.y;
   return (Math.atan2(y, x) * 180) / Math.PI;
 }
 
 /** The CSS cursor that shows what a press would do (`hit` from `hitTransform`). */
-export function transformCursor(source: Rect, m: Affine, hit: TransformHit | null): string {
+export function transformCursor(corners: Quad, hit: TransformHit | null): string {
   if (!hit) return 'default';
   switch (hit.kind) {
     case 'move':
       return 'move';
     case 'scale': {
-      const step = Math.round(handleDirection(source, m, hit.handle) / 45);
+      const step = Math.round(handleDirection(corners, hit.handle) / 45);
       return RESIZE_CURSORS[((step % 4) + 4) % 4] ?? 'move';
     }
     case 'rotate': {
       // The arrow is drawn for a south-east corner (45°); turn it to face the handle.
-      const step = Math.round((handleDirection(source, m, hit.handle) - 45) / 45);
+      const step = Math.round((handleDirection(corners, hit.handle) - 45) / 45);
       return rotateCursor((((step % 8) + 8) % 8) * 45);
     }
     default:
@@ -242,9 +417,38 @@ export function rotateCursor(degrees: number): string {
   return cursor;
 }
 
-/** (x, y) turned `degrees` clockwise about the origin. */
-function turn(x: number, y: number, degrees: number): [number, number] {
-  return transformPoint(rotation(degrees), x, y);
+/** `quad` with each corner mapped through `m`. */
+function mapQuad(m: Affine, [p0, p1, p2, p3]: Quad): Quad {
+  const map = ({ x, y }: Point): Point => {
+    const [px, py] = transformPoint(m, x, y);
+    return { x: px, y: py };
+  };
+  return [map(p0), map(p1), map(p2), map(p3)];
+}
+
+/** The inverse of either kind of transform, or null if it has none. */
+function inverseOf(m: Affine | Projective): Affine | Projective | null {
+  return isProjective(m) ? invertProjective(m) : invert(m);
+}
+
+/** The lengths of the box's shorter top or bottom edge, and its shorter left or right one. */
+function boxLengths([topLeft, topRight, bottomRight, bottomLeft]: Quad): [number, number] {
+  const length = (p: Point, q: Point) => Math.hypot(q.x - p.x, q.y - p.y);
+  return [
+    Math.min(length(topLeft, topRight), length(bottomLeft, bottomRight)),
+    Math.min(length(topLeft, bottomLeft), length(topRight, bottomRight)),
+  ];
+}
+
+/**
+ * A scale factor for an edge `length` pixels long that keeps it at least a pixel long,
+ * keeping its sign (1 if it isn't finite).
+ */
+function clampRatio(ratio: number, length: number): number {
+  if (!Number.isFinite(ratio)) return 1;
+  const min = 1 / length;
+  if (Math.abs(ratio) >= min) return ratio;
+  return (Math.sign(ratio) || 1) * min;
 }
 
 /** A scale factor kept at least one pixel across the layer's `size`, keeping its sign. */
@@ -263,112 +467,166 @@ export interface ScaleOptions {
 }
 
 /**
- * The params after dragging `handle` from `press` to `point` (document coordinates),
+ * The state after dragging `handle` from `press` to `point` (document coordinates),
  * starting from `start`. The opposite handle or edge (or with `fromPivot` the pivot)
  * stays where it is; the handle follows the pointer along the axes it moves, or with
  * `proportional` scales both axes alike. The box keeps at least a pixel each way, and
- * flips if the handle is dragged past its anchor.
+ * flips if the handle is dragged past its anchor. It scales the layer before the
+ * transform, so the box keeps its shape: a distorted box stays in perspective.
  */
-export function scaleParams(
+export function scaleState(
   source: Rect,
-  start: TransformParams,
+  start: TransformState,
   handle: TransformHandle,
   press: Point,
   point: Point,
   { proportional, fromPivot }: ScaleOptions,
-): TransformParams {
+): TransformState {
+  const m = boxTransform(source, start);
+  const inverse = inverseOf(m);
+  if (!inverse) return start;
   const [sideX, sideY] = HANDLE_SIDES[handle];
-  // The handle and the point that stays put, about the layer's centre before the transform.
-  const handleX = (sideX * source.width) / 2;
-  const handleY = (sideY * source.height) / 2;
-  const anchorX = fromPivot ? 0 : -handleX;
-  const anchorY = fromPivot ? 0 : -handleY;
-  // The anchor-to-handle offset, scaled but not yet turned, before and after the drag.
-  const fromX = start.scaleX * (handleX - anchorX);
-  const fromY = start.scaleY * (handleY - anchorY);
-  const [moveX, moveY] = turn(point.x - press.x, point.y - press.y, -start.angle);
-  const toX = fromX + moveX;
-  const toY = fromY + moveY;
-
-  let scaleX = start.scaleX;
-  let scaleY = start.scaleY;
-  if (proportional) {
-    let k: number;
-    if (sideX !== 0 && sideY !== 0) k = (toX * fromX + toY * fromY) / (fromX ** 2 + fromY ** 2);
-    else k = sideX !== 0 ? toX / fromX : toY / fromY;
-    scaleX *= k;
-    scaleY *= k;
-  } else {
-    if (sideX !== 0) scaleX *= toX / fromX;
-    if (sideY !== 0) scaleY *= toY / fromY;
+  const centre = sourceCentre(source);
+  // The handle and the point that stays put, on the layer before the transform.
+  const handleX = centre.x + (sideX * source.width) / 2;
+  const handleY = centre.y + (sideY * source.height) / 2;
+  const anchorX = fromPivot ? centre.x : centre.x - (sideX * source.width) / 2;
+  const anchorY = fromPivot ? centre.y : centre.y - (sideY * source.height) / 2;
+  // The handle follows the pointer on the canvas.
+  const [fromX, fromY] = mapPoint(m, handleX, handleY);
+  let toX = fromX + point.x - press.x;
+  let toY = fromY + point.y - press.y;
+  const corner = sideX !== 0 && sideY !== 0;
+  if (proportional && corner) {
+    // Along the line from the anchor through the handle, as the canvas shows it.
+    const [ax, ay] = mapPoint(m, anchorX, anchorY);
+    const ux = fromX - ax;
+    const uy = fromY - ay;
+    const k = ((toX - ax) * ux + (toY - ay) * uy) / (ux * ux + uy * uy);
+    toX = ax + k * ux;
+    toY = ay + k * uy;
   }
-  scaleX = clampScale(scaleX, source.width, start.scaleX);
-  scaleY = clampScale(scaleY, source.height, start.scaleY);
-  // The anchor stays put: the pivot moves by the turned change in the anchor's offset.
-  const [shiftX, shiftY] = turn(
-    (start.scaleX - scaleX) * anchorX,
-    (start.scaleY - scaleY) * anchorY,
-    start.angle,
-  );
-  return { ...start, x: start.x + shiftX, y: start.y + shiftY, scaleX, scaleY };
+  const [x, y] = mapPoint(inverse, toX, toY);
+  let ratioX = sideX !== 0 ? (x - anchorX) / (handleX - anchorX) : 1;
+  let ratioY = sideY !== 0 ? (y - anchorY) / (handleY - anchorY) : 1;
+  if (proportional) {
+    let ratio: number;
+    if (corner) {
+      const dx = handleX - anchorX;
+      const dy = handleY - anchorY;
+      ratio = ((x - anchorX) * dx + (y - anchorY) * dy) / (dx * dx + dy * dy);
+    } else {
+      ratio = sideX !== 0 ? ratioX : ratioY;
+    }
+    ratioX = ratio;
+    ratioY = ratio;
+  }
+  const [lengthX, lengthY] = boxLengths(start.corners);
+  ratioX = clampRatio(ratioX, lengthX);
+  ratioY = clampRatio(ratioY, lengthY);
+  const next = compose(m, aboutPivot(scaling(ratioX, ratioY), anchorX, anchorY));
+  const [pivotX, pivotY] = mapPoint(next, centre.x, centre.y);
+  return {
+    corners: mapCorners(next, source),
+    pivot: fromPivot ? start.pivot : { x: pivotX, y: pivotY },
+    angle: start.angle,
+  };
+}
+
+/** `state` turned about its pivot until the options bar reads `angle` degrees. */
+function turnState(state: TransformState, angle: number): TransformState {
+  const { pivot } = state;
+  const turn = aboutPivot(rotation(angle - state.angle), pivot.x, pivot.y);
+  return { corners: mapQuad(turn, state.corners), pivot, angle: normalizeAngle(angle) };
 }
 
 /**
- * The params after turning the box about its pivot by the angle the pointer swept from
+ * The state after turning the box about its pivot by the angle the pointer swept from
  * `press` to `point`. With `snap` the angle itself goes to a multiple of `ROTATE_SNAP`.
  */
-export function rotateParams(
-  start: TransformParams,
+export function rotateState(
+  start: TransformState,
   press: Point,
   point: Point,
   snap: boolean,
-): TransformParams {
-  if (Math.hypot(press.x - start.x, press.y - start.y) < 1e-9) return start;
-  const from = Math.atan2(press.y - start.y, press.x - start.x);
-  const to = Math.atan2(point.y - start.y, point.x - start.x);
+): TransformState {
+  const { pivot } = start;
+  if (Math.hypot(press.x - pivot.x, press.y - pivot.y) < 1e-9) return start;
+  const from = Math.atan2(press.y - pivot.y, press.x - pivot.x);
+  const to = Math.atan2(point.y - pivot.y, point.x - pivot.x);
   let angle = start.angle + ((to - from) * 180) / Math.PI;
   if (snap) angle = Math.round(angle / ROTATE_SNAP) * ROTATE_SNAP;
-  return { ...start, angle: normalizeAngle(angle) };
+  return turnState(start, angle);
+}
+
+/** The state with the box and its pivot moved by `dx`, `dy`. */
+export function translateState(state: TransformState, dx: number, dy: number): TransformState {
+  if (dx === 0 && dy === 0) return state;
+  const move = (p: Point): Point => ({ x: p.x + dx, y: p.y + dy });
+  const [p0, p1, p2, p3] = state.corners;
+  return {
+    corners: [move(p0), move(p1), move(p2), move(p3)],
+    pivot: move(state.pivot),
+    angle: state.angle,
+  };
 }
 
 /**
- * The params after dragging the box from `press` to `point`, by whole pixels. With
+ * The state after dragging the box from `press` to `point`, by whole pixels. With
  * `constrain` (Shift) it keeps to the axis it has moved furthest along.
  */
-export function moveParams(
-  start: TransformParams,
+export function moveState(
+  start: TransformState,
   press: Point,
   point: Point,
   constrain: boolean,
-): TransformParams {
+): TransformState {
   let dx = Math.round(point.x - press.x);
   let dy = Math.round(point.y - press.y);
   if (constrain) {
     if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
     else dx = 0;
   }
-  return { ...start, x: start.x + dx, y: start.y + dy };
+  return translateState(start, dx, dy);
 }
 
 /**
- * The params after a flip or turn of the transformed layer about its pivot, as the canvas
+ * The state after a flip or turn of the transformed layer about its pivot, as the canvas
  * sees it: Flip Horizontal mirrors it left to right on screen whatever its angle.
  */
-export function orientParams(params: TransformParams, orientation: Orientation): TransformParams {
+export function orientState(state: TransformState, orientation: Orientation): TransformState {
+  let m: Affine;
+  let angle: number;
   switch (orientation) {
     case 'flip-horizontal':
-      return { ...params, scaleX: -params.scaleX, angle: normalizeAngle(-params.angle) };
+      m = scaling(-1, 1);
+      angle = -state.angle;
+      break;
     case 'flip-vertical':
-      return { ...params, scaleY: -params.scaleY, angle: normalizeAngle(-params.angle) };
+      m = scaling(1, -1);
+      angle = -state.angle;
+      break;
     case 'rotate-180':
-      return { ...params, angle: normalizeAngle(params.angle + 180) };
+      m = rotation(180);
+      angle = state.angle + 180;
+      break;
     case 'rotate-cw':
-      return { ...params, angle: normalizeAngle(params.angle + 90) };
+      m = rotation(90);
+      angle = state.angle + 90;
+      break;
     case 'rotate-ccw':
-      return { ...params, angle: normalizeAngle(params.angle - 90) };
+      m = rotation(-90);
+      angle = state.angle - 90;
+      break;
     default:
       return assertNever(orientation);
   }
+  const { pivot } = state;
+  return {
+    corners: mapQuad(aboutPivot(m, pivot.x, pivot.y), state.corners),
+    pivot,
+    angle: normalizeAngle(angle),
+  };
 }
 
 /** How the options bar shows the width and height: in pixels or as a percentage. */
@@ -385,40 +643,75 @@ export interface TransformFields {
 
 export type TransformField = keyof TransformFields;
 
-/** What the options bar shows for `params` on the layer covering `source`. */
-export function transformFields(
-  source: Rect,
-  params: TransformParams,
-  unit: TransformUnit,
-): TransformFields {
-  const [width, height] =
-    unit === 'px'
-      ? [params.scaleX * source.width, params.scaleY * source.height]
-      : [params.scaleX * 100, params.scaleY * 100];
-  return { x: params.x, y: params.y, width, height, angle: params.angle };
+/** The size of the box's bounding rect. */
+function boundingSize(corners: Quad): { width: number; height: number } {
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  return {
+    width: Math.max(...xs) - Math.min(...xs),
+    height: Math.max(...ys) - Math.min(...ys),
+  };
 }
 
 /**
- * The params with one options-bar field set to `value`, or null if it can't be: not a
+ * What the options bar shows for `state` on the layer covering `source`. A box that isn't a
+ * parallelogram has no size along the layer's axes: it shows its bounding rect's.
+ */
+export function transformFields(
+  source: Rect,
+  state: TransformState,
+  unit: TransformUnit,
+): TransformFields {
+  const params = stateParams(source, state);
+  const { x, y } = params ?? state.pivot;
+  let width: number;
+  let height: number;
+  if (params) {
+    [width, height] =
+      unit === 'px'
+        ? [params.scaleX * source.width, params.scaleY * source.height]
+        : [params.scaleX * 100, params.scaleY * 100];
+  } else {
+    const box = boundingSize(state.corners);
+    [width, height] =
+      unit === 'px'
+        ? [box.width, box.height]
+        : [(box.width / source.width) * 100, (box.height / source.height) * 100];
+  }
+  return { x, y, width, height, angle: state.angle };
+}
+
+/**
+ * The state with one options-bar field set to `value`, or null if it can't be: not a
  * finite number, a position past ±`MAX_FIELD_VALUE`, or a size under 1 or over
  * `MAX_FIELD_VALUE` pixels. A size scales about the pivot; with `lockAspect` the other
- * side follows, keeping the proportions and its own sign.
+ * side follows, keeping the proportions and its own sign. A box that isn't a
+ * parallelogram scales its bounding rect, on the canvas's axes, and can't be flipped so.
  */
 export function withField(
   source: Rect,
-  params: TransformParams,
+  state: TransformState,
   field: TransformField,
   value: number,
   unit: TransformUnit,
   lockAspect: boolean,
-): TransformParams | null {
+): TransformState | null {
   if (!Number.isFinite(value)) return null;
   switch (field) {
     case 'x':
-    case 'y':
-      return Math.abs(value) <= MAX_FIELD_VALUE ? { ...params, [field]: value } : null;
+    case 'y': {
+      if (Math.abs(value) > MAX_FIELD_VALUE) return null;
+      const { pivot } = state;
+      const horizontal = field === 'x';
+      const moved = translateState(
+        state,
+        horizontal ? value - pivot.x : 0,
+        horizontal ? 0 : value - pivot.y,
+      );
+      return { ...moved, pivot: horizontal ? { x: value, y: pivot.y } : { x: pivot.x, y: value } };
+    }
     case 'angle':
-      return { ...params, angle: normalizeAngle(value) };
+      return turnState(state, value);
     case 'width':
     case 'height': {
       const horizontal = field === 'width';
@@ -426,6 +719,8 @@ export function withField(
       const scale = unit === 'px' ? value / size : value / 100;
       const pixels = Math.abs(scale * size);
       if (pixels < 1 || pixels > MAX_FIELD_VALUE) return null;
+      const params = stateParams(source, state);
+      if (!params) return scaleBoundingBox(state, horizontal, pixels, value, lockAspect);
       const [changed, other] = horizontal
         ? [params.scaleX, params.scaleY]
         : [params.scaleY, params.scaleX];
@@ -435,13 +730,38 @@ export function withField(
         const ratio = Math.abs(other / changed);
         follower = clampScale(Math.sign(other) * Math.abs(scale) * ratio, otherSize, other);
       }
-      return horizontal
-        ? { ...params, scaleX: scale, scaleY: follower }
-        : { ...params, scaleX: follower, scaleY: scale };
+      const [scaleX, scaleY] = horizontal ? [scale, follower] : [follower, scale];
+      return stateFromParams(source, { ...params, scaleX, scaleY });
     }
     default:
       return assertNever(field);
   }
+}
+
+/**
+ * A box that isn't a parallelogram scaled about its pivot on the canvas's axes, so that its
+ * bounding rect is `pixels` wide (or high); with `lockAspect` both ways alike. Null for a
+ * negative `value`, which would flip it, or a result under a pixel or too large.
+ */
+function scaleBoundingBox(
+  state: TransformState,
+  horizontal: boolean,
+  pixels: number,
+  value: number,
+  lockAspect: boolean,
+): TransformState | null {
+  if (value < 0) return null;
+  const box = boundingSize(state.corners);
+  const ratio = pixels / (horizontal ? box.width : box.height);
+  const ratioX = horizontal || lockAspect ? ratio : 1;
+  const ratioY = !horizontal || lockAspect ? ratio : 1;
+  const [width, height] = [box.width * ratioX, box.height * ratioY];
+  if (!(width >= 1 && height >= 1 && width <= MAX_FIELD_VALUE && height <= MAX_FIELD_VALUE)) {
+    return null;
+  }
+  const { pivot } = state;
+  const m = aboutPivot(scaling(ratioX, ratioY), pivot.x, pivot.y);
+  return { corners: mapQuad(m, state.corners), pivot, angle: state.angle };
 }
 
 /** How the options bar shows a field's value: to two decimal places at most. */

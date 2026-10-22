@@ -1,5 +1,14 @@
 import type { ComponentType } from 'react';
-import type { Affine, Editor, Interpolation, LayerId, PixelBuffer, Point, Rect } from '../../core';
+import type {
+  Affine,
+  Editor,
+  Interpolation,
+  LayerId,
+  PixelBuffer,
+  Point,
+  Projective,
+  Rect,
+} from '../../core';
 import type { ContextMenuSections } from '../panels/menu-logic';
 
 /**
@@ -120,7 +129,7 @@ export interface LassoOverlay {
 
 /**
  * A Free Transform session's preview: the layer's pixels as they were (`pixels`, with its
- * top-left pixel at `x`, `y`) mapped through `affine`, drawn in the layer's place while the
+ * top-left pixel at `x`, `y`) mapped through `matrix`, drawn in the layer's place while the
  * composite leaves the layer out, and the transformed box with its handles.
  */
 export interface TransformOverlay {
@@ -130,8 +139,11 @@ export interface TransformOverlay {
   readonly pixels: PixelBuffer;
   readonly x: number;
   readonly y: number;
-  /** Canvas coordinates to canvas coordinates, as `TransformLayerCommand` takes it. */
-  readonly affine: Affine;
+  /**
+   * Canvas coordinates to canvas coordinates, as `TransformLayerCommand` takes it: an
+   * `Affine` while the box is a parallelogram, else a `Projective`.
+   */
+  readonly matrix: Affine | Projective;
   readonly interpolation: Interpolation;
   /** The layer's opacity, which the preview is drawn with. */
   readonly opacity: number;
