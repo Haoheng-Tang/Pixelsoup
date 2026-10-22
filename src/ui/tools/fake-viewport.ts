@@ -64,7 +64,7 @@ export class FakeViewport {
     this.down(x0, y0, mods);
     this.move(x1, y1);
     this.up(x1, y1);
-    this.held = { ...this.held, shiftKey: false, altKey: false };
+    this.held = { ...this.held, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
   }
 
   /** Two clicks in place, then the double-click event, as a browser sends them. */

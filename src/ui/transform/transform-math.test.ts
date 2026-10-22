@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Affine, Point, Projective, Rect } from '../../core';
 import {
+  isConvexQuad,
   mapCorners,
   mapPoint,
   multiply,
@@ -9,8 +10,9 @@ import {
   toAffine,
   translation,
 } from '../../core';
-import type { TransformParams, TransformState } from './transform-math';
+import type { TransformMode, TransformParams, TransformState } from './transform-math';
 import {
+  distortState,
   fieldText,
   hitTransform,
   identityParams,
@@ -20,10 +22,11 @@ import {
   normalizeAngle,
   orientState,
   parseFieldText,
-  rotateCursor,
+  perspectiveState,
   rotateState,
   sameState,
   scaleState,
+  skewState,
   stateFromParams,
   stateMatrix,
   stateParams,
@@ -31,6 +34,7 @@ import {
   transformFields,
   withField,
 } from './transform-math';
+import { distortCursor, perspectiveCursor, rotateCursor, skewCursor } from './transform-cursors';
 
 const square: Rect = { x: 0, y: 0, width: 10, height: 10 };
 const wide: Rect = { x: 0, y: 0, width: 100, height: 50 };
@@ -90,9 +94,9 @@ describe('stateMatrix', () => {
 
   it('is the transform the params describe, which read back the same', () => {
     const cases: TransformParams[] = [
-      { x: 40.5, y: -12, scaleX: 1.5, scaleY: -0.75, angle: 33 },
-      { x: 50, y: 25, scaleX: 2, scaleY: 0.5, angle: -120 },
-      { x: 7, y: 9, scaleX: -1, scaleY: 1, angle: 45 },
+      { x: 40.5, y: -12, scaleX: 1.5, scaleY: -0.75, angle: 33, skewX: 0, skewY: 0 },
+      { x: 50, y: 25, scaleX: 2, scaleY: 0.5, angle: -120, skewX: 0, skewY: 0 },
+      { x: 7, y: 9, scaleX: -1, scaleY: 1, angle: 45, skewX: 0, skewY: 0 },
     ];
     for (const params of cases) {
       const state = stateFromParams(wide, params);
@@ -241,6 +245,46 @@ describe('scaleState', () => {
     const flat = scaleState(square, start, 'e', point(10, 5), point(0, 5), free);
     expect(paramsOf(square, flat).scaleX).toBeCloseTo(0.1, 12);
   });
+
+  describe('in perspective', () => {
+    // The left and right edges meet at (50, −12.5), so the horizon is the line y = −12.5.
+    const trapezoid: TransformState = {
+      corners: [point(40, 0), point(60, 0), point(100, 50), point(0, 50)],
+      pivot: point(50, 25 / 3),
+      angle: 0,
+    };
+
+    it('keeps the box in perspective, the handle following the pointer', () => {
+      const up = scaleState(wide, trapezoid, 'n', point(50, 0), point(50, -5), free);
+      expect(stateParams(wide, up)).toBeNull();
+      // Still on the lines through the left and right edges.
+      expectCorners(wide, up, [
+        [44, -5],
+        [56, -5],
+        [100, 50],
+        [0, 50],
+      ]);
+      // Dragged past the bottom edge it turns over below it, as a box does.
+      const over = scaleState(wide, trapezoid, 'n', point(50, 0), point(50, 200), free);
+      expectCorners(wide, over, [
+        [-120, 200],
+        [220, 200],
+        [100, 50],
+        [0, 50],
+      ]);
+    });
+
+    it('stops short of the horizon, the far edge just over a pixel long', () => {
+      const past = scaleState(wide, trapezoid, 'n', point(50, 0), point(50, -30), free);
+      const [topLeft, topRight, bottomRight, bottomLeft] = past.corners;
+      expect(isConvexQuad(past.corners)).toBe(true);
+      expect(topLeft.y).toBeGreaterThan(-12.5);
+      expect(topRight.x - topLeft.x).toBeGreaterThan(1);
+      expect(topRight.x - topLeft.x).toBeLessThan(2);
+      expect(bottomRight.x).toBeCloseTo(100, 9);
+      expect(bottomLeft.x).toBeCloseTo(0, 9);
+    });
+  });
 });
 
 describe('rotateState', () => {
@@ -294,7 +338,15 @@ describe('moveState', () => {
 });
 
 describe('orientState', () => {
-  const tilted: TransformParams = { x: 40, y: 30, scaleX: 1.5, scaleY: 0.5, angle: 30 };
+  const tilted: TransformParams = {
+    x: 40,
+    y: 30,
+    scaleX: 1.5,
+    scaleY: 0.5,
+    angle: 30,
+    skewX: 0,
+    skewY: 0,
+  };
   const state = stateFromParams(wide, tilted);
 
   it('flips and turns as the canvas sees it, about the pivot', () => {
@@ -327,8 +379,9 @@ describe('orientState', () => {
 
 describe('hitTransform', () => {
   const corners = cornersOf(wide, identityState(wide));
-  const hit = (x: number, y: number, zoom = 1, mode: 'free' | 'scale' | 'rotate' = 'free') =>
+  const hit = (x: number, y: number, zoom = 1, mode: TransformMode = 'free') =>
     hitTransform(corners, point(x, y), zoom, mode);
+  const ctrl = { shiftKey: false, altKey: false, ctrlKey: true, metaKey: false };
 
   it('finds the handles, the inside and the rotate zone at 100 %', () => {
     expect(hit(50, 25)).toEqual({ kind: 'move' });
@@ -363,6 +416,44 @@ describe('hitTransform', () => {
     expect(hit(100, 50, 1, 'rotate')).toEqual({ kind: 'rotate', handle: 'se' });
     expect(hit(500, 25, 1, 'rotate')).toEqual({ kind: 'rotate', handle: 'e' });
     expect(hit(50, 25, 1, 'rotate')).toEqual({ kind: 'move' });
+  });
+
+  it('distorts a corner and skews an edge with Ctrl or Cmd, in every mode', () => {
+    const cmd = { ...ctrl, ctrlKey: false, metaKey: true };
+    const all = { shiftKey: true, altKey: true, ctrlKey: true, metaKey: false };
+    const modes = ['free', 'scale', 'rotate', 'skew', 'distort', 'perspective'] as const;
+    for (const mode of modes) {
+      const at = (x: number, y: number, keys: typeof ctrl) =>
+        hitTransform(corners, point(x, y), 1, mode, keys);
+      expect(at(0, 0, ctrl)).toEqual({ kind: 'distort', handle: 'nw' });
+      expect(at(100, 50, cmd)).toEqual({ kind: 'distort', handle: 'se' });
+      expect(at(100, 25, ctrl)).toEqual({ kind: 'skew', handle: 'e' });
+      expect(at(50, 0, cmd)).toEqual({ kind: 'skew', handle: 'n' });
+      // With Alt and Shift too, a corner goes into perspective; an edge still skews.
+      expect(at(100, 50, all)).toEqual({ kind: 'perspective', handle: 'se' });
+      expect(at(50, 50, all)).toEqual({ kind: 'skew', handle: 's' });
+      expect(at(50, 25, ctrl)).toEqual({ kind: 'move' });
+    }
+    // Alt and Shift on their own still scale.
+    const altShift = { ...all, ctrlKey: false };
+    expect(hitTransform(corners, point(0, 0), 1, 'free', altShift)).toEqual({
+      kind: 'scale',
+      handle: 'nw',
+    });
+  });
+
+  it('skews, distorts or puts in perspective from the handles in those modes', () => {
+    expect(hit(0, 0, 1, 'skew')).toEqual({ kind: 'skew', handle: 'nw' });
+    expect(hit(50, 0, 1, 'skew')).toEqual({ kind: 'skew', handle: 'n' });
+    expect(hit(0, 0, 1, 'distort')).toEqual({ kind: 'distort', handle: 'nw' });
+    expect(hit(50, 0, 1, 'distort')).toEqual({ kind: 'distort', handle: 'n' });
+    expect(hit(0, 0, 1, 'perspective')).toEqual({ kind: 'perspective', handle: 'nw' });
+    expect(hit(50, 0, 1, 'perspective')).toEqual({ kind: 'skew', handle: 'n' });
+    for (const mode of ['skew', 'distort', 'perspective'] as const) {
+      // Nothing outside the handles rotates.
+      expect(hit(110, 55, 1, mode)).toBeNull();
+      expect(hit(50, 25, 1, mode)).toEqual({ kind: 'move' });
+    }
   });
 
   it('follows a turned and flipped box', () => {
@@ -404,17 +495,45 @@ describe('transformCursor', () => {
     expect(rotateCursor(0)).toMatch(/^url\("data:image\/svg\+xml,.*"\) 11 11, default$/);
     expect(rotateCursor(90)).toMatch(/\) 13 11, default$/);
   });
+
+  it('shows arrowheads to distort and put in perspective, and skew arrows along the edge', () => {
+    expect(transformCursor(corners, { kind: 'distort', handle: 'nw' })).toBe(distortCursor());
+    expect(transformCursor(corners, { kind: 'perspective', handle: 'se' })).toBe(
+      perspectiveCursor(),
+    );
+    expect(transformCursor(corners, { kind: 'skew', handle: 'n' })).toBe(skewCursor(0));
+    expect(transformCursor(corners, { kind: 'skew', handle: 'e' })).toBe(skewCursor(90));
+    // A corner slides along either edge; the arrows lie along its top or bottom one.
+    expect(transformCursor(corners, { kind: 'skew', handle: 'sw' })).toBe(skewCursor(0));
+    const turned = cornersOf(wide, stateFromParams(wide, { ...identityParams(wide), angle: 45 }));
+    expect(transformCursor(turned, { kind: 'skew', handle: 'n' })).toBe(skewCursor(45));
+    expect(transformCursor(turned, { kind: 'skew', handle: 'w' })).toBe(skewCursor(135));
+    // The arrowhead's tip is the hot spot.
+    expect(distortCursor()).toMatch(/\) 4 3, default$/);
+    const glyphs = [distortCursor(), perspectiveCursor(), skewCursor(0), skewCursor(90)];
+    expect(new Set(glyphs).size).toBe(4);
+  });
 });
 
 describe('the options-bar fields', () => {
-  const params: TransformParams = { x: 40.5, y: -12, scaleX: 1.5, scaleY: -0.75, angle: 33 };
+  const params: TransformParams = {
+    x: 40.5,
+    y: -12,
+    scaleX: 1.5,
+    scaleY: -0.75,
+    angle: 33,
+    skewX: 0,
+    skewY: 0,
+  };
   const state = stateFromParams(wide, params);
 
   it('round-trip to the same transform in pixels and percent', () => {
     for (const unit of ['px', 'percent'] as const) {
       const fields = transformFields(wide, state, unit);
-      for (const field of ['x', 'y', 'width', 'height', 'angle'] as const) {
-        const next = withField(wide, state, field, fields[field], unit, false);
+      for (const field of ['x', 'y', 'width', 'height', 'angle', 'skewX', 'skewY'] as const) {
+        const value = fields[field];
+        if (value === null) throw new Error(`No ${field}`);
+        const next = withField(wide, state, field, value, unit, false);
         expect(next).not.toBeNull();
         if (next) expectSameMatrix(stateMatrix(wide, next), stateMatrix(wide, state));
       }
@@ -425,6 +544,8 @@ describe('the options-bar fields', () => {
       width: 150,
       height: -37.5,
       angle: 33,
+      skewX: 0,
+      skewY: 0,
     });
     expect(transformFields(wide, state, 'percent')).toMatchObject({ width: 150, height: -75 });
   });
@@ -448,6 +569,70 @@ describe('the options-bar fields', () => {
     expect(paramsOf(wide, flipped)).toMatchObject({ scaleX: -1 });
   });
 
+  it('skew about the pivot, keeping the size and angle', () => {
+    const skewed = withField(wide, state, 'skewX', 20, 'px', false);
+    expect(paramsOf(wide, skewed)).toEqual({ ...params, skewX: 20 });
+    const both = skewed && withField(wide, skewed, 'skewY', -10, 'px', false);
+    expect(paramsOf(wide, both)).toEqual({ ...params, skewX: 20, skewY: -10 });
+    expect(both && transformFields(wide, both, 'px')).toEqual({
+      x: 40.5,
+      y: -12,
+      width: 150,
+      height: -37.5,
+      angle: 33,
+      skewX: 20,
+      skewY: -10,
+    });
+  });
+
+  it('refuse skews of 90° or more, or that flatten or fold the box or make it too large', () => {
+    expect(withField(wide, state, 'skewX', 90, 'px', false)).toBeNull();
+    expect(withField(wide, state, 'skewY', -90, 'px', false)).toBeNull();
+    expect(withField(wide, state, 'skewY', Number.NaN, 'px', false)).toBeNull();
+    // At 89.99° the top edge slides 25 · tan 89.99° ≈ 143,000 px each way.
+    const upright = identityState(wide);
+    expect(withField(wide, upright, 'skewX', 89.99, 'px', false)).toBeNull();
+    expect(withField(wide, upright, 'skewX', 89, 'px', false)).not.toBeNull();
+    // Skewed 45° one way and 45° the other, the box is flat; any further, it folds over.
+    const leaning = withField(wide, upright, 'skewY', -45, 'px', false);
+    expect(leaning && withField(wide, leaning, 'skewX', 45, 'px', false)).toBeNull();
+    expect(leaning && withField(wide, leaning, 'skewX', 60, 'px', false)).toBeNull();
+    const fine = leaning && withField(wide, leaning, 'skewX', 30, 'px', false);
+    expect(paramsOf(wide, fine)).toMatchObject({ skewX: 30, skewY: -45 });
+  });
+
+  it('show the bounding size and no angle or skew while the box is no parallelogram', () => {
+    const trapezoid: TransformState = {
+      corners: [point(10, 0), point(90, 0), point(100, 50), point(0, 50)],
+      pivot: point(50, 25),
+      angle: 0,
+    };
+    expect(transformFields(wide, trapezoid, 'px')).toEqual({
+      x: 50,
+      y: 25,
+      width: 100,
+      height: 50,
+      angle: null,
+      skewX: null,
+      skewY: null,
+    });
+    expect(transformFields(wide, trapezoid, 'percent')).toMatchObject({ width: 100, height: 100 });
+    for (const field of ['angle', 'skewX', 'skewY'] as const) {
+      expect(withField(wide, trapezoid, field, 10, 'px', false)).toBeNull();
+    }
+    // A size scales the bounding rect about the pivot, on the canvas's axes, but can't flip it.
+    const half = withField(wide, trapezoid, 'width', 50, 'px', false);
+    expect(half?.corners).toEqual([point(30, 0), point(70, 0), point(75, 50), point(25, 50)]);
+    expect(withField(wide, trapezoid, 'width', -100, 'px', false)).toBeNull();
+    const locked = withField(wide, trapezoid, 'height', 25, 'px', true);
+    expect(locked?.corners).toEqual([
+      point(30, 12.5),
+      point(70, 12.5),
+      point(75, 37.5),
+      point(25, 37.5),
+    ]);
+  });
+
   it('show two decimal places at most, and read back what was typed', () => {
     expect(fieldText(100 / 3)).toBe('33.33');
     expect(fieldText(150)).toBe('150');
@@ -458,5 +643,170 @@ describe('the options-bar fields', () => {
     expect(parseFieldText('')).toBeNull();
     expect(parseFieldText('abc')).toBeNull();
     expect(parseFieldText('Infinity')).toBeNull();
+  });
+});
+
+describe('skews', () => {
+  it('lean the edges clockwise about the centre', () => {
+    const params = identityParams(square);
+    // 45° horizontally slides the top edge right 5 px and the bottom edge left.
+    expectCorners(square, stateFromParams(square, { ...params, skewX: 45 }), [
+      [5, 0],
+      [15, 0],
+      [5, 10],
+      [-5, 10],
+    ]);
+    // 45° vertically slides the right edge down 5 px and the left edge up.
+    expectCorners(square, stateFromParams(square, { ...params, skewY: 45 }), [
+      [0, -5],
+      [10, 5],
+      [10, 15],
+      [0, 5],
+    ]);
+  });
+
+  it('read back the same, scaled, turned and flipped', () => {
+    const cases: TransformParams[] = [
+      { x: 40.5, y: -12, scaleX: 1.5, scaleY: -0.75, angle: 33, skewX: 20, skewY: -10 },
+      { x: 50, y: 25, scaleX: -2, scaleY: 0.5, angle: -120, skewX: -35, skewY: 0 },
+      { x: 7, y: 9, scaleX: 1, scaleY: 1, angle: 0, skewX: 0, skewY: 60 },
+    ];
+    for (const params of cases) {
+      expect(paramsOf(wide, stateFromParams(wide, params))).toEqual(params);
+    }
+  });
+});
+
+describe('skewState', () => {
+  const start = identityState(wide);
+
+  it('slides an edge along itself, the opposite edge staying put', () => {
+    const top = skewState(start, 'n', point(50, 0), point(70, 13), false);
+    expectCorners(wide, top, [
+      [20, 0],
+      [120, 0],
+      [100, 50],
+      [0, 50],
+    ]);
+    expect(top.pivot).toEqual({ x: 60, y: 25 });
+    // The left and right edges lean by atan(20 / 50).
+    expect(paramsOf(wide, top).skewX).toBeCloseTo((Math.atan(0.4) * 180) / Math.PI, 9);
+    const right = skewState(start, 'e', point(100, 25), point(110, 35), false);
+    expectCorners(wide, right, [
+      [0, 0],
+      [100, 10],
+      [100, 60],
+      [0, 50],
+    ]);
+  });
+
+  it('slides the opposite edge the other way with Alt, about the pivot', () => {
+    const state = skewState(start, 'n', point(50, 0), point(70, 0), true);
+    expectCorners(wide, state, [
+      [20, 0],
+      [120, 0],
+      [80, 50],
+      [-20, 50],
+    ]);
+    expect(state.pivot).toEqual({ x: 50, y: 25 });
+  });
+
+  it('slides a corner on its own along the edge the drag goes further along', () => {
+    const along = skewState(start, 'se', point(100, 50), point(130, 52), false);
+    expect(along.corners).toEqual([point(0, 0), point(100, 0), point(130, 50), point(0, 50)]);
+    const down = skewState(start, 'se', point(100, 50), point(101, 60), false);
+    expect(down.corners).toEqual([point(0, 0), point(100, 0), point(100, 60), point(0, 50)]);
+  });
+
+  it('stops a pixel before the box would fold over', () => {
+    // Slid left along the bottom edge, the bottom-right corner stops √5 px short of the
+    // bottom-left: a pixel from the line through its neighbours, (100, 0) and (0, 50).
+    const state = skewState(start, 'se', point(100, 50), point(-50, 50), false);
+    expect(state.corners[2].x).toBeCloseTo(Math.sqrt(5), 6);
+    expect(state.corners[2].y).toBe(50);
+    expect(isConvexQuad(state.corners)).toBe(true);
+  });
+});
+
+describe('distortState', () => {
+  const start = identityState(wide);
+  /** How far `p` is from the line through (100, 0) and (0, 50), on the top-left's side. */
+  const fromDiagonal = (p: Point) => (5000 - 50 * p.x - 100 * p.y) / Math.hypot(50, 100);
+
+  it('moves one corner on its own, the pivot where the diagonals cross', () => {
+    const state = distortState(start, 'ne', point(100, 0), point(120, -10));
+    expect(state.corners).toEqual([point(0, 0), point(120, -10), point(100, 50), point(0, 50)]);
+    expect(stateParams(wide, state)).toBeNull();
+    expectCorners(wide, state, [
+      [0, 0],
+      [120, -10],
+      [100, 50],
+      [0, 50],
+    ]);
+    // The layer's centre goes where the diagonals cross.
+    const [x, y] = mapPoint(stateMatrix(wide, state), 50, 25);
+    expect(state.pivot.x).toBeCloseTo(x, 9);
+    expect(state.pivot.y).toBeCloseTo(y, 9);
+  });
+
+  it('keeps a corner a pixel short of the line through its neighbours', () => {
+    const state = distortState(start, 'nw', point(0, 0), point(80, 40));
+    const [corner, ...rest] = state.corners;
+    expect(rest).toEqual(start.corners.slice(1));
+    expect(fromDiagonal(corner)).toBeCloseTo(1, 9);
+    // Straight across from the pointer: along the line's normal, (50, 100).
+    expect((corner.x - 80) * 100 - (corner.y - 40) * 50).toBeCloseTo(0, 9);
+  });
+
+  it('keeps a corner from going round past the edges beyond its neighbours', () => {
+    const state = distortState(start, 'nw', point(0, 0), point(400, 300));
+    const [corner] = state.corners;
+    expect(isConvexQuad(state.corners)).toBe(true);
+    // A pixel inside the right edge's line, and a pixel from the diagonal.
+    expect(corner.x).toBeCloseTo(99, 9);
+    expect(fromDiagonal(corner)).toBeCloseTo(1, 9);
+  });
+
+  it('moves an edge’s two corners together, short of folding over', () => {
+    const state = distortState(start, 'e', point(100, 25), point(130, 40));
+    expect(state.corners).toEqual([point(0, 0), point(130, 15), point(130, 65), point(0, 50)]);
+    const folded = distortState(start, 'e', point(100, 25), point(-300, 25));
+    const [topLeft, topRight] = folded.corners;
+    expect(isConvexQuad(folded.corners)).toBe(true);
+    // Its corners a pixel from the diagonals: w · 50 / √(w² + 50²) = 1.
+    expect(topRight.x - topLeft.x).toBeCloseTo(1.0002, 4);
+  });
+});
+
+describe('perspectiveState', () => {
+  const start = identityState(wide);
+
+  it('moves a corner along its edge and the edge’s other corner the opposite way', () => {
+    const top = perspectiveState(start, 'ne', point(100, 0), point(90, 3));
+    expect(top.corners).toEqual([point(10, 0), point(90, 0), point(100, 50), point(0, 50)]);
+    expectCorners(wide, top, [
+      [10, 0],
+      [90, 0],
+      [100, 50],
+      [0, 50],
+    ]);
+    const side = perspectiveState(start, 'se', point(100, 50), point(101, 60));
+    expect(side.corners).toEqual([point(0, 0), point(100, -10), point(100, 60), point(0, 50)]);
+  });
+
+  it('stops before the edge shrinks to a point', () => {
+    const state = perspectiveState(start, 'ne', point(100, 0), point(0, 0));
+    const [topLeft, topRight] = state.corners;
+    expect(isConvexQuad(state.corners)).toBe(true);
+    expect(topLeft.x + topRight.x).toBeCloseTo(100, 9);
+    // Its corners a pixel from the diagonals: 50 L / √((50 + L / 2)² + 50²) = 1.
+    expect(topRight.x - topLeft.x).toBeCloseTo(1.4243, 3);
+  });
+
+  it('skews from an edge', () => {
+    const state = perspectiveState(start, 'n', point(50, 0), point(70, 13));
+    expect(state.corners).toEqual(
+      skewState(start, 'n', point(50, 0), point(70, 13), false).corners,
+    );
   });
 });

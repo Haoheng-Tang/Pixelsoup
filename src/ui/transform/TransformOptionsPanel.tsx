@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import type { Interpolation } from '../../core';
 import { CANCEL_ICON, COMMIT_ICON, OptionsIcon } from '../tools/OptionsIcon';
+import { IS_APPLE } from '../use-file-shortcuts';
 import type { FreeTransform } from './free-transform';
 import type { TransformField, TransformUnit } from './transform-math';
 import { fieldText, parseFieldText, transformFields } from './transform-math';
@@ -22,6 +23,12 @@ const UNITS: readonly { unit: TransformUnit; label: string; hint: string }[] = [
 /** Two links of a chain: keep the proportions. */
 const LINK_ICON =
   'M4.5 5h3a3 3 0 0 1 0 6h-3a3 3 0 0 1 0-6zM8.5 5h3a3 3 0 0 1 0 6h-3a3 3 0 0 1 0-6z';
+
+const CTRL = IS_APPLE ? 'Cmd' : 'Ctrl';
+
+const HINT =
+  'Shift keeps proportions, Alt scales about the centre; drag outside a corner to rotate. ' +
+  `${CTRL} distorts a corner or skews an edge, ${CTRL}+Alt+Shift puts a corner in perspective.`;
 
 function isInterpolation(value: string): value is Interpolation {
   return Object.keys(INTERPOLATIONS).includes(value);
@@ -51,8 +58,9 @@ interface SessionOptionsProps {
 }
 
 /**
- * The pivot's position, the size, the angle and the interpolation, with ✓ and ✗. The
- * fields follow the handles, and typing in one previews straight away.
+ * The pivot's position, the size, the angle, the skews and the interpolation, with ✓ and
+ * ✗. The fields follow the handles, and typing in one previews straight away. A distorted
+ * box has no angle or skew: those fields are blank and disabled.
  */
 function SessionOptions({ session, options }: SessionOptionsProps) {
   const subscribe = useCallback((notify: () => void) => session.subscribe(notify), [session]);
@@ -128,6 +136,27 @@ function SessionOptions({ session, options }: SessionOptionsProps) {
         value={fields.angle}
         onChange={set('angle')}
       />
+      <div className="options-field" role="group" aria-label="Skew">
+        <span className="options-label" aria-hidden="true">
+          Skew
+        </span>
+        <TransformNumber
+          label="H"
+          name="Horizontal skew"
+          unit="°"
+          hint="Horizontal skew: degrees the left and right edges lean clockwise"
+          value={fields.skewX}
+          onChange={set('skewX')}
+        />
+        <TransformNumber
+          label="V"
+          name="Vertical skew"
+          unit="°"
+          hint="Vertical skew: degrees the top and bottom edges lean clockwise"
+          value={fields.skewY}
+          onChange={set('skewY')}
+        />
+      </div>
       <label className="options-field">
         <span className="options-label">Interpolation</span>
         <select
@@ -164,8 +193,8 @@ function SessionOptions({ session, options }: SessionOptionsProps) {
           <OptionsIcon d={CANCEL_ICON} />
         </button>
       </div>
-      <p className="tool-options-hint">
-        Shift keeps proportions, Alt scales about the centre. Drag outside a corner to rotate.
+      <p className="tool-options-hint" title={HINT}>
+        {HINT}
       </p>
     </>
   );
@@ -178,7 +207,8 @@ interface TransformNumberProps {
   name: string;
   unit: string;
   hint: string;
-  value: number;
+  /** Null disables the field, blank: the box has no such value (an angle, once distorted). */
+  value: number | null;
   /** Takes a typed value; false refuses it. */
   onChange: (value: number) => boolean;
 }
@@ -191,8 +221,9 @@ function TransformNumber({ label, name, unit, hint, value, onChange }: Transform
   // What the user is typing; null shows the value.
   const [text, setText] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
+  const disabled = value === null;
   return (
-    <div className="options-field" title={hint}>
+    <div className="options-field" title={disabled ? `${hint} (not while distorted)` : hint}>
       <span className="options-label" aria-hidden="true">
         {label}
       </span>
@@ -201,8 +232,9 @@ function TransformNumber({ label, name, unit, hint, value, onChange }: Transform
         className="options-number options-number-wide"
         aria-label={`${name} (${unit})`}
         aria-invalid={invalid}
+        disabled={disabled}
         step="any"
-        value={text ?? fieldText(value)}
+        value={disabled ? '' : (text ?? fieldText(value))}
         onChange={(e) => {
           setText(e.target.value);
           const parsed = parseFieldText(e.target.value);

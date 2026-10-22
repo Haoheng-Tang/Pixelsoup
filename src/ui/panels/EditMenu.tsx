@@ -20,6 +20,9 @@ type EditCommand =
   | 'transform'
   | 'scale'
   | 'rotate'
+  | 'skew'
+  | 'distort'
+  | 'perspective'
   | Orientation;
 
 interface EditMenuProps {
@@ -37,9 +40,9 @@ interface EditMenuProps {
  * The Edit menu. Fill and Clear also have plain shortcuts (see `useEditShortcuts`); the
  * menu shows the Mac's delete key, which types Backspace, as the key that clears. Paste
  * pastes Pixelsoup's own clipboard: only Ctrl/Cmd+V can paste an image from another app.
- * Free Transform and Transform's Scale and Rotate start a transform session (or switch the
- * one running); Transform's turns and flips are composed into it, or applied to the active
- * layer straight away when none runs.
+ * Free Transform and Transform's Scale, Rotate, Skew, Distort and Perspective start a
+ * transform session (or switch the one running); Transform's turns and flips are composed
+ * into it, or applied to the active layer straight away when none runs.
  */
 export function EditMenu({
   editor,
@@ -116,6 +119,9 @@ export function EditMenu({
           [
             { command: 'scale', label: 'Scale', disabled: noTransform },
             { command: 'rotate', label: 'Rotate', disabled: noTransform },
+            { command: 'skew', label: 'Skew', disabled: noTransform },
+            { command: 'distort', label: 'Distort', disabled: noTransform },
+            { command: 'perspective', label: 'Perspective', disabled: noTransform },
           ],
           [orient('flip-horizontal'), orient('flip-vertical')],
           [orient('rotate-180'), orient('rotate-cw'), orient('rotate-ccw')],
@@ -155,6 +161,9 @@ export function EditMenu({
             break;
           case 'scale':
           case 'rotate':
+          case 'skew':
+          case 'distort':
+          case 'perspective':
             freeTransform.start(command);
             break;
           case 'flip-horizontal':

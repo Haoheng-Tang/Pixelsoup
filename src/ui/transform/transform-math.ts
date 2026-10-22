@@ -7,8 +7,10 @@ import {
   homographyFromQuad,
   invert,
   invertProjective,
+  isConvexQuad,
   isProjective,
   mapCorners,
+  mappedBounds,
   mapPoint,
   multiply,
   rotation,
@@ -19,12 +21,16 @@ import {
 } from '../../core';
 import type { CropHandle } from '../tools/crop-geometry';
 import { HANDLE_GRID, HANDLE_REACH, HANDLE_SIDES } from '../tools/crop-geometry';
+import type { ToolModifiers } from '../tools/tool';
+import { distortCursor, perspectiveCursor, rotateCursor, skewCursor } from './transform-cursors';
 
 /**
- * Free Transform itself, or Edit → Transform → Scale or Rotate, which only scale (no
- * rotate zone) or only rotate (handles and the outside rotate). All three move from inside.
+ * Free Transform itself, or one of Edit → Transform's modes, which change what a plain drag
+ * on a handle does (see `hitTransform`): Scale has no rotate zone, Rotate turns from the
+ * handles and everywhere outside, and Skew, Distort and Perspective do what they're named
+ * for, with no rotate zone either. All of them move from inside.
  */
-export type TransformMode = 'free' | 'scale' | 'rotate';
+export type TransformMode = 'free' | 'scale' | 'rotate' | 'skew' | 'distort' | 'perspective';
 
 /**
  * What a Free Transform session does to its layer: where the corners of the layer's bounds
@@ -44,9 +50,9 @@ export interface TransformState {
 
 /**
  * How the options bar reads a box that's a parallelogram: the layer scaled by `scaleX`
- * and `scaleY` along its own axes (negative flips it), turned `angle` degrees clockwise,
- * both about its centre, and that centre (the pivot) put at `x`, `y` in document
- * coordinates.
+ * and `scaleY` along its own axes (negative flips it), skewed by `skewX` and `skewY`,
+ * turned `angle` degrees clockwise, all about its centre, and that centre (the pivot) put
+ * at `x`, `y` in document coordinates.
  */
 export interface TransformParams {
   readonly x: number;
@@ -55,19 +61,30 @@ export interface TransformParams {
   readonly scaleY: number;
   /** Degrees clockwise, in (−180, 180]. */
   readonly angle: number;
+  /** Horizontal skew: how far the layer's left and right edges lean, in degrees clockwise. */
+  readonly skewX: number;
+  /** Vertical skew: how far its top and bottom edges lean, in degrees clockwise. */
+  readonly skewY: number;
 }
 
 /**
  * A handle on the transform box, named for where it is on the layer before the transform
- * (so a flipped layer's 'e' handle is on the left): corners scale both axes, edges one.
+ * (so a flipped layer's 'e' handle is on the left).
  */
 export type TransformHandle = CropHandle;
 
-/** What a press on the transform box does: scale from a handle, rotate, or move it. */
+/**
+ * What dragging a handle does. Scale scales from the opposite handle and Rotate turns about
+ * the pivot. Skew slides an edge along itself (a corner along one of its edges), Distort
+ * moves a corner, or an edge's two, anywhere, and Perspective moves a corner along one of
+ * its edges and the edge's other corner the same distance the opposite way; these three
+ * keep the box convex.
+ */
+export type HandleOperation = 'scale' | 'rotate' | 'skew' | 'distort' | 'perspective';
+
+/** What a press on the transform box does: something from a handle, or move the box. */
 export type TransformHit =
-  | { readonly kind: 'scale'; readonly handle: TransformHandle }
-  | { readonly kind: 'rotate'; readonly handle: TransformHandle }
-  | { readonly kind: 'move' };
+  { readonly kind: HandleOperation; readonly handle: TransformHandle } | { readonly kind: 'move' };
 
 /** How far beyond a corner handle's reach, in CSS pixels, a press rotates (Free Transform). */
 export const ROTATE_REACH = 12;
@@ -84,6 +101,13 @@ const PARALLELOGRAM_EPSILON = 1e-6;
 /** How near to 0 or ±1 a linear part's entries must be to make a whole turn or flip. */
 const WHOLE_TURN_EPSILON = 1e-9;
 
+/**
+ * How close, in document pixels, Skew, Distort and Perspective let a corner come to the
+ * line through its two neighbours (no closer than it was, if it started closer), so the
+ * box stays convex.
+ */
+const MIN_CLEARANCE = 1;
+
 /** The layer's centre, which its transform turns and scales about. */
 export function sourceCentre(source: Rect): Point {
   return { x: source.x + source.width / 2, y: source.y + source.height / 2 };
@@ -92,7 +116,7 @@ export function sourceCentre(source: Rect): Point {
 /** The params that leave the layer `source` covers where it is. */
 export function identityParams(source: Rect): TransformParams {
   const { x, y } = sourceCentre(source);
-  return { x, y, scaleX: 1, scaleY: 1, angle: 0 };
+  return { x, y, scaleX: 1, scaleY: 1, angle: 0, skewX: 0, skewY: 0 };
 }
 
 /** The state that leaves the layer `source` covers where it is. */
@@ -120,18 +144,26 @@ export function normalizeAngle(degrees: number): number {
 }
 
 /**
- * The state `params` describe for the layer covering `source`: its bounds scaled and
- * turned about its centre, and moved to put the centre at the pivot.
+ * The skew the options bar's H and V fields set: the layer's vertical edges turned `h`
+ * degrees clockwise and its horizontal edges `v`, each keeping its length across the
+ * other axis (y down, so x′ = x − y·tan h and y′ = y + x·tan v).
+ */
+function skewing(h: number, v: number): Affine {
+  const radians = Math.PI / 180;
+  return [1, Math.tan(v * radians), -Math.tan(h * radians), 1, 0, 0];
+}
+
+/**
+ * The state `params` describe for the layer covering `source`: its bounds scaled, skewed
+ * and turned about its centre, and moved to put the centre at the pivot.
  */
 export function stateFromParams(source: Rect, params: TransformParams): TransformState {
   const centre = sourceCentre(source);
-  const m = multiply(
-    translation(params.x, params.y),
-    multiply(
-      rotation(params.angle),
-      multiply(scaling(params.scaleX, params.scaleY), translation(-centre.x, -centre.y)),
-    ),
-  );
+  let shape = multiply(scaling(params.scaleX, params.scaleY), translation(-centre.x, -centre.y));
+  if (params.skewX !== 0 || params.skewY !== 0) {
+    shape = multiply(skewing(params.skewX, params.skewY), shape);
+  }
+  const m = multiply(translation(params.x, params.y), multiply(rotation(params.angle), shape));
   return {
     corners: mapCorners(m, source),
     pivot: { x: params.x, y: params.y },
@@ -237,18 +269,23 @@ function tidy(value: number): number {
 }
 
 /**
- * How the options bar reads `state`: its size along the layer's own axes, turned by its
- * angle, or null if the box isn't a parallelogram.
+ * How the options bar reads `state`: its size along the layer's own axes, skewed, turned
+ * by its angle; or null if the box isn't a parallelogram.
  */
 export function stateParams(source: Rect, state: TransformState): TransformParams | null {
   if (!isParallelogram(state.corners)) return null;
-  const [scaleX, , , scaleY] = multiply(rotation(-state.angle), stateAffine(source, state));
+  // Unturned, the linear part is skewing × scaling: [a, b, c, d] =
+  // [scaleX, tan(skewY)·scaleX, −tan(skewX)·scaleY, scaleY].
+  const [a, b, c, d] = multiply(rotation(-state.angle), stateAffine(source, state));
+  const degrees = (radians: number) => (radians * 180) / Math.PI;
   return {
     x: tidy(state.pivot.x),
     y: tidy(state.pivot.y),
-    scaleX: tidy(scaleX),
-    scaleY: tidy(scaleY),
+    scaleX: tidy(a),
+    scaleY: tidy(d),
     angle: state.angle,
+    skewX: tidy(degrees(Math.atan(-c / d))),
+    skewY: tidy(degrees(Math.atan(b / a))),
   };
 }
 
@@ -302,18 +339,53 @@ function sideFrom(start: number, end: number, reach: number): -1 | 0 | 1 | null 
   return 0;
 }
 
+/** No modifier keys held. */
+const NO_KEYS: ToolModifiers = { shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
+
+/**
+ * What dragging `handle` does in `mode` with `keys` held at the press. Ctrl (Cmd on a Mac)
+ * distorts a corner, or with Alt and Shift too puts it in perspective, and skews an edge,
+ * in any mode; otherwise the mode decides.
+ */
+function handleOperation(
+  mode: TransformMode,
+  handle: TransformHandle,
+  keys: ToolModifiers,
+): HandleOperation {
+  const corner = isCornerHandle(handle);
+  if (keys.ctrlKey || keys.metaKey) {
+    if (!corner) return 'skew';
+    return keys.altKey && keys.shiftKey ? 'perspective' : 'distort';
+  }
+  switch (mode) {
+    case 'free':
+    case 'scale':
+      return 'scale';
+    case 'rotate':
+    case 'skew':
+    case 'distort':
+      return mode;
+    case 'perspective':
+      return corner ? 'perspective' : 'skew';
+    default:
+      return assertNever(mode);
+  }
+}
+
 /**
  * What a press at `point` does to the transform box with `corners` (as `TransformOverlay`
- * has them), or null if nothing. Edges reach `HANDLE_REACH` CSS pixels outwards, but at
- * most a third of the box inwards, as the crop box's do; in Free Transform a press up to
- * `ROTATE_REACH` further out round a corner rotates. In 'rotate' mode the handles and
- * everything outside rotate, and in 'scale' mode nothing outside the handles does.
+ * has them), with `keys` held, or null if nothing. Edges reach `HANDLE_REACH` CSS pixels
+ * outwards, but at most a third of the box inwards, as the crop box's do; in Free
+ * Transform a press up to `ROTATE_REACH` further out round a corner rotates. In 'rotate'
+ * mode the handles and everything outside rotate, and in the other modes nothing outside
+ * the handles does. What a handle does: `handleOperation`.
  */
 export function hitTransform(
   corners: Quad,
   point: Point,
   zoom: number,
   mode: TransformMode,
+  keys: ToolModifiers = NO_KEYS,
 ): TransformHit | null {
   const distances = edgeDistances(corners, point);
   if (!distances) return null;
@@ -324,9 +396,9 @@ export function hitTransform(
   if (sideX !== null && sideY !== null) {
     const handle = HANDLE_GRID[sideY + 1]?.[sideX + 1] ?? null;
     if (!handle) return { kind: 'move' };
-    return { kind: mode === 'rotate' ? 'rotate' : 'scale', handle };
+    return { kind: handleOperation(mode, handle, keys), handle };
   }
-  if (mode === 'scale') return null;
+  if (mode !== 'free' && mode !== 'rotate') return null;
   // Outside the handles: the edges it's beyond tell which handle it's beyond.
   const nearX = left <= 0 ? -1 : right <= 0 ? 1 : 0;
   const nearY = top <= 0 ? -1 : bottom <= 0 ? 1 : 0;
@@ -368,6 +440,32 @@ function handleDirection(corners: Quad, handle: TransformHandle): number {
   return (Math.atan2(y, x) * 180) / Math.PI;
 }
 
+/** A corner of a `Quad`: its top-left, top-right, bottom-right or bottom-left. */
+type CornerIndex = 0 | 1 | 2 | 3;
+
+type CornerHandle = 'nw' | 'ne' | 'se' | 'sw';
+type EdgeHandle = 'n' | 'e' | 's' | 'w';
+
+function isCornerHandle(handle: TransformHandle): handle is CornerHandle {
+  return handle.length === 2;
+}
+
+/** A corner handle's corner, then its neighbours along the layer's x and y axes. */
+const CORNERS: Readonly<Record<CornerHandle, readonly [CornerIndex, CornerIndex, CornerIndex]>> = {
+  nw: [0, 1, 3],
+  ne: [1, 0, 2],
+  se: [2, 3, 1],
+  sw: [3, 2, 0],
+};
+
+/**
+ * An edge handle's two corners, in the direction of the layer's axis along the edge, then
+ * the opposite edge's two, the same way round.
+ */
+const EDGES: Readonly<
+  Record<EdgeHandle, readonly [CornerIndex, CornerIndex, CornerIndex, CornerIndex]>
+> = { n: [0, 1, 3, 2], e: [1, 2, 0, 3], s: [3, 2, 0, 1], w: [0, 3, 1, 2] };
+
 /** The CSS cursor that shows what a press would do (`hit` from `hitTransform`). */
 export function transformCursor(corners: Quad, hit: TransformHit | null): string {
   if (!hit) return 'default';
@@ -383,38 +481,24 @@ export function transformCursor(corners: Quad, hit: TransformHit | null): string
       const step = Math.round((handleDirection(corners, hit.handle) - 45) / 45);
       return rotateCursor((((step % 8) + 8) % 8) * 45);
     }
+    case 'skew': {
+      // Along the edge that slides, or for a corner, its edge along the layer's x axis.
+      const { handle } = hit;
+      const [from, to] = isCornerHandle(handle)
+        ? [CORNERS[handle][1], CORNERS[handle][0]]
+        : [EDGES[handle][0], EDGES[handle][1]];
+      const p = corners[from];
+      const q = corners[to];
+      const step = Math.round(Math.atan2(q.y - p.y, q.x - p.x) / (Math.PI / 4));
+      return skewCursor((((step % 4) + 4) % 4) * 45);
+    }
+    case 'distort':
+      return distortCursor();
+    case 'perspective':
+      return perspectiveCursor();
     default:
       return assertNever(hit);
   }
-}
-
-const rotateCursors = new Map<number, string>();
-
-/**
- * A curved double arrow, bent round a south-east corner and turned `degrees` clockwise
- * about the middle of its 24 px square: black with a white edge, so it shows on any colour.
- */
-export function rotateCursor(degrees: number): string {
-  let cursor = rotateCursors.get(degrees);
-  if (cursor) return cursor;
-  const arc = 'M13.97 5.78A9 9 0 0 1 5.78 13.97';
-  const heads = 'M14.32 1.8L17.46 6.08L10.48 5.48ZM1.8 14.32L6.09 17.46L5.48 10.48Z';
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">` +
-    `<g transform="rotate(${degrees} 12 12)" stroke-linejoin="round">` +
-    `<path d="${arc}" fill="none" stroke="white" stroke-width="4"/>` +
-    `<path d="${heads}" fill="white" stroke="white" stroke-width="2.5"/>` +
-    `<path d="${arc}" fill="none" stroke="black" stroke-width="1.5"/>` +
-    `<path d="${heads}" fill="black"/></g></svg>`;
-  // The hot spot is the middle of the arc, (11.36, 11.36) before the turn.
-  const [hx, hy] = transformPoint(
-    multiply(translation(12, 12), multiply(rotation(degrees), translation(-12, -12))),
-    11.36,
-    11.36,
-  );
-  cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${Math.round(hx)} ${Math.round(hy)}, default`;
-  rotateCursors.set(degrees, cursor);
-  return cursor;
 }
 
 /** `quad` with each corner mapped through `m`. */
@@ -459,6 +543,31 @@ function clampScale(scale: number, size: number, fallback: number): number {
   return (Math.sign(scale) || Math.sign(fallback) || 1) * min;
 }
 
+/** How close a corner of `quad` comes to the line through its neighbours, either way round. */
+function quadClearance(quad: Quad): number {
+  return Math.max(clearance(quad, 1), clearance(quad, -1));
+}
+
+/**
+ * Whether a box in perspective (`m` projective) scaled by `ratioX`, `ratioY` about
+ * `anchorX`, `anchorY` on the layer keeps its shape: in front of its horizon, and convex
+ * either way round (a flip turns it over), its corners at least `margin` from the lines
+ * through their neighbours.
+ */
+function keepsShape(
+  source: Rect,
+  m: Projective,
+  [ratioX, ratioY]: readonly [number, number],
+  anchorX: number,
+  anchorY: number,
+  margin: number,
+): boolean {
+  const scaled = compose(m, aboutPivot(scaling(ratioX, ratioY), anchorX, anchorY));
+  // Null when the corners are either side of the horizon.
+  if (!mappedBounds(scaled, source)) return false;
+  return quadClearance(mapCorners(scaled, source)) >= margin;
+}
+
 export interface ScaleOptions {
   /** Keep the box's proportions: Shift, or the options bar's lock without Shift. */
   readonly proportional: boolean;
@@ -472,7 +581,9 @@ export interface ScaleOptions {
  * stays where it is; the handle follows the pointer along the axes it moves, or with
  * `proportional` scales both axes alike. The box keeps at least a pixel each way, and
  * flips if the handle is dragged past its anchor. It scales the layer before the
- * transform, so the box keeps its shape: a distorted box stays in perspective.
+ * transform, so the box keeps its shape: a box in perspective stays in perspective, and
+ * its handle goes only as far towards the pointer as the box stays convex and in front of
+ * its horizon (`keepsShape`).
  */
 export function scaleState(
   source: Rect,
@@ -492,38 +603,61 @@ export function scaleState(
   const handleY = centre.y + (sideY * source.height) / 2;
   const anchorX = fromPivot ? centre.x : centre.x - (sideX * source.width) / 2;
   const anchorY = fromPivot ? centre.y : centre.y - (sideY * source.height) / 2;
+  const corner = sideX !== 0 && sideY !== 0;
+  const [lengthX, lengthY] = boxLengths(start.corners);
   // The handle follows the pointer on the canvas.
   const [fromX, fromY] = mapPoint(m, handleX, handleY);
-  let toX = fromX + point.x - press.x;
-  let toY = fromY + point.y - press.y;
-  const corner = sideX !== 0 && sideY !== 0;
-  if (proportional && corner) {
-    // Along the line from the anchor through the handle, as the canvas shows it.
-    const [ax, ay] = mapPoint(m, anchorX, anchorY);
-    const ux = fromX - ax;
-    const uy = fromY - ay;
-    const k = ((toX - ax) * ux + (toY - ay) * uy) / (ux * ux + uy * uy);
-    toX = ax + k * ux;
-    toY = ay + k * uy;
-  }
-  const [x, y] = mapPoint(inverse, toX, toY);
-  let ratioX = sideX !== 0 ? (x - anchorX) / (handleX - anchorX) : 1;
-  let ratioY = sideY !== 0 ? (y - anchorY) / (handleY - anchorY) : 1;
-  if (proportional) {
-    let ratio: number;
-    if (corner) {
-      const dx = handleX - anchorX;
-      const dy = handleY - anchorY;
-      ratio = ((x - anchorX) * dx + (y - anchorY) * dy) / (dx * dx + dy * dy);
-    } else {
-      ratio = sideX !== 0 ? ratioX : ratioY;
+  /** The ratios that take the handle to `targetX`, `targetY` on the canvas. */
+  const ratiosTo = (targetX: number, targetY: number): [number, number] => {
+    let toX = targetX;
+    let toY = targetY;
+    if (proportional && corner) {
+      // Along the line from the anchor through the handle, as the canvas shows it.
+      const [ax, ay] = mapPoint(m, anchorX, anchorY);
+      const ux = fromX - ax;
+      const uy = fromY - ay;
+      const k = ((toX - ax) * ux + (toY - ay) * uy) / (ux * ux + uy * uy);
+      toX = ax + k * ux;
+      toY = ay + k * uy;
     }
-    ratioX = ratio;
-    ratioY = ratio;
+    const [x, y] = mapPoint(inverse, toX, toY);
+    let ratioX = sideX !== 0 ? (x - anchorX) / (handleX - anchorX) : 1;
+    let ratioY = sideY !== 0 ? (y - anchorY) / (handleY - anchorY) : 1;
+    if (proportional) {
+      let ratio: number;
+      if (corner) {
+        const dx = handleX - anchorX;
+        const dy = handleY - anchorY;
+        ratio = ((x - anchorX) * dx + (y - anchorY) * dy) / (dx * dx + dy * dy);
+      } else {
+        ratio = sideX !== 0 ? ratioX : ratioY;
+      }
+      ratioX = ratio;
+      ratioY = ratio;
+    }
+    return [clampRatio(ratioX, lengthX), clampRatio(ratioY, lengthY)];
+  };
+  const endX = fromX + point.x - press.x;
+  const endY = fromY + point.y - press.y;
+  let [ratioX, ratioY] = ratiosTo(endX, endY);
+  if (isProjective(m)) {
+    // Past its horizon the pointer has no place on the layer, and towards it the far edge
+    // shrinks to a point: stop where the box would lose its shape, along the pointer's path.
+    const margin = Math.min(MIN_CLEARANCE, quadClearance(start.corners));
+    const along = (t: number) => ratiosTo(fromX + t * (endX - fromX), fromY + t * (endY - fromY));
+    const fits = (ratios: readonly [number, number]) =>
+      keepsShape(source, m, ratios, anchorX, anchorY, margin);
+    if (!fits([ratioX, ratioY])) {
+      let low = 0;
+      let high = 1;
+      for (let i = 0; i < 40; i++) {
+        const middle = (low + high) / 2;
+        if (fits(along(middle))) low = middle;
+        else high = middle;
+      }
+      [ratioX, ratioY] = along(low);
+    }
   }
-  const [lengthX, lengthY] = boxLengths(start.corners);
-  ratioX = clampRatio(ratioX, lengthX);
-  ratioY = clampRatio(ratioY, lengthY);
   const next = compose(m, aboutPivot(scaling(ratioX, ratioY), anchorX, anchorY));
   const [pivotX, pivotY] = mapPoint(next, centre.x, centre.y);
   return {
@@ -590,6 +724,301 @@ export function moveState(
   return translateState(start, dx, dy);
 }
 
+/** Corner `i` of `quad`, counting round from the top-left either way. */
+function cornerAt(quad: Quad, i: number): Point {
+  return quad[(((i % 4) + 4) % 4) as CornerIndex];
+}
+
+/** Which way round a box's corners go: the sign of its area, 1 or −1, or 0 if it has none. */
+function turning(quad: Quad): number {
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const p = cornerAt(quad, i);
+    const q = cornerAt(quad, i + 1);
+    area += p.x * q.y - q.x * p.y;
+  }
+  return Math.sign(area) || 0;
+}
+
+/**
+ * How far the corners of a box going round `sign`'s way (see `turning`) stand out from
+ * the lines through their neighbours, the diagonals they'd fold across: the least of the
+ * four, in document pixels. Positive while the box is convex.
+ */
+function clearance(quad: Quad, sign: number): number {
+  let least = Infinity;
+  for (let i = 0; i < 4; i++) {
+    const p = cornerAt(quad, i - 1);
+    const q = cornerAt(quad, i);
+    const r = cornerAt(quad, i + 1);
+    const dx = r.x - p.x;
+    const dy = r.y - p.y;
+    const length = Math.hypot(dx, dy);
+    if (!(length > 0)) return -Infinity;
+    least = Math.min(least, (sign * ((q.x - p.x) * dy - (q.y - p.y) * dx)) / length);
+  }
+  return least;
+}
+
+/**
+ * The largest fraction of a change, up to all of it, that leaves the box going round
+ * `sign`'s way with a clearance of at least `margin`; `at(t)` is the box after fraction t.
+ * Corners moving along one direction turn the box linearly in t, so what's allowed is one
+ * stretch from 0, which halving finds.
+ */
+function allowedFraction(at: (t: number) => Quad, sign: number, margin: number): number {
+  if (clearance(at(1), sign) >= margin) return 1;
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < 40; i++) {
+    const middle = (low + high) / 2;
+    if (clearance(at(middle), sign) >= margin) low = middle;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * Where the box's diagonals cross, which is where the layer's centre goes whatever
+ * transform takes its bounds to the box: the pivot. Null if they don't cross at a point.
+ */
+function diagonalsCross([topLeft, topRight, bottomRight, bottomLeft]: Quad): Point | null {
+  if (isParallelogram([topLeft, topRight, bottomRight, bottomLeft])) {
+    return { x: (topLeft.x + bottomRight.x) / 2, y: (topLeft.y + bottomRight.y) / 2 };
+  }
+  // topLeft + s (bottomRight − topLeft) = topRight + u (bottomLeft − topRight)
+  const ax = bottomRight.x - topLeft.x;
+  const ay = bottomRight.y - topLeft.y;
+  const bx = bottomLeft.x - topRight.x;
+  const by = bottomLeft.y - topRight.y;
+  const denominator = ax * by - ay * bx;
+  if (!(Math.abs(denominator) > 0)) return null;
+  const s = ((topRight.x - topLeft.x) * by - (topRight.y - topLeft.y) * bx) / denominator;
+  return { x: topLeft.x + s * ax, y: topLeft.y + s * ay };
+}
+
+/** `start` with its box's corners at `corners`, the pivot where their diagonals cross. */
+function withCorners(start: TransformState, corners: Quad): TransformState {
+  if (!isConvexQuad(corners)) return start;
+  return { corners, pivot: diagonalsCross(corners) ?? start.pivot, angle: start.angle };
+}
+
+/** A corner of the box moved by an offset, in document pixels. */
+interface CornerMove {
+  readonly corner: CornerIndex;
+  readonly dx: number;
+  readonly dy: number;
+}
+
+/** `quad` with the corners in `moves` moved by `t` times their offsets. */
+function movedCorners(quad: Quad, moves: readonly CornerMove[], t: number): Quad {
+  const moved: [Point, Point, Point, Point] = [...quad];
+  for (const { corner, dx, dy } of moves) {
+    const p = quad[corner];
+    moved[corner] = { x: p.x + t * dx, y: p.y + t * dy };
+  }
+  return moved;
+}
+
+/**
+ * `start` with corners moved by their offsets in `moves`, or as much of the way as keeps
+ * the box convex, each corner at least `MIN_CLEARANCE` from the line through its
+ * neighbours (or no closer than it was).
+ */
+function movedState(start: TransformState, moves: readonly CornerMove[]): TransformState {
+  const { corners } = start;
+  const sign = turning(corners);
+  const margin = Math.min(MIN_CLEARANCE, clearance(corners, sign));
+  if (!sign || !(margin > 0)) return start;
+  const t = allowedFraction((t) => movedCorners(corners, moves, t), sign, margin);
+  return t > 0 ? withCorners(start, movedCorners(corners, moves, t)) : start;
+}
+
+/** The allowed side of a line: where `nx·x + ny·y + c ≥ 0`, (nx, ny) a unit vector. */
+interface HalfPlane {
+  readonly nx: number;
+  readonly ny: number;
+  readonly c: number;
+}
+
+/**
+ * Where a corner may go beside the line from `from` to `to`: on the side `sign` gives, at
+ * least `MIN_CLEARANCE` from it, or no closer than `corner` is now.
+ */
+function sideOf(from: Point, to: Point, sign: number, corner: Point): HalfPlane {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  const nx = (sign * dy) / length;
+  const ny = (-sign * dx) / length;
+  const c = -(nx * from.x + ny * from.y);
+  const margin = Math.min(MIN_CLEARANCE, nx * corner.x + ny * corner.y + c);
+  return { nx, ny, c: c - margin };
+}
+
+/** The point nearest `target` on the allowed side of all three lines, or null if none is. */
+function nearestAllowed(
+  target: Point,
+  planes: readonly [HalfPlane, HalfPlane, HalfPlane],
+): Point | null {
+  const value = (plane: HalfPlane, p: Point) => plane.nx * p.x + plane.ny * p.y + plane.c;
+  const allowed = (p: Point) => planes.every((plane) => value(plane, p) >= -1e-9);
+  if (allowed(target)) return target;
+  // The nearest allowed point is on a line, nearest the target, or where two lines meet.
+  const candidates: Point[] = [];
+  for (const plane of planes) {
+    const v = value(plane, target);
+    candidates.push({ x: target.x - v * plane.nx, y: target.y - v * plane.ny });
+  }
+  const [a, b, c] = planes;
+  for (const [p, q] of [
+    [a, b],
+    [b, c],
+    [a, c],
+  ] as const) {
+    const det = p.nx * q.ny - p.ny * q.nx;
+    if (Math.abs(det) < 1e-12) continue;
+    candidates.push({ x: (p.ny * q.c - p.c * q.ny) / det, y: (p.c * q.nx - p.nx * q.c) / det });
+  }
+  let nearest: Point | null = null;
+  let distance = Infinity;
+  for (const p of candidates) {
+    const d = Math.hypot(p.x - target.x, p.y - target.y);
+    if (d < distance && allowed(p)) {
+      nearest = p;
+      distance = d;
+    }
+  }
+  return nearest;
+}
+
+/**
+ * The state after dragging `handle` from `press` to `point` to distort the box: a corner
+ * follows the pointer on its own, or an edge's two corners follow it together. A corner
+ * mustn't cross the line through its neighbours, nor go round past the lines through the
+ * edges beyond them, so it stops at the nearest point that keeps the box convex, at least
+ * `MIN_CLEARANCE` from each line; an edge just stops.
+ */
+export function distortState(
+  start: TransformState,
+  handle: TransformHandle,
+  press: Point,
+  point: Point,
+): TransformState {
+  const dx = point.x - press.x;
+  const dy = point.y - press.y;
+  if (!isCornerHandle(handle)) {
+    const [from, to] = EDGES[handle];
+    return movedState(start, [
+      { corner: from, dx, dy },
+      { corner: to, dx, dy },
+    ]);
+  }
+  const { corners } = start;
+  const sign = turning(corners);
+  if (!sign) return start;
+  const i = CORNERS[handle][0];
+  const corner = corners[i];
+  const before = cornerAt(corners, i - 1);
+  const after = cornerAt(corners, i + 1);
+  const opposite = cornerAt(corners, i + 2);
+  const target = nearestAllowed({ x: corner.x + dx, y: corner.y + dy }, [
+    sideOf(before, after, sign, corner),
+    sideOf(opposite, after, sign, corner),
+    sideOf(opposite, before, -sign, corner),
+  ]);
+  if (!target) return start;
+  const moved: [Point, Point, Point, Point] = [...corners];
+  moved[i] = target;
+  return withCorners(start, moved);
+}
+
+/**
+ * How far a drag (`dx`, `dy`) goes along corner `corner`'s edges, from its neighbours
+ * `alongX` and `alongY` towards it: the edge it goes further along, as that neighbour, a
+ * unit vector and the distance. Null if the edges are in line.
+ */
+function alongEdge(
+  corners: Quad,
+  [corner, alongX, alongY]: readonly [CornerIndex, CornerIndex, CornerIndex],
+  dx: number,
+  dy: number,
+): { neighbour: CornerIndex; ux: number; uy: number; t: number } | null {
+  const p = corners[corner];
+  const ex = unit(corners[alongX], p);
+  const ey = unit(corners[alongY], p);
+  const det = ex.x * ey.y - ex.y * ey.x;
+  if (!(Math.abs(det) > 1e-12)) return null;
+  // (dx, dy) = a·ex + b·ey
+  const a = (dx * ey.y - dy * ey.x) / det;
+  const b = (ex.x * dy - ex.y * dx) / det;
+  return Math.abs(a) >= Math.abs(b)
+    ? { neighbour: alongX, ux: ex.x, uy: ex.y, t: a }
+    : { neighbour: alongY, ux: ey.x, uy: ey.y, t: b };
+}
+
+/**
+ * The state after dragging `handle` from `press` to `point` to skew the box. An edge
+ * slides along itself as far as the pointer goes along it, the opposite edge staying put,
+ * or with `symmetric` (Alt) sliding the other way. A corner slides on its own along
+ * whichever of its edges the drag goes further along. Either stops where the box would
+ * stop being convex, as `distortState`'s corners do.
+ */
+export function skewState(
+  start: TransformState,
+  handle: TransformHandle,
+  press: Point,
+  point: Point,
+  symmetric: boolean,
+): TransformState {
+  const { corners } = start;
+  const dx = point.x - press.x;
+  const dy = point.y - press.y;
+  if (isCornerHandle(handle)) {
+    const along = alongEdge(corners, CORNERS[handle], dx, dy);
+    if (!along) return start;
+    const { ux, uy, t } = along;
+    return movedState(start, [{ corner: CORNERS[handle][0], dx: t * ux, dy: t * uy }]);
+  }
+  const [from, to, oppositeFrom, oppositeTo] = EDGES[handle];
+  const u = unit(corners[from], corners[to]);
+  const t = dx * u.x + dy * u.y;
+  const moves: CornerMove[] = [
+    { corner: from, dx: t * u.x, dy: t * u.y },
+    { corner: to, dx: t * u.x, dy: t * u.y },
+  ];
+  if (symmetric) {
+    const v = unit(corners[oppositeFrom], corners[oppositeTo]);
+    moves.push(
+      { corner: oppositeFrom, dx: -t * v.x, dy: -t * v.y },
+      { corner: oppositeTo, dx: -t * v.x, dy: -t * v.y },
+    );
+  }
+  return movedState(start, moves);
+}
+
+/**
+ * The state after dragging corner `handle` from `press` to `point` to put the box in
+ * perspective: the corner slides along whichever of its edges the drag goes further
+ * along, and that edge's other corner the same distance the opposite way, so the edge
+ * grows or shrinks about its middle, as far as the box stays convex. An edge skews.
+ */
+export function perspectiveState(
+  start: TransformState,
+  handle: TransformHandle,
+  press: Point,
+  point: Point,
+): TransformState {
+  if (!isCornerHandle(handle)) return skewState(start, handle, press, point, false);
+  const along = alongEdge(start.corners, CORNERS[handle], point.x - press.x, point.y - press.y);
+  if (!along) return start;
+  const { neighbour, ux, uy, t } = along;
+  return movedState(start, [
+    { corner: CORNERS[handle][0], dx: t * ux, dy: t * uy },
+    { corner: neighbour, dx: -t * ux, dy: -t * uy },
+  ]);
+}
+
 /**
  * The state after a flip or turn of the transformed layer about its pivot, as the canvas
  * sees it: Flip Horizontal mirrors it left to right on screen whatever its angle.
@@ -632,13 +1061,20 @@ export function orientState(state: TransformState, orientation: Orientation): Tr
 /** How the options bar shows the width and height: in pixels or as a percentage. */
 export type TransformUnit = 'px' | 'percent';
 
-/** The options bar's fields: the pivot's position, the size (signed: negative flips) and angle. */
+/**
+ * The options bar's fields: the pivot's position, the size (signed: negative flips), the
+ * angle and the skews. A box that isn't a parallelogram has no angle or skew: null.
+ */
 export interface TransformFields {
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
-  readonly angle: number;
+  readonly angle: number | null;
+  /** Horizontal skew in degrees: the left and right edges lean clockwise. */
+  readonly skewX: number | null;
+  /** Vertical skew in degrees: the top and bottom edges lean clockwise. */
+  readonly skewY: number | null;
 }
 
 export type TransformField = keyof TransformFields;
@@ -655,7 +1091,8 @@ function boundingSize(corners: Quad): { width: number; height: number } {
 
 /**
  * What the options bar shows for `state` on the layer covering `source`. A box that isn't a
- * parallelogram has no size along the layer's axes: it shows its bounding rect's.
+ * parallelogram has no size along the layer's axes, so it shows its bounding rect's, and
+ * no angle or skew.
  */
 export function transformFields(
   source: Rect,
@@ -678,7 +1115,15 @@ export function transformFields(
         ? [box.width, box.height]
         : [(box.width / source.width) * 100, (box.height / source.height) * 100];
   }
-  return { x, y, width, height, angle: state.angle };
+  return {
+    x,
+    y,
+    width,
+    height,
+    angle: params ? state.angle : null,
+    skewX: params ? params.skewX : null,
+    skewY: params ? params.skewY : null,
+  };
 }
 
 /**
@@ -686,7 +1131,9 @@ export function transformFields(
  * finite number, a position past ±`MAX_FIELD_VALUE`, or a size under 1 or over
  * `MAX_FIELD_VALUE` pixels. A size scales about the pivot; with `lockAspect` the other
  * side follows, keeping the proportions and its own sign. A box that isn't a
- * parallelogram scales its bounding rect, on the canvas's axes, and can't be flipped so.
+ * parallelogram scales its bounding rect, on the canvas's axes, and can't be flipped so,
+ * nor turned or skewed. A skew must be under 90° and keep the box from folding over or
+ * growing past `MAX_FIELD_VALUE`.
  */
 export function withField(
   source: Rect,
@@ -711,7 +1158,25 @@ export function withField(
       return { ...moved, pivot: horizontal ? { x: value, y: pivot.y } : { x: pivot.x, y: value } };
     }
     case 'angle':
-      return turnState(state, value);
+      return stateParams(source, state) ? turnState(state, value) : null;
+    case 'skewX':
+    case 'skewY': {
+      const params = stateParams(source, state);
+      if (!params || !(Math.abs(value) < 90)) return null;
+      const next = stateFromParams(
+        source,
+        field === 'skewX' ? { ...params, skewX: value } : { ...params, skewY: value },
+      );
+      const box = boundingSize(next.corners);
+      if (
+        !isConvexQuad(next.corners) ||
+        turning(next.corners) !== turning(state.corners) ||
+        !(box.width <= MAX_FIELD_VALUE && box.height <= MAX_FIELD_VALUE)
+      ) {
+        return null;
+      }
+      return next;
+    }
     case 'width':
     case 'height': {
       const horizontal = field === 'width';

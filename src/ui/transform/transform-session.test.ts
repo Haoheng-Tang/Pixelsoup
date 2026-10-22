@@ -6,6 +6,9 @@ import {
   createLayerId,
   createRasterLayer,
   Editor,
+  getPixel,
+  isConvexQuad,
+  isProjective,
   liftSelectionCommand,
   orientedSize,
   orientPixels,
@@ -23,6 +26,9 @@ import { MoveTool } from '../tools/move-tool';
 import { SelectionOptions } from '../tools/selection-options';
 import { ToolManager } from '../tools/tool-manager';
 import { FreeTransform } from './free-transform';
+import { distortCursor, perspectiveCursor, skewCursor } from './transform-cursors';
+import type { TransformMode } from './transform-math';
+import { isIdentity } from './transform-math';
 import type { TransformSession } from './transform-session';
 
 const W = 40;
@@ -88,7 +94,7 @@ function setup() {
   const messages: string[] = [];
   tools.subscribeMessages((text) => messages.push(text));
   const freeTransform = new FreeTransform(editor, tools);
-  const start = (mode?: 'free' | 'scale' | 'rotate'): TransformSession => {
+  const start = (mode?: TransformMode): TransformSession => {
     expect(freeTransform.start(mode)).toBe(true);
     const session = freeTransform.session;
     if (!session) throw new Error('No session');
@@ -492,13 +498,262 @@ describe('Free Transform sessions', () => {
     expect(photo.pixels).toEqual(oriented(original, 'rotate-ccw'));
   });
 
-  it('offer their turns and flips, Apply and Cancel on the canvas’s context menu', () => {
+  it('distort a corner on its own with Ctrl or Cmd, applying a projective transform', () => {
+    const { editor, photo, original, messages, view, start } = setup();
+    const session = start();
+    // The top-right corner, dragged with Ctrl: the other three stay put.
+    view.drag(15, 4, 18, 1, { ctrlKey: true });
+    expect(session.state.corners).toEqual([
+      { x: 5, y: 4 },
+      { x: 18, y: 1 },
+      { x: 15, y: 12 },
+      { x: 5, y: 12 },
+    ]);
+    expect(messages).toContain('Distort');
+    // No longer a parallelogram: no angle or skew, and a projective transform.
+    expect(session.params).toBeNull();
+    expect(isProjective(session.matrix)).toBe(true);
+    const m = session.matrix;
+    view.keyDown('Enter');
+    expect(undoLabels(editor)).toEqual(['Free Transform']);
+    const expected = transformPixels(original, compose(m, translation(5, 4)), 'bilinear');
+    expect(boundsOf(photo)).toEqual({ x: 5, y: 1, width: 13, height: 11 });
+    expect(photo.pixels).toEqual(expected?.pixels);
+
+    const cmd = start();
+    view.drag(5, 12, 1, 15, { metaKey: true });
+    expect(cmd.state.corners[3]).toEqual({ x: 1, y: 15 });
+    cmd.discard();
+  });
+
+  it('keep a distorted corner a pixel short of the line through its neighbours', () => {
+    const { view, start } = setup();
+    const session = start();
+    view.drag(5, 4, 30, 25, { ctrlKey: true });
+    const { corners } = session.state;
+    expect(isConvexQuad(corners)).toBe(true);
+    expect(corners.slice(1)).toEqual([
+      { x: 15, y: 4 },
+      { x: 15, y: 12 },
+      { x: 5, y: 12 },
+    ]);
+    // How far the top-left corner is from the line through (15, 4) and (5, 12).
+    const [{ x, y }] = corners;
+    expect(-(8 * (x - 15) + 10 * (y - 4)) / Math.hypot(8, 10)).toBeCloseTo(1, 9);
+  });
+
+  it('skew an edge with Ctrl, the opposite edge staying put, or sliding the other way with Alt', () => {
+    const { editor, messages, view, start } = setup();
+    const session = start();
+    // The top edge's handle, dragged with Ctrl: it slides 3 px right along itself.
+    view.drag(10, 4, 13, 1, { ctrlKey: true });
+    expect(session.state.corners).toEqual([
+      { x: 8, y: 4 },
+      { x: 18, y: 4 },
+      { x: 15, y: 12 },
+      { x: 5, y: 12 },
+    ]);
+    expect(messages).toContain('Skew');
+    expect(session.params?.skewX).toBeCloseTo((Math.atan(3 / 8) * 180) / Math.PI, 9);
+    // The bottom edge with Cmd and Alt: it slides 4 px left and the top edge 4 px right.
+    view.drag(10, 12, 6, 12, { metaKey: true, altKey: true });
+    expect(session.state.corners).toEqual([
+      { x: 12, y: 4 },
+      { x: 22, y: 4 },
+      { x: 11, y: 12 },
+      { x: 1, y: 12 },
+    ]);
+    expect(session.state.pivot).toEqual({ x: 11.5, y: 8 });
+    view.keyDown('Enter');
+    expect(undoLabels(editor)).toEqual(['Free Transform']);
+  });
+
+  it('put a pair of corners in perspective with Ctrl+Alt+Shift', () => {
+    const { messages, view, start } = setup();
+    const session = start();
+    // The top-right corner, dragged 3 px left: the top-left comes 3 px right.
+    view.drag(15, 4, 12, 5, { ctrlKey: true, altKey: true, shiftKey: true });
+    expect(session.state.corners).toEqual([
+      { x: 8, y: 4 },
+      { x: 12, y: 4 },
+      { x: 15, y: 12 },
+      { x: 5, y: 12 },
+    ]);
+    expect(messages).toContain('Perspective');
+    expect(isProjective(session.matrix)).toBe(true);
+    session.discard();
+  });
+
+  it('show what a press would do as Ctrl, Alt and Shift go down and up', () => {
+    const { messages, view, start } = setup();
+    const session = start();
+    view.move(15, 4);
+    expect(session.cursor).toBe('nesw-resize');
+    // Ctrl isn't claimed, so the browser's shortcuts still work with it.
+    expect(view.keyDown('Control')).toBe(false);
+    expect(session.cursor).toBe(distortCursor());
+    expect(messages.at(-1)).toBe('Distort');
+    expect(view.keyDown('Alt')).toBe(true);
+    expect(view.keyDown('Shift')).toBe(true);
+    expect(session.cursor).toBe(perspectiveCursor());
+    expect(messages.at(-1)).toBe('Perspective');
+    view.keyUp('Control');
+    expect(session.cursor).toBe('nesw-resize');
+    view.keyUp('Alt');
+    view.keyUp('Shift');
+    view.move(10, 4);
+    expect(session.cursor).toBe('ns-resize');
+    view.keyDown('Meta');
+    expect(session.cursor).toBe(skewCursor(0));
+    expect(messages.at(-1)).toBe('Skew');
+    view.keyUp('Meta');
+    expect(session.cursor).toBe('ns-resize');
+  });
+
+  it('cancel a distortion with Escape, putting the box back mid-drag first', () => {
+    const { editor, photo, original, view, start } = setup();
+    const session = start();
+    view.down(15, 4, { ctrlKey: true });
+    view.move(20, 0);
+    expect(session.state.corners[1]).toEqual({ x: 20, y: 0 });
+    expect(view.keyDown('Escape')).toBe(true);
+    expect(session.state.corners[1]).toEqual({ x: 15, y: 4 });
+    view.up(20, 0, { ctrlKey: false });
+    expect(session.state.corners[1]).toEqual({ x: 15, y: 4 });
+    expect(session.active).toBe(true);
+    view.keyDown('Escape');
+    expect(session.active).toBe(false);
+    expect(editor.history.canUndo).toBe(false);
+    expect(photo.pixels).toEqual(original);
+  });
+
+  it('add no step for a distortion dragged back to where it began', () => {
+    const { editor, view, start } = setup();
+    const session = start();
+    view.drag(15, 4, 18, 1, { ctrlKey: true });
+    view.drag(18, 1, 15, 4, { ctrlKey: true });
+    expect(isIdentity(session.matrix)).toBe(true);
+    view.keyDown('Enter');
+    expect(session.active).toBe(false);
+    expect(editor.history.canUndo).toBe(false);
+  });
+
+  it('skew, distort or put in perspective with a plain drag in those modes', () => {
+    const { editor, tools, view, start } = setup();
+    const session = start();
+    const item = (label: string) =>
+      tools
+        .contextMenu()
+        .flat()
+        .find((entry) => entry.label === label);
+    const checked = () =>
+      tools
+        .contextMenu()
+        .flat()
+        .filter((entry) => entry.checked)
+        .map((entry) => entry.label);
+    expect(checked()).toEqual(['Free Transform']);
+    item('Distort')?.run();
+    expect(checked()).toEqual(['Distort']);
+    expect(session.mode).toBe('distort');
+    expect(editor.pending?.label).toBe('Distort');
+    view.drag(15, 4, 18, 1);
+    expect(session.state.corners[1]).toEqual({ x: 18, y: 1 });
+
+    item('Reset to Original')?.run();
+    item('Skew')?.run();
+    // The bottom edge slides along itself, 4 px right.
+    view.drag(10, 12, 14, 12);
+    expect(session.state.corners).toEqual([
+      { x: 5, y: 4 },
+      { x: 15, y: 4 },
+      { x: 19, y: 12 },
+      { x: 9, y: 12 },
+    ]);
+
+    item('Reset to Original')?.run();
+    item('Perspective')?.run();
+    // The bottom-left corner, 3 px left along the bottom edge: the bottom-right goes right.
+    view.drag(5, 12, 2, 13);
+    expect(session.state.corners).toEqual([
+      { x: 5, y: 4 },
+      { x: 15, y: 4 },
+      { x: 18, y: 12 },
+      { x: 2, y: 12 },
+    ]);
+    view.keyDown('Enter');
+    expect(undoLabels(editor)).toEqual(['Perspective']);
+  });
+
+  it('start in a mode from the Edit menu, named after it', () => {
+    const { editor, view, start } = setup();
+    const session = start('distort');
+    expect(session.name).toBe('Distort');
+    view.drag(5, 12, 2, 14);
+    expect(session.state.corners[3]).toEqual({ x: 2, y: 14 });
+    expect(start('skew')).toBe(session);
+    expect(session.name).toBe('Skew');
+    view.keyDown('Enter');
+    expect(undoLabels(editor)).toEqual(['Skew']);
+  });
+
+  it('reset to the original from the context menu, adding no step if applied so', () => {
+    const { editor, tools, photo, original, view, start } = setup();
+    const session = start();
+    const reset = () =>
+      tools
+        .contextMenu()
+        .flat()
+        .find((entry) => entry.label === 'Reset to Original');
+    expect(reset()?.disabled).toBe(true);
+    view.drag(15, 4, 18, 1, { ctrlKey: true });
+    session.orient('rotate-cw');
+    expect(reset()?.disabled).toBe(false);
+    reset()?.run();
+    expect(isIdentity(session.matrix)).toBe(true);
+    expect(session.params).toMatchObject({ x: 10, y: 8, scaleX: 1, scaleY: 1, angle: 0 });
+    expect(session.mode).toBe('free');
+    expect(reset()?.disabled).toBe(true);
+    view.keyDown('Enter');
+    expect(session.active).toBe(false);
+    expect(editor.history.canUndo).toBe(false);
+    expect(photo.pixels).toEqual(original);
+  });
+
+  it('distort a floating selection, its outline and all', () => {
+    const { editor, doc, view, select, start } = setup();
+    select({ x: 7, y: 5, width: 4, height: 3 });
+    start();
+    // The floating selection's top-right corner, (11, 5), dragged with Ctrl.
+    view.drag(11, 5, 14, 2, { ctrlKey: true });
+    view.keyDown('Enter');
+    expect(undoLabels(editor)).toEqual(['Free Transform', 'Lift Selection', 'Change Selection']);
+    const floating = editor.floating;
+    const float = editor.activeLayer;
+    if (!floating || !float) throw new Error('Nothing floating');
+    expect(float.id).toBe(floating.layerId);
+    expect(floating.edited).toBe(true);
+    expect(boundsOf(float)).toEqual({ x: 7, y: 2, width: 7, height: 6 });
+    // Lifted from opaque pixels, the floating layer's alpha is the selection's coverage.
+    const wrong: string[] = [];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const alpha = getPixel(float.pixels, x - float.x, y - float.y)[3];
+        if ((doc.selection?.coverageAt(x, y) ?? 0) !== alpha) wrong.push(`${x},${y}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it('offer their modes, turns and flips, Reset, Apply and Cancel on the canvas’s context menu', () => {
     const { editor, tools, photo, original, start } = setup();
     start();
     const menu = tools.contextMenu();
     expect(menu.map((section) => section.map((item) => item.label))).toEqual([
+      ['Free Transform', 'Scale', 'Rotate', 'Skew', 'Distort', 'Perspective'],
       ['Flip Horizontal', 'Flip Vertical'],
       ['Rotate 180°', 'Rotate 90° Clockwise', 'Rotate 90° Anticlockwise'],
+      ['Reset to Original'],
       ['Apply', 'Cancel'],
     ]);
     const run = (label: string) =>
@@ -543,11 +798,18 @@ describe('Free Transform sessions', () => {
         .flat()
         .map((entry) => entry.label),
     ).toEqual([
+      'Free Transform',
+      'Scale',
+      'Rotate',
+      'Skew',
+      'Distort',
+      'Perspective',
       'Flip Horizontal',
       'Flip Vertical',
       'Rotate 180°',
       'Rotate 90° Clockwise',
       'Rotate 90° Anticlockwise',
+      'Reset to Original',
       'Apply',
       'Cancel',
     ]);
