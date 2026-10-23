@@ -5,8 +5,10 @@ import { assertNever } from './layer';
 import type { Orientation } from './orientation';
 import { orientPixels, orientRect, orientedSize } from './orientation';
 import type { Affine } from './resample/affine';
-import { multiply, translation } from './resample/affine';
+import { translation } from './resample/affine';
 import type { Interpolation } from './resample/kernels';
+import type { Projective } from './resample/projective';
+import { compose } from './resample/projective';
 import { transformMask } from './resample/transform';
 
 /** How a new shape combines with the existing selection. */
@@ -346,11 +348,12 @@ export class Selection {
   }
 
   /**
-   * The selection mapped through `m` (document coordinates), with its coverage resampled
-   * the way `transformPixels` resamples a layer's pixels, so a floating selection's outline
-   * keeps matching its pixels. Coverage that ends up off the canvas is dropped.
+   * The selection mapped through `m` (document coordinates), affine or projective, with its
+   * coverage resampled the way `transformPixels` resamples a layer's pixels, so a floating
+   * selection's outline keeps matching its pixels. Coverage that ends up off the canvas is
+   * dropped, and so is all of it if `m` takes part of the selection past its horizon.
    */
-  transform(m: Affine, interpolation: Interpolation): Selection {
+  transform(m: Affine | Projective, interpolation: Interpolation): Selection {
     const box = this.box;
     if (!box) return this;
     const region = new Uint8ClampedArray(box.width * box.height);
@@ -363,7 +366,7 @@ export class Selection {
       region,
       box.width,
       box.height,
-      multiply(m, translation(box.x, box.y)),
+      compose(m, translation(box.x, box.y)),
       interpolation,
       canvas,
     );

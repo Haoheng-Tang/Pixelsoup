@@ -1,5 +1,5 @@
 import type { Editor, Rect } from '../../core';
-import { assertNever, roundRectOut, transformedBounds } from '../../core';
+import { assertNever, mappedBounds, roundRectOut } from '../../core';
 import { isContextClick, isOnCanvas } from '../canvas-menu';
 import { isTextEntry } from '../dom';
 import type { CompositeRenderer } from '../render/composite-renderer';
@@ -101,7 +101,7 @@ function overlayArea(overlay: ToolOverlay | null): Rect | null {
     case 'lasso':
       return lassoBounds(overlay);
     case 'transform':
-      return transformedBounds(overlay.affine, {
+      return mappedBounds(overlay.matrix, {
         x: overlay.x,
         y: overlay.y,
         width: overlay.pixels.width,

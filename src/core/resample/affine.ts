@@ -76,6 +76,14 @@ function snap(value: number): number {
 /** The smallest whole-pixel rect containing `area` (a rect of pixel edges) after `m`. */
 export function transformedBounds(m: Affine, area: Rect): Rect {
   const { minX, minY, maxX, maxY } = cornerExtent(m, area);
+  return wholePixelBounds(minX, minY, maxX, maxY);
+}
+
+/**
+ * The smallest whole-pixel rect containing the box from (minX, minY) to (maxX, maxY), where
+ * coordinates within a millionth of a whole number count as whole.
+ */
+export function wholePixelBounds(minX: number, minY: number, maxX: number, maxY: number): Rect {
   // `|| 0` turns -0 into 0.
   const x = Math.floor(snap(minX)) || 0;
   const y = Math.floor(snap(minY)) || 0;

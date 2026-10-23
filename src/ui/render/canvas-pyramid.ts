@@ -15,7 +15,7 @@ export type ShrinkImage = (
 ) => CanvasImageSource;
 
 /** One level of a pyramid: the image, or a copy at 2^-k of its size, rounded up. */
-interface PyramidLevel {
+export interface PyramidLevel {
   readonly image: CanvasImageSource;
   readonly width: number;
   readonly height: number;
@@ -65,6 +65,11 @@ export class CanvasPyramid {
    * image itself from half its size up, else the smallest copy at least that large.
    */
   at(scale: number): CanvasImageSource {
+    return this.level(scale).image;
+  }
+
+  /** The level `at` draws from, with its size. */
+  level(scale: number): PyramidLevel {
     const wanted = pyramidLevel(this.width, this.height, scale);
     while (this.levels.length <= wanted) {
       const top = this.levels[this.levels.length - 1];
@@ -72,7 +77,7 @@ export class CanvasPyramid {
       const height = Math.ceil(top.height / 2);
       this.levels.push({ image: this.shrink(top.image, width, height), width, height });
     }
-    return this.levels[wanted].image;
+    return this.levels[wanted];
   }
 }
 

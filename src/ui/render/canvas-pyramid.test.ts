@@ -68,4 +68,11 @@ describe('CanvasPyramid', () => {
     expect(name(p.at(0.01))).toBe('base>3x2>2x1>1x1');
     expect(made).toHaveLength(3);
   });
+
+  it('tells the size of the copy it draws from', () => {
+    const { base, pyramid: p } = pyramid(5, 3);
+    expect(p.level(1)).toEqual({ image: base, width: 5, height: 3 });
+    const level = p.level(0.2);
+    expect([name(level.image), level.width, level.height]).toEqual(['base>3x2>2x1', 2, 1]);
+  });
 });

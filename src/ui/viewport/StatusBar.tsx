@@ -42,7 +42,8 @@ export function StatusBar({ viewport, tools }: StatusBarProps) {
     const unsubscribe = tools.subscribeMessages((text) => {
       const message = messageRef.current;
       if (!message) return;
-      message.textContent = text;
+      // A message repeated while it shows (a mode named as the pointer moves) only stays.
+      if (message.textContent !== text) message.textContent = text;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => (message.textContent = ''), MESSAGE_MS);
     });

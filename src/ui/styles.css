@@ -1103,6 +1103,24 @@ button.danger:hover:not(:disabled) {
   font-size: var(--font-size-md);
 }
 
+/* Free Transform's fields, as far apart as the bar's items. A narrow window brings them closer
+   and leaves out labels their controls can do without, so ✓ and ✗ stay in view. */
+.transform-fields {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+@media (width < 1400px) {
+  .transform-fields {
+    gap: 8px;
+  }
+
+  .options-label-optional {
+    display: none;
+  }
+}
+
 .options-slider {
   width: 96px;
   margin: 0;

@@ -16,9 +16,10 @@ export interface FreeTransformInit {
 
 /**
  * Starts Free Transform (Edit → Free Transform, Ctrl/Cmd+Alt+T, or the canvas's context
- * menu) and Edit → Transform → Scale and Rotate on the active layer, and tracks the
- * session they run. One session at a time: starting another while one runs just switches
- * its mode. Edit → Transform's turns and flips come here too (`orient`).
+ * menu) and Edit → Transform → Scale, Rotate, Skew, Distort and Perspective on the active
+ * layer, and tracks the session they run. One session at a time: starting another while
+ * one runs just switches its mode. Edit → Transform's turns and flips come here too
+ * (`orient`).
  */
 export class FreeTransform {
   readonly options: TransformOptions;
